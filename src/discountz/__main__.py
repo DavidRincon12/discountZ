@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
+import random
 import re
+import socket
 import sys
 import time
 from collections.abc import Sequence
@@ -14,11 +17,15 @@ from typing import Literal
 
 import psycopg
 
-from discountz.config import load_canaries, load_params, load_settings
+from discountz.app.cycle import CycleDeps, run_cycle
+from discountz.config import Settings, load_canaries, load_params, load_settings
 from discountz.domain.errors import ConfigError, LeaseBusy
 from discountz.infra.db import connect
-from discountz.infra.http import CurlClient, HttpxClient
+from discountz.infra.healthchecks import Healthchecks
+from discountz.infra.http import CurlClient, HttpClient, HttpxClient
+from discountz.infra.log import configure_logging, event, install_excepthook
 from discountz.infra.migrate import MigrationError, migrate_with_lease
+from discountz.infra.telegram import TelegramClient
 from discountz.sources.fixtures import FIXTURES_DIR, save_fixture
 from discountz.sources.registry import load_all
 
@@ -126,10 +133,89 @@ def _cmd_check_config() -> int:
     return EXIT_OK
 
 
+CONNECT_ATTEMPTS = 3
+
+
+def _connect_with_retry(settings: Settings, rnd: random.Random) -> psycopg.Connection:
+    """3 intentos con espera U(0, 2·2^n) s (spec §1.3, paso 1)."""
+    name = f"discountz-{settings.gh_run_id or 'local'}"
+    for attempt in range(CONNECT_ATTEMPTS):
+        try:
+            return connect(settings.database_url.get_secret_value(), application_name=name)
+        except psycopg.OperationalError:
+            if attempt == CONNECT_ATTEMPTS - 1:
+                raise
+            time.sleep(rnd.uniform(0, 2 * 2**attempt))
+    raise AssertionError("inalcanzable")
+
+
+def _cmd_run() -> int:
+    configure_logging()
+    install_excepthook()
+    now = datetime.now(UTC)
+    try:
+        settings = load_settings()
+        params = load_params()
+        canaries = load_canaries()
+    except ConfigError as exc:
+        print(f"run: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    rnd = random.Random()
+    sources = load_all()
+    clients: dict[str, HttpxClient | CurlClient] = {
+        code: CurlClient(code) if s.descriptor.client == "curl" else HttpxClient(code)
+        for code, s in sources.items()
+    }
+    api = HttpxClient("telegram")
+    health = Healthchecks(settings.healthchecks_url, api)
+    holder = (
+        f"gh:{settings.gh_run_id}:{settings.gh_run_attempt or 1}"
+        if settings.gh_run_id is not None
+        else f"local:{socket.gethostname()[:60]}"
+    )
+    try:
+        conn = _connect_with_retry(settings, rnd)
+    except psycopg.OperationalError:
+        event(logging.getLogger("discountz"), "db_unavailable", logging.ERROR)
+        health.fail()
+        return EXIT_DB
+    http: dict[str, HttpClient] = dict(clients)
+    try:
+        with conn:
+            result = run_cycle(
+                CycleDeps(
+                    conn=conn,
+                    sources=sources,
+                    http=http,
+                    telegram=TelegramClient(settings.telegram_bot_token, api),
+                    params=params,
+                    canaries=canaries,
+                    settings=settings,
+                    holder=holder,
+                    monotonic=time.monotonic,
+                    sleep=time.sleep,
+                    rnd=rnd,
+                    healthchecks=health,
+                ),
+                now,
+            )
+    except psycopg.OperationalError:
+        event(logging.getLogger("discountz"), "db_unavailable", logging.ERROR)
+        health.fail()
+        return EXIT_DB
+    finally:
+        for client in clients.values():
+            client.close()
+        api.close()
+    return result.exit_code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "migrate":
         return _cmd_migrate(args)
+    if args.command == "run":
+        return _cmd_run()
     if args.command == "check-config":
         return _cmd_check_config()
     if args.command == "record-fixture":

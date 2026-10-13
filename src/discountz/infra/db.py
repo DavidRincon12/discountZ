@@ -15,9 +15,9 @@ import psycopg
 from psycopg import errors
 from psycopg.types.json import Jsonb
 
-from discountz.domain.evaluate import ListingState
+from discountz.domain.evaluate import AlertRecord, ListingState
 from discountz.domain.health import BreakerState, HourStat
-from discountz.domain.model import AlertKind, Maturity, Offer, SellerClass
+from discountz.domain.model import AlertKind, ListingRef, Maturity, Offer, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money
 from discountz.domain.scheduling import Event, PlanInput, SearchDue, SourceBudget, WatchDue
 from discountz.domain.segments import (
@@ -992,6 +992,299 @@ def status_snapshot(conn: psycopg.Connection, now: datetime) -> StatusSnapshot:
         int(size[0]),
         int(overdue[0]),
     )
+
+
+# ───────────── Ciclo: seguimientos, búsquedas, alertas y fuentes
+
+
+@dataclass(frozen=True, slots=True)
+class WatchRow:
+    id: int
+    source: str
+    listing_id: int | None
+    pending_ref: str | None
+    requested_category: str
+    target_minor: int | None
+    target_set_at: datetime | None
+    reply_to_message_id: int | None
+    consecutive_failures: int
+    consecutive_not_found: int
+
+
+_WATCH_COLS = (
+    "id, source, listing_id, pending_ref, requested_category, target_price_minor, target_set_at,"
+    " reply_to_message_id, consecutive_failures, consecutive_not_found"
+)
+
+
+def _watch(row: tuple[Any, ...]) -> WatchRow:
+    return WatchRow(
+        int(row[0]), row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9]
+    )
+
+
+def get_watch(conn: psycopg.Connection, watch_id: int) -> WatchRow | None:
+    row = _one(conn, f"SELECT {_WATCH_COLS} FROM discountz.watch WHERE id = %s", (watch_id,))
+    return None if row is None else _watch(row)
+
+
+def watch_for_listing(conn: psycopg.Connection, listing_id: int) -> WatchRow | None:
+    row = _one(
+        conn, f"SELECT {_WATCH_COLS} FROM discountz.watch WHERE listing_id = %s", (listing_id,)
+    )
+    return None if row is None else _watch(row)
+
+
+def record_watch_check(
+    conn: psycopg.Connection,
+    watch_id: int,
+    now: datetime,
+    next_at: datetime,
+    *,
+    failures: int,
+    not_found: int,
+    gone: bool = False,
+) -> None:
+    """Reprograma el seguimiento; `gone` solo aplica a watches ya resueltos."""
+    conn.execute(
+        """UPDATE discountz.watch
+              SET last_checked_at = %s, next_check_at = %s, consecutive_failures = %s,
+                  consecutive_not_found = %s,
+                  status = CASE WHEN %s AND listing_id IS NOT NULL THEN 'gone' ELSE status END
+            WHERE id = %s""",
+        (now, next_at, min(failures, 1000), min(not_found, 1000), gone, watch_id),
+    )
+
+
+def delete_watch(conn: psycopg.Connection, watch_id: int) -> None:
+    conn.execute("DELETE FROM discountz.watch WHERE id = %s", (watch_id,))
+
+
+def mark_listing_gone(conn: psycopg.Connection, listing_id: int, now: datetime) -> None:
+    conn.execute("UPDATE discountz.listing SET gone_at = %s WHERE id = %s", (now, listing_id))
+
+
+def listing_refs(conn: psycopg.Connection, listing_ids: Sequence[int]) -> dict[int, ListingRef]:
+    rows = conn.execute(
+        "SELECT id, source, external_id FROM discountz.listing WHERE id = ANY(%s)",
+        (list(listing_ids),),
+    ).fetchall()
+    return {int(r[0]): ListingRef(r[1], r[2]) for r in rows}
+
+
+def prev_list_price(conn: psycopg.Connection, source: str, external_id: str) -> int | None:
+    row = _one(
+        conn,
+        """SELECT last_list_price_minor FROM discountz.listing
+            WHERE source = %s AND external_id = %s""",
+        (source, external_id),
+    )
+    return None if row is None or row[0] is None else int(row[0])
+
+
+def global_muted_until(conn: psycopg.Connection) -> datetime | None:
+    row = _one(conn, "SELECT muted_until FROM discountz.bot_state WHERE id = 1")
+    return None if row is None else row[0]
+
+
+def pending_confirmation_at(conn: psycopg.Connection, listing_id: int) -> datetime | None:
+    row = _one(
+        conn, "SELECT pending_confirmation_at FROM discountz.listing WHERE id = %s", (listing_id,)
+    )
+    return None if row is None else row[0]
+
+
+@dataclass(frozen=True, slots=True)
+class SearchRow:
+    id: int
+    spec: SearchSpec
+    last_result_count: int | None
+    consecutive_failures: int
+    consecutive_empty: int
+
+
+def get_search(conn: psycopg.Connection, search_id: int) -> SearchRow | None:
+    row = _one(
+        conn,
+        """SELECT id, source, query, exclude_terms, min_price_minor, max_price_minor, category,
+                  last_result_count, consecutive_failures, consecutive_empty
+             FROM discountz.search WHERE id = %s AND enabled""",
+        (search_id,),
+    )
+    if row is None:
+        return None
+    spec = SearchSpec(row[1], row[2], tuple(row[3]), row[4], row[5], row[6])
+    return SearchRow(int(row[0]), spec, row[7], int(row[8]), int(row[9]))
+
+
+def record_search_run(
+    conn: psycopg.Connection,
+    search_id: int,
+    now: datetime,
+    next_at: datetime,
+    *,
+    result_count: int | None,
+) -> None:
+    """`result_count=None` = la búsqueda falló. Un 0 tras resultados previos cuenta como vacío."""
+    conn.execute(
+        """UPDATE discountz.search
+              SET last_run_at = %(now)s, next_run_at = %(next)s,
+                  consecutive_failures = CASE WHEN %(n)s::int IS NULL
+                                              THEN consecutive_failures + 1 ELSE 0 END,
+                  consecutive_empty = CASE
+                      WHEN %(n)s::int IS NULL THEN consecutive_empty
+                      WHEN %(n)s::int = 0 AND coalesce(last_result_count, 0) > 0
+                           OR %(n)s::int = 0 AND consecutive_empty > 0
+                      THEN consecutive_empty + 1
+                      ELSE 0 END,
+                  last_result_count = coalesce(least(%(n)s::int, 32767), last_result_count)
+            WHERE id = %(id)s""",
+        {"now": now, "next": next_at, "n": result_count, "id": search_id},
+    )
+
+
+def max_consecutive_empty(conn: psycopg.Connection, source: str) -> int:
+    row = _one(
+        conn,
+        "SELECT coalesce(max(consecutive_empty), 0) FROM discountz.search WHERE source = %s",
+        (source,),
+    )
+    return int(_required(row)[0])
+
+
+def last_alert(conn: psycopg.Connection, listing_id: int) -> AlertRecord | None:
+    row = _one(
+        conn,
+        """SELECT kind, price_minor, reference_minor, created_at, segment_started_at, delivery
+             FROM discountz.alert WHERE listing_id = %s AND delivery <> 'suppressed'
+            ORDER BY created_at DESC, id DESC LIMIT 1""",
+        (listing_id,),
+    )
+    if row is None:
+        return None
+    return AlertRecord(AlertKind(row[0]), int(row[1]), row[2], row[3], row[4], row[5])
+
+
+@dataclass(frozen=True, slots=True)
+class UnqueuedAlert:
+    id: int
+    listing_id: int
+    watch_id: int | None
+    kind: AlertKind
+    price_minor: int
+    reference_minor: int | None
+    real_saving_bp: int | None
+    advertised_saving_bp: int | None
+    flags: tuple[str, ...]
+    observed_at: datetime
+    source: str
+    title: str
+    url: str
+    category: str
+    currency: Currency
+    list_price_minor: int | None
+
+
+def unqueued_alerts(conn: psycopg.Connection) -> list[UnqueuedAlert]:
+    """Alertas `new` sin mensaje en el outbox (incluye las de un ciclo que murió)."""
+    rows = conn.execute(
+        """SELECT a.id, a.listing_id, coalesce(a.watch_id, w.id), a.kind, a.price_minor,
+                  a.reference_minor, a.real_saving_bp, a.advertised_saving_bp, a.flags,
+                  a.observed_at, l.source, l.title, l.canonical_url, l.category, s.currency,
+                  l.last_list_price_minor
+             FROM discountz.alert a
+             JOIN discountz.listing l ON l.id = a.listing_id
+             JOIN discountz.source s ON s.code = l.source
+             LEFT JOIN discountz.watch w ON w.listing_id = a.listing_id
+            WHERE a.delivery = 'new'
+            ORDER BY a.id"""
+    ).fetchall()
+    return [
+        UnqueuedAlert(
+            int(r[0]),
+            int(r[1]),
+            r[2],
+            AlertKind(r[3]),
+            int(r[4]),
+            r[5],
+            r[6],
+            r[7],
+            tuple(r[8]),
+            r[9],
+            r[10],
+            r[11],
+            r[12],
+            r[13],
+            Currency(r[14].strip()),
+            r[15],
+        )
+        for r in rows
+    ]
+
+
+def mark_alerts_queued(conn: psycopg.Connection, alert_ids: Sequence[int], outbox_id: int) -> None:
+    conn.execute(
+        """UPDATE discountz.alert SET delivery = 'queued', outbox_id = %s
+            WHERE id = ANY(%s) AND delivery = 'new'""",
+        (outbox_id, list(alert_ids)),
+    )
+
+
+def release_outbox(conn: psycopg.Connection, outbox_ids: Sequence[int]) -> None:
+    """Devuelve a `pending` mensajes reclamados que no se intentaron (sin sumar intentos)."""
+    conn.execute(
+        """UPDATE discountz.outbox SET status = 'pending', sending_since = NULL
+            WHERE id = ANY(%s) AND status = 'sending'""",
+        (list(outbox_ids),),
+    )
+
+
+def record_canary(conn: psycopg.Connection, source: str, ok: bool, now: datetime) -> None:
+    conn.execute(
+        "UPDATE discountz.source SET canary_checked_at = %s, canary_ok = %s WHERE code = %s",
+        (now, ok, source),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SourceHealthRow:
+    health: str
+    notified_health: str
+    canary_ok: bool | None
+
+
+def source_health(conn: psycopg.Connection, source: str) -> SourceHealthRow:
+    row = _required(
+        _one(
+            conn,
+            "SELECT health, notified_health, canary_ok FROM discountz.source WHERE code = %s",
+            (source,),
+        )
+    )
+    return SourceHealthRow(row[0], row[1], row[2])
+
+
+def save_health(
+    conn: psycopg.Connection, source: str, health: str, now: datetime, *, notified: bool
+) -> None:
+    conn.execute(
+        """UPDATE discountz.source
+              SET health_since = CASE WHEN health <> %(h)s THEN %(now)s ELSE health_since END,
+                  health = %(h)s,
+                  notified_health = CASE WHEN %(notified)s THEN %(h)s ELSE notified_health END,
+                  last_notice_at = CASE WHEN %(notified)s THEN %(now)s ELSE last_notice_at END,
+                  last_success_at = CASE WHEN %(h)s = 'healthy' THEN %(now)s
+                                         ELSE last_success_at END
+            WHERE code = %(code)s""",
+        {"h": health, "now": now, "notified": notified, "code": source},
+    )
+
+
+def recent_run_statuses(conn: psycopg.Connection, n: int) -> list[str]:
+    rows = conn.execute(
+        "SELECT status FROM discountz.run ORDER BY started_at DESC, id DESC LIMIT %s", (n,)
+    ).fetchall()
+    return [str(r[0]) for r in rows]
 
 
 # ───────────── Plan

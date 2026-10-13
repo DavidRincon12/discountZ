@@ -24,6 +24,7 @@ LIST_PAGE = 15
 DB_LIMIT_MB = 500
 MUTE_BUTTON_DAYS = 30
 CASILLERO = "🇺🇸 Compra por casillero"
+REFERENCE_LABEL = "precio habitual, mediana 90 d"
 # Colombia no tiene horario de verano: UTC−5 fijo, sin depender de tzdata.
 BOGOTA = timezone(timedelta(hours=-5), "COT")
 _MONTHS = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
