@@ -42,6 +42,8 @@ extend-exclude = ["docs"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "DTZ", "TID", "S", "RUF", "SIM"]
 # Textos en español con notación matemática del spec.
+# S311: el azar solo da jitter y backoff, nunca seguridad.
+ignore = ["S311"]
 allowed-confusables = ["×", "−", "·", "–", "’", "‘", "´"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
