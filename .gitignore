@@ -6,3 +6,12 @@ CLAUDE.local.md
 .worktrees/
 .claude/worktrees/
 .superpowers/
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.import_linter_cache/
+.pii-denylist
