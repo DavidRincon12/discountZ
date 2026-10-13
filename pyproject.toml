@@ -56,6 +56,8 @@ allowed-confusables = ["×", "−", "·", "–", "’", "‘", "´"]
 [tool.ruff.lint.per-file-ignores]
 "src/discountz/__main__.py" = ["TID251"]
 "src/discountz/infra/http.py" = ["TID251"]
+# Solo se interpolan constantes del módulo (columnas, tablas); los valores van siempre como parámetros.
+"src/discountz/infra/db.py" = ["S608"]
 "tests/**/*.py" = ["S101", "S603"]
 
 [tool.mypy]

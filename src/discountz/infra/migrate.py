@@ -12,6 +12,7 @@ from typing import Literal
 import psycopg
 
 from discountz.domain.errors import InfrastructureError, LeaseBusy
+from discountz.infra.db import acquire_lease, release_lease
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations"
 _FILE_RE = re.compile(r"^(\d{4})_([a-z0-9_]{1,60})\.up\.sql$")
@@ -24,16 +25,6 @@ CREATE TABLE IF NOT EXISTS discountz.schema_migrations (
   checksum   char(64) NOT NULL,
   applied_at timestamptz NOT NULL DEFAULT now()
 );
-"""
-_LEASE_TAKE = """
-UPDATE discountz.run_lease
-   SET holder = %(holder)s, acquired_at = now(), expires_at = now() + interval '16 minutes'
- WHERE id = 1 AND (holder IS NULL OR expires_at < now())
-RETURNING holder
-"""
-_LEASE_FREE = """
-UPDATE discountz.run_lease SET holder = NULL, acquired_at = NULL, expires_at = NULL
- WHERE id = 1 AND holder = %(holder)s
 """
 
 
@@ -141,7 +132,7 @@ def migrate_with_lease(
     if not _lease_table_exists(conn):
         return migrate(conn, to, directory=directory)
     deadline = monotonic() + wait_s
-    while not conn.execute(_LEASE_TAKE, {"holder": holder}).fetchone():
+    while not acquire_lease(conn, holder):
         if monotonic() >= deadline:
             raise LeaseBusy("lease_busy")
         sleep(5.0)
@@ -149,7 +140,7 @@ def migrate_with_lease(
         return migrate(conn, to, directory=directory)
     finally:
         if _lease_table_exists(conn):
-            conn.execute(_LEASE_FREE, {"holder": holder})
+            release_lease(conn, holder)
 
 
 def _lease_table_exists(conn: psycopg.Connection) -> bool:
