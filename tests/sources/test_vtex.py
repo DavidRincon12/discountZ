@@ -3,7 +3,6 @@ from __future__ import annotations
 import gzip
 import json
 from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +14,7 @@ from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
 from discountz.infra.http import FakeHttp, HttpResponse
 from discountz.sources.base import (
+    ListingFailed,
     ListingFound,
     ListingGone,
     NeedsResolution,
@@ -152,13 +152,6 @@ def test_simulation_cents_are_divided_with_decimal() -> None:
     }
     o = parse_vtex_simulation(body(sim), STORES["exito"], "1", T)
     assert o is not None and o.price == Money(123, Currency.COP)  # 123,45 → 123 (ROUND_HALF_UP)
-    assert to_check(Decimal("123.45")) == 123
-
-
-def to_check(value: Decimal) -> int:
-    from discountz.domain.money import to_minor
-
-    return to_minor(value, Currency.COP)
 
 
 def test_simulation_without_items_is_none() -> None:
@@ -243,3 +236,12 @@ def test_expected_files_exist_for_every_detail() -> None:
     for code, sku in FICHAS:
         assert (folder / f"{code}_ficha_{sku}.expected.json").exists()
         assert gzip.decompress((folder / f"{code}_ficha_{sku}.json.gz").read_bytes())
+
+
+def test_fetch_listings_keeps_parse_errors_as_parse_kind() -> None:
+    store = STORES["exito"]
+    url = f"{store.api_base}/catalog_system/pub/products/search?fq=skuId%3A1"
+    c, _ = ctx({url: HttpResponse(200, url, {}, b"[{", 5)})
+    out = VtexSource(store).fetch_listings(c, [ListingRef("exito", "1")])
+    assert isinstance(out[0], ListingFailed)
+    assert isinstance(out[0].error, ParseError)

@@ -15,7 +15,7 @@ from typing import Literal, Protocol
 
 from pydantic import SecretStr
 
-from discountz.domain.errors import CredentialUnavailable, SourceError
+from discountz.domain.errors import CredentialUnavailable, ParseError, SourceError
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec
 from discountz.domain.money import Currency
 from discountz.domain.urls import SafeUrl
@@ -98,7 +98,7 @@ class ListingGone:
 @dataclass(frozen=True, slots=True)
 class ListingFailed:
     ref: ListingRef
-    error: SourceError
+    error: SourceError | ParseError  # ParseError conserva el tipo 'parse' para el breaker
 
 
 ListingOutcome = ListingFound | ListingGone | ListingFailed

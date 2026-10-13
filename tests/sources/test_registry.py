@@ -105,3 +105,8 @@ def test_scrub_removes_ips_and_delivery_location() -> None:
     out = scrub(body)
     assert b"181.49.10.3" not in out and b"2800:e2" not in out
     assert b"Bucaramanga" not in out and b"680001" not in out
+
+
+def test_scrub_keeps_times_and_hex_that_are_not_ips() -> None:
+    body = b"12:30:45 #ab:cd:ef 2026-10-13T15:00:00Z v1.2.3 999.1.1.1"
+    assert scrub(body) == body

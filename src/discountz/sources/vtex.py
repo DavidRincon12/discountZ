@@ -291,10 +291,7 @@ class VtexSource:
                 }
                 self._remember(resp.body)
             except (SourceError, ParseError) as exc:
-                error = (
-                    exc if isinstance(exc, SourceError) else SourceError(self.store.code, "parse")
-                )
-                out.extend(ListingFailed(r, error) for r in batch)
+                out.extend(ListingFailed(r, exc) for r in batch)
                 continue
             for r in batch:
                 offer = found.get(r.external_id)
