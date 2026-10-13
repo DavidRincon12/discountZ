@@ -36,8 +36,21 @@ def test_alert_kind_rank_order() -> None:
 
 def test_flags_cover_db_check_values() -> None:
     expected = {
-        "inflated_list", "advertised_gap", "pre_inflated", "flash_seen", "gap_before",
-        "short_history", "marketplace", "target_above_typical", "ref_antigua", "unit_changed",
-        "storm", "target_also", "persistence_only", "hot", "community", "unverified",
-    }  # fmt: skip
+        "inflated_list",
+        "advertised_gap",
+        "pre_inflated",
+        "flash_seen",
+        "gap_before",
+        "short_history",
+        "marketplace",
+        "target_above_typical",
+        "ref_antigua",
+        "unit_changed",
+        "storm",
+        "target_also",
+        "persistence_only",
+        "hot",
+        "community",
+        "unverified",
+    }
     assert {f.value for f in Flag} == expected

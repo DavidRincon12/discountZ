@@ -41,6 +41,8 @@ extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "DTZ", "TID", "S", "RUF", "SIM"]
+# Textos en español con notación matemática del spec.
+allowed-confusables = ["×", "−", "·", "–", "’", "‘", "´"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "datetime.datetime.now".msg = "Usa el `now` inyectado (solo __main__.py e infra/http.py leen el reloj)."
