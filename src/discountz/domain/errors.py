@@ -102,7 +102,27 @@ class CredentialUnavailable(SourceError):
 
 # Telegram
 class TelegramError(DiscountzError):
-    """Error al hablar con la API de Telegram."""
+    """Error al hablar con la API de Telegram. `str(exc)` es un código, nunca la descripción."""
+
+
+class TelegramRetryAfter(TelegramError):
+    """429: Telegram pide esperar `retry_after` segundos."""
+
+    def __init__(self, retry_after: int) -> None:
+        super().__init__("retry_after")
+        self.retry_after = retry_after
+
+
+class TelegramBadRequest(TelegramError):
+    """400: p. ej. «can't parse entities» o «query is too old»."""
+
+
+class TelegramForbidden(TelegramError):
+    """403: David bloqueó el bot."""
+
+
+class TelegramConflict(TelegramError):
+    """409: hay un webhook activo u otro `getUpdates` en curso."""
 
 
 # Infraestructura

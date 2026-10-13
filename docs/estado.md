@@ -5,13 +5,14 @@
 - BD (Tasks 12-13): migración `0001_init`, ejecutor con sha256 y lease, repositorio SQL (`infra/db.py`); CLI `migrate --to N|head --wait-lease 20m`.
 - HTTP (Task 14): `HttpxClient`, `CurlClient` y `PacedClient` (ritmo, presupuesto, reintentos, bloqueos); `FakeHttp` para pruebas.
 - Fuentes (Tasks 15-16): contrato `Source`, registro, `detect_block_common`, fixtures + `record-fixture`; adaptador VTEX para Éxito, Carulla, Olímpica y Panamericana con fixtures reales.
-- Aún no hay Telegram, configuración, ciclo ni workflows de despliegue.
+- Telegram (Task 17): `infra/telegram.py` (cliente con errores tipados), `app/render.py` (alertas, resumen, `/lista`, `/estado`, diario; golden en `tests/golden/`) y `app/inbox.py` (comandos y botones exactamente una vez en efecto).
+- Aún no hay configuración, ciclo ni workflows de despliegue.
 
 ## Último cambio
-- Rama `claude/discountz-v1-plan-execution-ur365u`: Tasks 1-16 del plan y revisión completa de esas tareas (5 hallazgos importantes y 3 menores corregidos con pruebas).
+- Rama `claude/discountz-v1-plan-execution-ur365u`: Tasks 1-16 revisadas y Task 17 (Telegram); las desviaciones de la Task 17 están en el cuerpo de su commit.
 
 ## Siguiente paso
-- Plan `docs/superpowers/plans/2026-10-13-discountz-v1.md` en modo **Native** (superpowers:executing-plans): continuar en la **Task 17** (Telegram: cliente, render y bandeja de entrada).
+- Plan `docs/superpowers/plans/2026-10-13-discountz-v1.md` en modo **Native** (superpowers:executing-plans): continuar en la **Task 18** (configuración y composición).
 - Criterio de cada tarea: su prueba en verde y el comando de verificación completo de `CLAUDE.md` (más `-m integration` con Postgres si toca la BD).
 - Ledger local de ejecución: `.superpowers/sdd/2026-10-13-discountz-v1/progress.md` (no se versiona; si se pierde, reconstruir desde `git log`). Las decisiones tomadas en cada tarea están en los cuerpos de los commits y en ese ledger.
 
@@ -29,6 +30,8 @@
 - El `now` del ciclo viaja en `SourceContext.now`: los adaptadores no leen el reloj.
 - El ciclo (Task 19) debe pasar `deadline=` (plazo blando) a cada `PacedClient`; sin él, los reintentos no miran el plazo.
 - ruff 0.17 formatea Markdown: `docs/` está excluido en `pyproject.toml`.
-- La imagen `postgres:17` del CI no tiene digest fijado. En la sesión en la nube se usa el Postgres 16 del sistema (`service postgresql start`).
+- La imagen `postgres:17` del CI no tiene digest fijado. En la nube: `service postgresql start` y, si pide clave, `ALTER USER postgres PASSWORD 'postgres'` (Postgres 16 del sistema).
+- Task 19 (entrega): `/seguir` responde al instante y deja `watch.reply_to_message_id`; el ciclo debe responder a ese mensaje tras la primera lectura. `send_message` recibe el `reply_markup` del outbox; ante `TelegramBadRequest` reenvía con `parse_mode=None` y `html.unescape`.
+- `/estado` muestra «Uso 24h» sin presupuesto hasta que la Task 18 cargue `config/discountz.toml`.
 - El contrato «Adaptadores independientes» de import-linter crece con cada adaptador (falla si un módulo listado no existe).
 - Walmart y Best Buy siguen detrás de la puerta de activación. Confirmar las fechas del calendario de eventos en la Task 18.

@@ -20,7 +20,7 @@ Monitor personal de ofertas para David (Colombia): rastrea tiendas CO (COP) y de
 - `src/discountz/infra/`: HTTP, BD, migraciones, Telegram, logs
 - `src/discountz/sources/`: contrato `Source`, registro y un adaptador por plataforma
 - `src/discountz/app/`: casos de uso del ciclo
-- `tests/{unit,sources,integration,e2e,arch}/`, fixtures en `tests/fixtures/<fuente>/`
+- `tests/{unit,sources,integration,e2e,arch}/`, fixtures en `tests/fixtures/<fuente>/`, HTML esperado de Telegram en `tests/golden/`
 - `config/`: TOML público con parámetros, presupuestos, eventos y canarios
 
 ## Arquitectura

@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 import psycopg
@@ -18,6 +18,7 @@ from psycopg.types.json import Jsonb
 from discountz.domain.evaluate import ListingState
 from discountz.domain.health import BreakerState, HourStat
 from discountz.domain.model import AlertKind, Maturity, Offer, SellerClass
+from discountz.domain.money import Currency, Money
 from discountz.domain.scheduling import Event, PlanInput, SearchDue, SourceBudget, WatchDue
 from discountz.domain.segments import (
     CloseAndOpen,
@@ -749,6 +750,248 @@ def drop_ref(conn: psycopg.Connection, ref: str) -> bool:
         return False
     cur = conn.execute(f"DELETE FROM discountz.{table} WHERE id = %s", (int(ref[1:]),))
     return cur.rowcount == 1
+
+
+# ───────────── Telegram: offset y comandos
+
+
+def telegram_offset(conn: psycopg.Connection) -> int:
+    """Último `update_id` aplicado."""
+    row = _one(conn, "SELECT telegram_offset FROM discountz.bot_state WHERE id = 1")
+    return int(_required(row)[0])
+
+
+def advance_offset(conn: psycopg.Connection, update_id: int) -> bool:
+    """Avanza el offset solo hacia adelante; `False` = ese update ya se aplicó (no-op)."""
+    cur = conn.execute(
+        """UPDATE discountz.bot_state SET telegram_offset = %s
+            WHERE id = 1 AND telegram_offset < %s""",
+        (update_id, update_id),
+    )
+    return cur.rowcount == 1
+
+
+def set_watch_reply_to(conn: psycopg.Connection, watch_id: int, message_id: int) -> None:
+    """Mensaje de David al que responderá el ciclo tras la primera lectura."""
+    conn.execute(
+        "UPDATE discountz.watch SET reply_to_message_id = %s WHERE id = %s",
+        (message_id, watch_id),
+    )
+
+
+def source_currency(conn: psycopg.Connection, code: str) -> Currency | None:
+    row = _one(conn, "SELECT currency FROM discountz.source WHERE code = %s", (code,))
+    return None if row is None else Currency(row[0].strip())
+
+
+def watch_currency(conn: psycopg.Connection, watch_id: int) -> Currency | None:
+    row = _one(
+        conn,
+        """SELECT s.currency FROM discountz.watch w JOIN discountz.source s ON s.code = w.source
+            WHERE w.id = %s""",
+        (watch_id,),
+    )
+    return None if row is None else Currency(row[0].strip())
+
+
+def listing_source(conn: psycopg.Connection, listing_id: int) -> str | None:
+    row = _one(conn, "SELECT source FROM discountz.listing WHERE id = %s", (listing_id,))
+    return None if row is None else str(row[0])
+
+
+def set_target(
+    conn: psycopg.Connection, watch_id: int, target_minor: int | None, now: datetime
+) -> bool:
+    """Fija o quita el objetivo y fuerza la evaluación en el próximo plan."""
+    cur = conn.execute(
+        """UPDATE discountz.watch
+              SET target_price_minor = %s, target_set_at = %s, next_check_at = %s
+            WHERE id = %s""",
+        (target_minor, None if target_minor is None else now, now, watch_id),
+    )
+    return cur.rowcount == 1
+
+
+def set_category(conn: psycopg.Connection, ref: str, category: str) -> bool:
+    """`L1234` → `listing.category`; `p12` → la del listing o, si está pendiente, la pedida."""
+    num = int(ref[1:])
+    if ref.startswith("L"):
+        cur = conn.execute(
+            "UPDATE discountz.listing SET category = %s WHERE id = %s", (category, num)
+        )
+        return cur.rowcount == 1
+    row = _one(conn, "SELECT listing_id FROM discountz.watch WHERE id = %s", (num,))
+    if row is None:
+        return False
+    if row[0] is None:
+        conn.execute(
+            "UPDATE discountz.watch SET requested_category = %s WHERE id = %s", (category, num)
+        )
+    else:
+        conn.execute("UPDATE discountz.listing SET category = %s WHERE id = %s", (category, row[0]))
+    return True
+
+
+def mute(conn: psycopg.Connection, ref: str, until: datetime) -> bool:
+    """`todo` → `bot_state`; `p12`/`L1234` → `listing.muted_until`. `False` si no existe."""
+    if ref == "todo":
+        conn.execute("UPDATE discountz.bot_state SET muted_until = %s WHERE id = 1", (until,))
+        return True
+    num = int(ref[1:])
+    if ref.startswith("p"):
+        row = _one(conn, "SELECT listing_id FROM discountz.watch WHERE id = %s", (num,))
+        if row is None or row[0] is None:
+            return False
+        num = int(row[0])
+    cur = conn.execute("UPDATE discountz.listing SET muted_until = %s WHERE id = %s", (until, num))
+    return cur.rowcount == 1
+
+
+def set_source_enabled(
+    conn: psycopg.Connection, code: str, enabled: bool, ramp_until: datetime | None
+) -> bool:
+    """`/fuente on|off`; al activar se fija la rampa (`ramp_until`)."""
+    cur = conn.execute(
+        """UPDATE discountz.source
+              SET enabled = %s, ramp_until = CASE WHEN %s THEN %s ELSE ramp_until END
+            WHERE code = %s""",
+        (enabled, enabled, ramp_until, code),
+    )
+    return cur.rowcount == 1
+
+
+def set_token_expiry(conn: psycopg.Connection, day: date) -> None:
+    conn.execute(
+        "UPDATE discountz.bot_state SET dispatch_token_expires_on = %s WHERE id = 1", (day,)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class WatchItem:
+    id: int
+    source: str
+    title: str
+    category: str
+    price: Money | None
+    target: Money | None
+    pending: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SearchItem:
+    id: int
+    source: str
+    query: str
+    category: str
+    enabled: bool
+
+
+def list_watches(conn: psycopg.Connection) -> list[WatchItem]:
+    rows = conn.execute(
+        """SELECT w.id, w.source, coalesce(l.title, w.pending_ref),
+                  coalesce(l.category, w.requested_category), l.last_price_minor,
+                  w.target_price_minor, w.listing_id IS NULL, s.currency
+             FROM discountz.watch w
+             JOIN discountz.source s ON s.code = w.source
+             LEFT JOIN discountz.listing l ON l.id = w.listing_id
+            ORDER BY w.id"""
+    ).fetchall()
+    out = []
+    for wid, source, title, category, price, target, pending, currency in rows:
+        cur = Currency(currency.strip())
+        out.append(
+            WatchItem(
+                int(wid),
+                source,
+                title,
+                category,
+                None if price is None else Money(int(price), cur),
+                None if target is None else Money(int(target), cur),
+                bool(pending),
+            )
+        )
+    return out
+
+
+def list_searches(conn: psycopg.Connection) -> list[SearchItem]:
+    rows = conn.execute(
+        "SELECT id, source, query, category, enabled FROM discountz.search ORDER BY id"
+    ).fetchall()
+    return [SearchItem(int(r[0]), r[1], r[2], r[3], bool(r[4])) for r in rows]
+
+
+@dataclass(frozen=True, slots=True)
+class SourceStatus:
+    code: str
+    enabled: bool
+    health: str
+    breaker: str
+    breaker_open_until: datetime | None
+    breaker_trips: int
+    ok_24h: int
+    requests_24h: int
+
+
+@dataclass(frozen=True, slots=True)
+class StatusSnapshot:
+    last_run_started_at: datetime | None
+    last_run_finished_at: datetime | None
+    last_run_status: str | None
+    gap_p50_s: int | None
+    gap_p95_s: int | None
+    sources: Sequence[SourceStatus]
+    db_bytes: int
+    overdue: int
+
+
+def status_snapshot(conn: psycopg.Connection, now: datetime) -> StatusSnapshot:
+    """Datos de `/estado`: último ciclo, intervalos de 24 h, fuentes, tamaño y atrasos."""
+    last = _one(
+        conn,
+        """SELECT started_at, finished_at, status FROM discountz.run
+            WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1""",
+    )
+    gaps = _required(
+        _one(
+            conn,
+            """SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY gap_seconds),
+                      percentile_disc(0.95) WITHIN GROUP (ORDER BY gap_seconds)
+                 FROM discountz.run
+                WHERE started_at > %s - interval '24 hours' AND gap_seconds IS NOT NULL""",
+            (now,),
+        )
+    )
+    sources = conn.execute(
+        """SELECT s.code, s.enabled, s.health, s.breaker, s.breaker_open_until, s.breaker_trips,
+                  coalesce(sum(h.ok), 0), coalesce(sum(h.requests), 0)
+             FROM discountz.source s
+             LEFT JOIN discountz.source_hourly_stat h
+               ON h.source = s.code AND h.hour_start > %s - interval '24 hours'
+            GROUP BY s.code ORDER BY s.code""",
+        (now,),
+    ).fetchall()
+    size = _required(_one(conn, "SELECT pg_database_size(current_database())"))
+    overdue = _required(
+        _one(
+            conn,
+            """SELECT count(*) FROM discountz.watch
+                WHERE status IN ('pending','active') AND next_check_at < %s - interval '1 hour'""",
+            (now,),
+        )
+    )
+    return StatusSnapshot(
+        None if last is None else last[0],
+        None if last is None else last[1],
+        None if last is None else last[2],
+        None if gaps[0] is None else int(gaps[0]),
+        None if gaps[1] is None else int(gaps[1]),
+        [
+            SourceStatus(r[0], r[1], r[2], r[3], r[4], int(r[5]), int(r[6]), int(r[7]))
+            for r in sources
+        ],
+        int(size[0]),
+        int(overdue[0]),
+    )
 
 
 # ───────────── Plan
