@@ -174,3 +174,23 @@ def test_next_check_at() -> None:
     assert next_check_at(T, 3 * HOUR, 3, False, rnd) == T + 2 * HOUR
     assert next_check_at(T, HOUR, 5, False, rnd) == T + HOUR
     assert next_check_at(T, HOUR, 0, True, rnd) == T + 24 * HOUR
+
+
+SLICK = SourceBudget("slickdeals", 0, 0, 1, 60, 30 * MIN, 30 * MIN, 1)
+
+
+def test_feed_searches_share_one_request_without_reserve() -> None:
+    """Un RSS sirve a todas las búsquedas de Slickdeals: un solo task y sin reserva de
+    confirmación (el feed no confirma), aunque `max_per_run` sea 1."""
+    plan = plan_run(
+        inp(
+            budgets={"slickdeals": SLICK},
+            breakers={"slickdeals": CLOSED},
+            searches=(
+                SearchDue(1, "slickdeals", "feed", T - MIN, 30 * MIN),
+                SearchDue(2, "slickdeals", "feed", T - 2 * MIN, 30 * MIN),
+            ),
+        ),
+        T,
+    )
+    assert plan["slickdeals"] == [Task("feed", "slickdeals", (2, 1))]

@@ -83,7 +83,11 @@ class SearchSpec:
 
     def accepts(self, offer: Offer) -> bool:
         """Filtro puro: todos los tokens, ningún excluido y precio dentro de `[min, max]`."""
-        title_tokens = set(normalize_title(offer.title).split())
+        return self.matches(offer.title, offer.price)
+
+    def matches(self, title: str, price: Money | None) -> bool:
+        """El mismo filtro sobre título y precio sueltos (leads de Slickdeals)."""
+        title_tokens = set(normalize_title(title).split())
         if not set(normalize_title(self.query).split()) <= title_tokens:
             return False
         for term in self.exclude_terms:
@@ -91,9 +95,9 @@ class SearchSpec:
                 return False
         if self.min_minor is None and self.max_minor is None:
             return True
-        if offer.price is None:
+        if price is None:
             return False
-        p = offer.price.minor
+        p = price.minor
         return (self.min_minor is None or p >= self.min_minor) and (
             self.max_minor is None or p <= self.max_minor
         )

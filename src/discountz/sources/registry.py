@@ -19,6 +19,7 @@ ADAPTER_MODULES: tuple[str, ...] = (
     "discountz.sources.vtex",
     "discountz.sources.amazon",
     "discountz.sources.newegg",
+    "discountz.sources.slickdeals",
 )
 
 

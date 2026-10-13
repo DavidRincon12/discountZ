@@ -30,8 +30,8 @@ from discountz.app.maintenance import (
 from discountz.app.render import local, source_name
 from discountz.config import AppParams, Canary, Settings
 from discountz.domain.errors import TelegramError
-from discountz.domain.health import BreakerState, classify_health, tick_quarantine
-from discountz.domain.scheduling import Task, plan_run
+from discountz.domain.health import BreakerState, classify_health, effective_state, tick_quarantine
+from discountz.domain.scheduling import PlanInput, Task, plan_run
 from discountz.infra import db
 from discountz.infra.healthchecks import Healthchecks
 from discountz.infra.http import HttpClient, PacedClient
@@ -175,8 +175,22 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
     updates = _inbox(deps, now)
     inp = db.load_plan_input(conn, now, params.budgets, params.events, CYCLE)
     plan = plan_run(inp, now)
+    stores = {
+        code: src
+        for code, src in deps.sources.items()
+        if code in inp.budgets and src.descriptor.kind == "store"
+    }
     collector = Collector(
-        conn, now, params, deps.canaries, deps.rnd, deps.monotonic, deadline, CYCLE
+        conn,
+        now,
+        params,
+        deps.canaries,
+        deps.rnd,
+        deps.monotonic,
+        deadline,
+        CYCLE,
+        stores=stores,
+        spawn=lambda code: _spawn_run(deps, inp, code, now, deadline),
     )
     runs = _source_runs(deps, plan, inp.breakers, deadline)
     collector.run(runs)
@@ -243,22 +257,49 @@ def _source_runs(
 ) -> list[SourceRun]:
     runs = []
     for code, tasks in plan.items():
-        source, transport = deps.sources.get(code), deps.http.get(code)
-        budget = deps.params.budgets.get(code)
-        if source is None or transport is None or budget is None or not tasks:
-            continue
-        paced = PacedClient(
-            transport,
-            budget,
-            deps.sleep,
-            deps.monotonic,
-            deps.rnd,
-            source.detect_block,
-            source=code,
-            deadline=deadline,
-        )
-        runs.append(SourceRun(source, paced, budget, breakers.get(code, _CLOSED), deque(tasks)))
+        if tasks and (run := _make_run(deps, code, tasks, breakers, deadline)) is not None:
+            runs.append(run)
     return runs
+
+
+def _make_run(
+    deps: CycleDeps,
+    code: str,
+    tasks: Sequence[Task],
+    breakers: Mapping[str, BreakerState],
+    deadline: float,
+) -> SourceRun | None:
+    source, transport = deps.sources.get(code), deps.http.get(code)
+    budget = deps.params.budgets.get(code)
+    if source is None or transport is None or budget is None:
+        return None
+    paced = PacedClient(
+        transport,
+        budget,
+        deps.sleep,
+        deps.monotonic,
+        deps.rnd,
+        source.detect_block,
+        source=code,
+        deadline=deadline,
+    )
+    return SourceRun(source, paced, budget, breakers.get(code, _CLOSED), deque(tasks))
+
+
+def _spawn_run(
+    deps: CycleDeps, inp: PlanInput, code: str, now: datetime, deadline: float
+) -> SourceRun | None:
+    """SourceRun para la tienda de un lead que no tenía tareas: activa, con el breaker
+    cerrado y con presupuesto de 24 h disponible."""
+    budget = inp.budgets.get(code)
+    if budget is None:
+        return None
+    breaker = inp.breakers.get(code, _CLOSED)
+    if effective_state(breaker, now) != "closed":
+        return None
+    if inp.usage_24h.get(budget.group, 0) >= budget.max_per_24h:
+        return None
+    return _make_run(deps, code, (), inp.breakers, deadline)
 
 
 def _close_source(conn: psycopg.Connection, r: SourceRun, now: datetime) -> None:

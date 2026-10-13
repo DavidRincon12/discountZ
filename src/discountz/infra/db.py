@@ -190,6 +190,18 @@ def find_listing(conn: psycopg.Connection, source: str, external_id: str) -> int
     return None if row is None else int(row[0])
 
 
+def listing_last_seen(conn: psycopg.Connection, source: str, external_id: str) -> datetime | None:
+    row = _one(
+        conn,
+        "SELECT last_seen_at FROM discountz.listing WHERE source = %s AND external_id = %s",
+        (source, external_id),
+    )
+    if row is None:
+        return None
+    seen: datetime = row[0]
+    return seen
+
+
 def upsert_listing(
     conn: psycopg.Connection, offer: Offer, category: str, canonical_url: str, now: datetime
 ) -> ListingState:

@@ -22,7 +22,7 @@ PRIORITY: Mapping[TaskKind, int] = {
     "search": 6,
     "feed": 6,
 }
-_BATCHABLE: frozenset[TaskKind] = frozenset({"hot", "watch_target", "watch"})
+_BATCHABLE: frozenset[TaskKind] = frozenset({"hot", "watch_target", "watch", "feed"})
 NOT_FOUND_RETRY = timedelta(hours=24)
 FAIL_BASE = timedelta(minutes=30)
 
@@ -181,7 +181,9 @@ def _capacity(inp: PlanInput, group: str, items: Sequence[_Item], now: datetime)
     if event:
         per_run = per_run * 3 // 2
     effective = max(0, min(per_run, per_24h - inp.usage_24h.get(group, 0)))
-    reserve = min(effective, max(2, per_run * 20 // 100))
+    # La reserva es para lecturas de confirmación; un grupo que solo tiene feeds no confirma.
+    feeds_only = all(i.kind == "feed" for i in items)
+    reserve = 0 if feeds_only else min(effective, max(2, per_run * 20 // 100))
     return effective - reserve
 
 
@@ -194,7 +196,8 @@ def _fill(
     for item in items:
         ids = [] if item.payload_id is None else [item.payload_id]
         key = (item.source, item.kind)
-        max_batch = inp.budgets[item.source].max_batch
+        # Un feed se baja una vez y sirve a todas sus búsquedas: va en un solo task.
+        max_batch = len(items) if item.kind == "feed" else inp.budgets[item.source].max_batch
         batch = open_batch.get(key)
         if item.kind in _BATCHABLE and batch is not None and len(batch) < max_batch:
             batch.extend(ids)

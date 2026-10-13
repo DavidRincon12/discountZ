@@ -33,6 +33,7 @@ from discountz.domain.errors import (
     NotFound,
     ParseError,
     SourceError,
+    UnsafeUrl,
 )
 from discountz.domain.evaluate import (
     EvalContext,
@@ -50,7 +51,7 @@ from discountz.domain.health import (
     HourStat,
     breaker_transition,
 )
-from discountz.domain.model import AlertKind, Flag, ListingRef, Offer, SellerClass
+from discountz.domain.model import AlertKind, Flag, Lead, ListingRef, Offer, SellerClass
 from discountz.domain.money import Money, format_money
 from discountz.domain.params import CategoryParams
 from discountz.domain.scheduling import SourceBudget, Task, effective_interval, next_check_at
@@ -70,6 +71,7 @@ from discountz.sources.base import (
     Source,
     SourceContext,
 )
+from discountz.sources.registry import route_url
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +79,7 @@ HOT_FOR = timedelta(hours=2)
 GONE_AFTER = 3
 REPLY_TTL = timedelta(hours=24)
 SYSTEM_TTL = timedelta(hours=48)
+LEAD_FRESH = timedelta(hours=6)  # un lead no relee un listing leído hace menos (spec §4.3)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +94,15 @@ class Candidate:
     prev: ListingState
     cat: CategoryParams
     watch: db.WatchRow | None
+
+
+@dataclass(frozen=True, slots=True)
+class LeadRead:
+    """Lectura de ficha que pide un lead de Slickdeals, con prioridad de confirmación."""
+
+    ref: ListingRef
+    price: Money
+    category: str
 
 
 @dataclass
@@ -131,6 +143,7 @@ class SourceRun:
     tasks: deque[Task]
     counters: Counters = field(default_factory=Counters)
     candidates: list[Candidate] = field(default_factory=list)
+    leads: deque[LeadRead] = field(default_factory=deque)
     failed: bool = False
     stopped: bool = False
     canary_ok: bool | None = None
@@ -151,6 +164,9 @@ class Collector:
         monotonic: Callable[[], float],
         deadline: float,
         cycle: timedelta,
+        *,
+        stores: Mapping[str, Source] | None = None,
+        spawn: Callable[[str], SourceRun | None] | None = None,
     ) -> None:
         self.conn = conn
         self.now = now
@@ -163,20 +179,38 @@ class Collector:
         self.views: dict[int, AlertView] = {}
         self.alerts_created = 0
         self.evaluated: set[int] = set()
+        # Tiendas activas a las que un lead puede llevar y fábrica de su SourceRun si esa
+        # tienda no tenía tareas en este ciclo.
+        self.stores: Mapping[str, Source] = stores or {}
+        self.spawn = spawn
+        self._runs: list[SourceRun] = []
+        self._lead_refs: set[ListingRef] = set()
 
     # ───────────── Bucle de turnos rotativos
 
-    def run(self, runs: Sequence[SourceRun]) -> None:
-        active = [r for r in runs if r.tasks]
-        while active and self.monotonic() < self.deadline:
-            for r in list(active):
-                if r.stopped or not r.tasks:
-                    active.remove(r)
-                    continue
-                self._execute(r, r.tasks.popleft())
+    def run(self, runs: list[SourceRun]) -> None:
+        """Turnos rotativos; las lecturas de leads van antes que las tareas de su fuente.
 
-    def _execute(self, r: SourceRun, task: Task) -> None:
+        `runs` puede crecer: un lead abre el SourceRun de una tienda sin tareas.
+        """
+        self._runs = runs
+        while self.monotonic() < self.deadline:
+            active = [r for r in runs if not r.stopped and (r.leads or r.tasks)]
+            if not active:
+                break
+            for r in active:
+                if r.leads:
+                    self._execute(r, "lead", r.leads.popleft())
+                elif r.tasks:
+                    task = r.tasks.popleft()
+                    self._execute(r, task.kind, task)
+
+    def _execute(self, r: SourceRun, kind: str, work: Task | LeadRead) -> None:
         try:
+            if isinstance(work, LeadRead):
+                self._lead(r, work)
+                return
+            task = work
             if task.kind == "canary":
                 self._canary(r)
             elif task.kind == "resolve":
@@ -187,6 +221,8 @@ class Collector:
             elif task.kind == "search":
                 for search_id in task.payload_ids:
                     self._search(r, search_id)
+            elif task.kind == "feed":
+                self._feed(r, task.payload_ids)
             else:
                 event(log, "task_skipped", source=r.code, kind=task.kind)
         except BudgetExhausted:
@@ -198,7 +234,7 @@ class Collector:
                 "task_failed",
                 logging.ERROR,
                 source=r.code,
-                kind=task.kind,
+                kind=kind,
                 error=type(exc).__name__,
             )
 
@@ -412,6 +448,81 @@ class Collector:
         nxt = next_check_at(self.now, interval, 0, False, self.rnd)
         db.record_search_run(self.conn, search_id, self.now, nxt, result_count=len(page.offers))
 
+    # ───────────── Feed comunitario (spec §4.3 «Slickdeals»)
+
+    def _feed(self, r: SourceRun, search_ids: Sequence[int]) -> None:
+        """Un RSS para todas las búsquedas vencidas; los leads no se guardan."""
+        events = any(e.active(r.code, self.now) for e in self.params.events)
+        interval = effective_interval(r.budget.search_interval, False, False, events, self.cycle)
+        rows = [row for i in search_ids if (row := db.get_search(self.conn, i)) is not None]
+        try:
+            leads = r.source.fetch_leads(self.ctx(r))
+        except (SourceError, ParseError) as exc:
+            if isinstance(exc, BudgetExhausted):
+                raise
+            self.on_error(r, exc)
+            for row in rows:
+                failures = row.consecutive_failures + 1
+                nxt = next_check_at(self.now, interval, failures, False, self.rnd)
+                db.record_search_run(self.conn, row.id, self.now, nxt, result_count=None)
+            return
+        self.breaker_event(r, BreakerEvent.OK)
+        if not leads:
+            r.counters.soft_empty += 1
+        for row in rows:
+            for lead in leads:
+                if row.spec.matches(lead.title, lead.price):
+                    self._queue_lead(lead, row.spec.category)
+            nxt = next_check_at(self.now, interval, 0, False, self.rnd)
+            db.record_search_run(self.conn, row.id, self.now, nxt, result_count=len(leads))
+
+    def _queue_lead(self, lead: Lead, category: str) -> None:
+        """Encola la ficha en la tienda de destino si está activa y no se leyó hace poco."""
+        if lead.price is None:  # sin precio del lead no hay COMMUNITY_DEAL posible
+            return
+        try:
+            source, ref = route_url(str(lead.target_url), self.stores)
+        except UnsafeUrl:  # tienda inactiva o ruta que no es una ficha
+            return
+        if not isinstance(ref, ListingRef) or ref in self._lead_refs:
+            return  # un enlace corto exigiría red: se ignora
+        seen = db.listing_last_seen(self.conn, ref.source, ref.external_id)
+        if seen is not None and self.now - seen < LEAD_FRESH:
+            return
+        target = self._run_for(source.descriptor.code)
+        if target is None or target.stopped:
+            return
+        self._lead_refs.add(ref)
+        target.leads.append(LeadRead(ref, lead.price, category))
+        event(log, "lead_queued", source=ref.source)
+
+    def _run_for(self, code: str) -> SourceRun | None:
+        for r in self._runs:
+            if r.code == code:
+                return r
+        spawned = self.spawn(code) if self.spawn is not None else None
+        if spawned is not None:
+            self._runs.append(spawned)
+        return spawned
+
+    def _lead(self, r: SourceRun, item: LeadRead) -> None:
+        (out,) = r.source.fetch_listings(self.ctx(r), [item.ref])
+        if isinstance(out, ListingFound):
+            r.counters.offers += 1
+            self.breaker_event(r, BreakerEvent.OK)
+            same = out.offer.price is None or out.offer.price.currency is item.price.currency
+            self.process_offer(
+                r,
+                out.offer,
+                "lead",
+                category=item.category,
+                lead_price=item.price.minor if same else None,
+            )
+        elif isinstance(out, ListingGone):
+            r.counters.not_found += 1
+        else:
+            self.on_error(r, out.error)
+
     # ───────────── F → R → E → W de una oferta
 
     def process_offer(
@@ -424,6 +535,7 @@ class Collector:
         peers: Sequence[int] | None = None,
         alerts: bool = True,
         on_listing: Callable[[int, str, Offer], None] | None = None,
+        lead_price: int | None = None,
     ) -> None:
         d = r.source.descriptor
         prev_lp = db.prev_list_price(self.conn, raw.ref.source, raw.ref.external_id)
@@ -501,7 +613,7 @@ class Collector:
                 nominal_interval=interval,
                 watch=terms,
                 peers=peers,
-                lead_price=None,
+                lead_price=lead_price,
                 last_alert=db.last_alert(self.conn, lid),
                 has_independent_route=Capability.CONFIRM in d.capabilities,
             )

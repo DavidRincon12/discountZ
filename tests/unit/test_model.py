@@ -1,4 +1,5 @@
 from discountz.domain.model import AlertKind, Flag, SearchSpec, normalize_title
+from discountz.domain.money import Currency, Money
 from tests.factories import offer
 
 
@@ -54,3 +55,11 @@ def test_flags_cover_db_check_values() -> None:
         "unverified",
     }
     assert {f.value for f in Flag} == expected
+
+
+def test_search_spec_matches_title_and_price() -> None:
+    spec = SearchSpec("slickdeals", "990 evo", ("refurbished",), None, 10_000, "componentes")
+    assert spec.matches("Samsung 990 EVO 1TB SSD $74.99", Money(7_499, Currency.USD))
+    assert not spec.matches("Samsung 990 EVO 1TB Refurbished $59.99", Money(5_999, Currency.USD))
+    assert not spec.matches("Samsung 990 EVO 2TB $129.99", Money(12_999, Currency.USD))
+    assert not spec.matches("Samsung 990 EVO 1TB", None)  # con rango y sin precio: no

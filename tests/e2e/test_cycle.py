@@ -17,6 +17,7 @@ from pydantic import SecretStr
 from discountz.app import cycle as cycle_module
 from discountz.app.cycle import CycleDeps, run_cycle
 from discountz.config import Settings, load_canaries, load_params
+from discountz.domain.money import Currency
 from discountz.domain.scheduling import plan_run
 from discountz.infra import db as repo
 from discountz.infra.healthchecks import Healthchecks
@@ -25,6 +26,7 @@ from discountz.infra.log import configure_logging
 from discountz.infra.telegram import TelegramClient
 from discountz.sources.fixtures import load_fixture
 from discountz.sources.registry import load_all
+from discountz.sources.slickdeals import RSS_URL
 from discountz.sources.vtex import STORES
 from tests.factories import offer
 from tests.integration.conftest import connect_extra, db, empty_db_url  # noqa: F401
@@ -336,3 +338,102 @@ def test_logs_contain_no_secrets(
     assert TOKEN not in text
     assert "postgres:postgres@" not in text
     assert "Datáfono" not in text and "panamericana.com.co" not in text
+
+
+# ───────────── Slickdeals (Task 24): U34 y U34b de punta a punta
+
+LEAD_ASIN = "B0DHLBDSP7"
+AMAZON_DP = f"https://www.amazon.com/dp/{LEAD_ASIN}"
+
+
+def slickdeals_rss(*items: tuple[str, str]) -> HttpResponse:
+    body = "".join(
+        f"<item><title><![CDATA[{title}]]></title>"
+        "<pubDate>Tue, 13 Oct 2026 12:00:00 +0000</pubDate>"
+        f"<content:encoded><![CDATA[{link}]]></content:encoded></item>"
+        for title, link in items
+    )
+    xml = (
+        '<?xml version="1.0"?><rss version="2.0" '
+        'xmlns:content="http://purl.org/rss/1.0/modules/content/">'
+        f"<channel><title>Slickdeals</title>{body}</channel></rss>"
+    )
+    return HttpResponse(200, "https://slickdeals.net/newsearch.php", {}, xml.encode(), 3)
+
+
+EVO_LEAD = (
+    "Samsung 990 EVO 1TB NVMe SSD $74.99",
+    f'<a data-product-exitWebsite="amazon.com" data-aps-asin="{LEAD_ASIN}">Amazon</a>',
+)
+WALMART_LEAD = (
+    "Samsung 990 EVO 2TB NVMe SSD $119.99",
+    '<a href="https://www.walmart.com/ip/5113175776">Walmart</a>',
+)
+
+
+def amazon_page(cents: int) -> HttpResponse:
+    price = f"${cents // 100}.{cents % 100:02d}"
+    html = f"""<span id="productTitle">Samsung 990 EVO SSD 1TB</span>
+      <input id="ASIN" value="{LEAD_ASIN}"><div id="corePrice_feature_div">
+      <span class="a-price"><span class="a-offscreen">{price}</span></span></div>
+      <div id="availability"><span>In Stock</span></div>
+      <div id="merchantInfoFeature_feature_div">
+      <span class="offer-display-feature-text-message">Amazon.com</span></div>"""
+    return HttpResponse(200, AMAZON_DP, {}, html.encode(), 3)
+
+
+def slickdeals_search(conn: psycopg.Connection) -> None:
+    conn.execute(
+        """INSERT INTO discountz.search (source, query, category, next_run_at)
+           VALUES ('slickdeals', '990 evo', 'componentes', %s)""",
+        (T - timedelta(minutes=1),),
+    )
+
+
+def feed_http(amazon: FakeHttp, *items: tuple[str, str]) -> dict[str, HttpClient]:
+    rss = slickdeals_rss(*items)
+    return {"slickdeals": FakeHttp({RSS_URL: rss}), "amazon_us": amazon}
+
+
+def test_u34_slickdeals_lead_alerts_community_deal(conn: psycopg.Connection) -> None:
+    slickdeals_search(conn)
+    tg = telegram()
+    amazon = FakeHttp({AMAZON_DP: amazon_page(7_499)})
+    result = run_cycle(deps(conn, feed_http(amazon, EVO_LEAD, WALMART_LEAD), tg), T)
+    assert (result.status, result.exit_code) == ("ok", 0)
+    assert [url for _, url, _ in amazon.calls] == [AMAZON_DP]  # Walmart está desactivada
+    alerts = conn.execute("SELECT kind, flags FROM discountz.alert").fetchall()
+    assert alerts == [("community_deal", ["community", "short_history"])]
+    listing = conn.execute("SELECT source, external_id, category FROM discountz.listing")
+    assert listing.fetchall() == [("amazon_us", LEAD_ASIN, "componentes")]
+    (text,) = sent(tg)
+    assert text.startswith("<b>OFERTA DE LA COMUNIDAD")
+    run = conn.execute("SELECT last_result_count FROM discountz.search").fetchone()
+    assert run == (2,)
+
+
+def test_u34b_lead_price_gone_no_alert(conn: psycopg.Connection) -> None:
+    slickdeals_search(conn)
+    tg = telegram()
+    amazon = FakeHttp({AMAZON_DP: amazon_page(8_999)})
+    run_cycle(deps(conn, feed_http(amazon, EVO_LEAD), tg), T)
+    assert conn.execute("SELECT count(*) FROM discountz.alert").fetchone() == (0,)
+    assert conn.execute("SELECT count(*) FROM discountz.listing").fetchone() == (1,)
+    assert sent(tg) == []
+
+
+def test_lead_skipped_when_listing_read_less_than_6h_ago(conn: psycopg.Connection) -> None:
+    slickdeals_search(conn)
+    o = offer(
+        source="amazon_us",
+        external_id=LEAD_ASIN,
+        price=8_999,
+        currency=Currency.USD,
+        observed_at=T - timedelta(hours=5),
+    )
+    repo.upsert_listing(conn, o, "componentes", AMAZON_DP, T - timedelta(hours=5))
+    tg = telegram()
+    amazon = FakeHttp({AMAZON_DP: amazon_page(7_499)})
+    run_cycle(deps(conn, feed_http(amazon, EVO_LEAD), tg), T)
+    assert amazon.calls == []
+    assert conn.execute("SELECT count(*) FROM discountz.alert").fetchone() == (0,)
