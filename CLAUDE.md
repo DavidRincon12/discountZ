@@ -36,6 +36,7 @@ Estado actual, siguiente paso y pendientes en `docs/estado.md`: léelo al empeza
 - Logs con lista blanca de campos: nunca URLs con query, cuerpos, mensajes de pydantic/psycopg ni secretos.
 - ruff 0.17 formatea Markdown: `docs/` está en `extend-exclude`.
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero».
+- Fixtures marcadas con `"nota"` en su `.meta.json` son sintéticas (Newegg, fichas de Best Buy): regrabarlas con `record-fixture` desde una red que la tienda no bloquee.
 
 ## Reglas de David (prevalecen sobre las skills, incluida superpowers)
 - Autoría: todo a nombre de David Santiago Rincón Bautista <davidsantiagorb@ufps.edu.co>, sin `Co-Authored-By`, `Claude-Session` ni menciones a IA. `.claude/hooks/git-guard.sh` fija la identidad al iniciar sesión; antes de push, `bash .claude/hooks/git-guard.sh check`.

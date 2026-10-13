@@ -66,6 +66,7 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
    9. Composición al outbox, segunda pasada de la bandeja y entrega (≤ 15 mensajes).
    10. Mantenimiento diario, resumen de las 08:00, contadores, cierre y liberación del lease.
 2. **Comando `/seguir`**: crea un `watch` pendiente sin HTTP → el plan lo resuelve → la primera lectura crea el `listing` y encola la respuesta.
+3. **Feed de Slickdeals**: una tarea `feed` baja el RSS una vez para todas las búsquedas `source='slickdeals'` vencidas → cada lead que coincide y apunta a una tienda activa (sin red: `href`, `u2=` o `data-aps-asin`) encola en memoria una lectura de ficha en esa tienda, antes que sus demás tareas → `evaluate(origin="lead")` puede dar `COMMUNITY_DEAL`. Los leads no se guardan.
 
 ## Atributos de calidad
 1. **Corrección de alertas**: ninguna alerta por un error de parseo o un descuento inflado (guardas G1-G14, confirmación independiente, tabla U01-U37).
@@ -85,3 +86,4 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
 - Términos de uso de Actions y de las tiendas · ritmo conservador, sin evasión.
 - Un mensaje duplicado si el proceso cae entre la API de Telegram y el commit · aceptado (at-least-once).
 - Comandos perdidos tras más de 24 h de caída · healthchecks avisa.
+- Newegg y las fichas de Best Buy no responden a la nube de desarrollo: sus fixtures son sintéticas y hay que medirlas desde Actions antes de confiar en ellas · Walmart y Best Buy siguen detrás de `/fuente on`.
