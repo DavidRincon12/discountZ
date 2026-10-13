@@ -65,6 +65,8 @@ def apply_sample(
     open_seg: Segment | None, obs: Observation, h: timedelta, status: SegmentStatus
 ) -> Extend | CloseAndOpen | Ignore:
     """Decide si una lectura extiende el segmento abierto o lo cierra y abre otro."""
+    if obs.in_stock and obs.price_minor is None:  # sin precio comprable no hay stock útil
+        obs = replace(obs, in_stock=False)
     opened = Segment(
         listing_id=open_seg.listing_id if open_seg else 0,
         started_at=obs.t,

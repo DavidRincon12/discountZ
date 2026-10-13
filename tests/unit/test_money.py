@@ -53,3 +53,18 @@ def test_parse_error_carries_code_and_loc() -> None:
     assert err.code == "bad_price"
     assert err.loc == "price"
     assert "bad_price" in str(err)
+
+
+@pytest.mark.parametrize(
+    ("text", "cur", "minor"),
+    [
+        ("1299,90", Currency.COP, 1_300),
+        ("1299,90", Currency.USD, 129_990),
+        ("$ 1.299.900", Currency.USD, 129_990_000),
+        ("US$1,299.99", Currency.USD, 129_999),
+    ],
+)
+def test_review_focus_regional_formats_never_shift_by_100(
+    text: str, cur: Currency, minor: int
+) -> None:
+    assert parse_price(text, cur) == minor

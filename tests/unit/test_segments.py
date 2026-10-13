@@ -116,3 +116,9 @@ def test_u19_walmart_search_every_12h_is_one_segment() -> None:
             seg = action.segment
         t += timedelta(hours=gaps[i % len(gaps)])
     assert opened == 1
+
+
+def test_in_stock_without_price_is_stored_as_out_of_stock() -> None:
+    action = apply_sample(None, obs(T0, None, in_stock=True), H, SegmentStatus.OPEN)
+    assert isinstance(action, CloseAndOpen)
+    assert action.opened.in_stock is False

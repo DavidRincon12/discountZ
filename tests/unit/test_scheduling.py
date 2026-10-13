@@ -98,7 +98,7 @@ def test_budget_per_run_with_confirmation_reserve_and_no_burst() -> None:
     assert len(plan["amazon_us"]) == AMAZON.max_per_run - reserve
 
 
-def test_test_no_burst_after_cron_delay() -> None:
+def test_no_burst_after_cron_delay() -> None:
     late = tuple(watch(i, overdue=10 * HOUR) for i in range(1, 200))
     assert len(plan_run(inp(watches=late), T)["amazon_us"]) <= AMAZON.max_per_run
 
