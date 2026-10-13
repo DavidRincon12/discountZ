@@ -26,6 +26,8 @@ BACKOFF_CAP_S = 20.0
 RETRY_STATUS = frozenset({500, 502, 503, 504, 429})
 
 Method = Literal["GET", "POST"]
+# Una secuencia de pares permite repetir claves (VTEX: `fq=skuId:A&fq=skuId:B`).
+Params = Mapping[str, str] | Sequence[tuple[str, str]]
 
 
 class BlockKind(StrEnum):
@@ -56,15 +58,19 @@ class HttpClient(Protocol):
         method: Method,
         url: str,
         *,
-        params: Mapping[str, str] | None = None,
+        params: Params | None = None,
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
     ) -> HttpResponse: ...
 
 
-def _full_url(url: str, params: Mapping[str, str] | None) -> str:
-    return f"{url}?{urlencode(list(params.items()))}" if params else url
+def _pairs(params: Params) -> list[tuple[str, str | int | float | bool | None]]:
+    return list(params.items()) if isinstance(params, Mapping) else list(params)
+
+
+def _full_url(url: str, params: Params | None) -> str:
+    return f"{url}?{urlencode(_pairs(params))}" if params else url
 
 
 class HttpxClient:
@@ -83,7 +89,7 @@ class HttpxClient:
         method: Method,
         url: str,
         *,
-        params: Mapping[str, str] | None = None,
+        params: Params | None = None,
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
@@ -92,7 +98,7 @@ class HttpxClient:
             with self._client.stream(
                 method,
                 url,
-                params=dict(params) if params else None,
+                params=_pairs(params) if params else None,
                 json=dict(json) if json is not None else None,
                 headers=dict(headers) if headers else None,
                 cookies=dict(cookies) if cookies else None,
@@ -132,7 +138,7 @@ class CurlClient:
         method: Method,
         url: str,
         *,
-        params: Mapping[str, str] | None = None,
+        params: Params | None = None,
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
@@ -141,7 +147,7 @@ class CurlClient:
             resp: Any = self._session.request(
                 method,
                 url,
-                params=dict(params) if params else None,
+                params=_pairs(params) if params else None,
                 json=dict(json) if json is not None else None,
                 headers=dict(headers) if headers else None,
                 cookies=dict(cookies) if cookies else None,
@@ -205,7 +211,7 @@ class PacedClient:
         method: Method,
         url: str,
         *,
-        params: Mapping[str, str] | None = None,
+        params: Params | None = None,
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
@@ -244,7 +250,7 @@ class PacedClient:
         self,
         method: Method,
         url: str,
-        params: Mapping[str, str] | None,
+        params: Params | None,
         json: Mapping[str, object] | None,
         headers: Mapping[str, str] | None,
         cookies: Mapping[str, str] | None,
@@ -295,7 +301,7 @@ class FakeHttp:
         method: Method,
         url: str,
         *,
-        params: Mapping[str, str] | None = None,
+        params: Params | None = None,
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,

@@ -27,11 +27,15 @@ ASIN_PATH = re.compile(r"^/(?:[^/]+/)?(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})(?
 
 class FakeAmazon:
     descriptor = SourceDescriptor(
-        code="amazon_us", kind="store", currency=Currency.USD,
-        hosts=frozenset({"www.amazon.com", "amazon.com", "a.co", "amzn.to"}), client="curl",
-        capabilities=frozenset({Capability.DETAIL}), max_batch=1,
+        code="amazon_us",
+        kind="store",
+        currency=Currency.USD,
+        hosts=frozenset({"www.amazon.com", "amazon.com", "a.co", "amzn.to"}),
+        client="curl",
+        capabilities=frozenset({Capability.DETAIL}),
+        max_batch=1,
         external_id_re=re.compile(r"^[A-Z0-9]{10}$"),
-    )  # fmt: skip
+    )
 
     def parse_url(self, url: SafeUrl) -> ListingRef | NeedsResolution | None:
         if url.host in ("a.co", "amzn.to"):
@@ -74,8 +78,14 @@ def test_route_short_link_needs_resolution() -> None:
     assert ref == NeedsResolution("amazon_us", "short:a.co/d/xyz")
 
 
-@pytest.mark.parametrize("raw", ["https://www.ebay.com/itm/1", "https://www.amazon.com/gp/help",
-                                 "http://www.amazon.com/dp/B0EXAMPLE1"])  # fmt: skip
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://www.ebay.com/itm/1",
+        "https://www.amazon.com/gp/help",
+        "http://www.amazon.com/dp/B0EXAMPLE1",
+    ],
+)
 def test_unroutable_urls_raise(raw: str) -> None:
     with pytest.raises(UnsafeUrl):
         route_url(raw, SOURCES)

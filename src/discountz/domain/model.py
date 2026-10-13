@@ -44,6 +44,7 @@ class Offer:
     unit_key: str  # 'un|1', 'g|0.5', 'pk|6'
     extraction: ExtractionPath
     observed_at: datetime
+    url_path: str | None = None  # ruta canónica en el host de la fuente (p. ej. `/<slug>/p`)
 
 
 @dataclass(frozen=True, slots=True)

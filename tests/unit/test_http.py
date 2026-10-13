@@ -43,8 +43,9 @@ def captcha(resp: HttpResponse) -> BlockKind | None:
 
 
 def paced(fake: FakeHttp, clock: Clock, budget: SourceBudget = BUDGET) -> PacedClient:
-    return PacedClient(fake, budget, clock.sleep, clock.monotonic, random.Random(0), captcha,
-                       source="exito")  # fmt: skip
+    return PacedClient(
+        fake, budget, clock.sleep, clock.monotonic, random.Random(0), captcha, source="exito"
+    )
 
 
 def test_respects_min_pause_between_requests() -> None:

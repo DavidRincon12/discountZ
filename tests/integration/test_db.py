@@ -42,14 +42,16 @@ def test_runs_track_gap_and_orphans(db: psycopg.Connection) -> None:
     status = db.execute("SELECT status FROM discountz.run WHERE id = %s", (first,)).fetchone()
     assert status == ("failed",)
     repo.finish_run(db, second, T + HOUR / 60, "ok", repo.RunCounters(requests=5, alerts_created=1))
-    row = db.execute("SELECT status, gap_seconds, requests FROM discountz.run WHERE id = %s",
-                     (second,)).fetchone()  # fmt: skip
+    row = db.execute(
+        "SELECT status, gap_seconds, requests FROM discountz.run WHERE id = %s", (second,)
+    ).fetchone()
     assert row is not None and row[0] == "ok" and row[2] == 5 and row[1] > 0
 
 
 def _sample(t_hours: float, price: int = 1_990) -> Observation:
-    return Observation(T + timedelta(hours=t_hours), price, None, True, SellerClass.FIRST_PARTY,
-                       "un|1")  # fmt: skip
+    return Observation(
+        T + timedelta(hours=t_hours), price, None, True, SellerClass.FIRST_PARTY, "un|1"
+    )
 
 
 def test_write_sample_extends_and_closes(db: psycopg.Connection) -> None:
@@ -78,17 +80,34 @@ def test_upsert_listing_returns_previous_price(db: psycopg.Connection) -> None:
 def test_insert_alert_duplicate_returns_none(db: psycopg.Connection) -> None:
     state = repo.upsert_listing(db, offer(), "otros", URL, T)
     seg = repo.write_sample(db, state.id, _sample(0, 100_000), SegmentStatus.OPEN, 12 * HOUR)
-    alert = repo.NewAlert(state.id, seg.started_at, None, AlertKind.GOOD_DEAL, Maturity.MATURE,
-                          100_000, 150_000, 3_333, None, ("short_history",), "new", T)  # fmt: skip
+    alert = repo.NewAlert(
+        state.id,
+        seg.started_at,
+        None,
+        AlertKind.GOOD_DEAL,
+        Maturity.MATURE,
+        100_000,
+        150_000,
+        3_333,
+        None,
+        ("short_history",),
+        "new",
+        T,
+    )
     assert repo.insert_alert(db, alert) is not None
     assert repo.insert_alert(db, alert) is None
 
 
 def test_claim_outbox_never_delivers_twice(db: psycopg.Connection) -> None:
-    first = repo.enqueue(db, "reply", "<b>hola</b>", priority=1, dedup_key="reply:1", now=T,
-                         ttl=24 * HOUR)  # fmt: skip
-    assert repo.enqueue(db, "reply", "<b>hola</b>", priority=1, dedup_key="reply:1", now=T,
-                        ttl=24 * HOUR) == first  # fmt: skip
+    first = repo.enqueue(
+        db, "reply", "<b>hola</b>", priority=1, dedup_key="reply:1", now=T, ttl=24 * HOUR
+    )
+    assert (
+        repo.enqueue(
+            db, "reply", "<b>hola</b>", priority=1, dedup_key="reply:1", now=T, ttl=24 * HOUR
+        )
+        == first
+    )
     repo.enqueue(
         db, "alert", "<b>oferta</b>", priority=0, dedup_key="alert:9", now=T, ttl=12 * HOUR
     )

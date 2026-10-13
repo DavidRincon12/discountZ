@@ -55,6 +55,7 @@ def load_fixture(source: str, name: str, *, root: Path = FIXTURES_DIR) -> HttpRe
     for ext in _EXTENSIONS:
         path = folder / f"{name}.{ext}.gz"
         if path.exists():
-            return HttpResponse(int(meta["status"]), str(meta["url"]), {},
-                                gzip.decompress(path.read_bytes()), 0)  # fmt: skip
+            return HttpResponse(
+                int(meta["status"]), str(meta["url"]), {}, gzip.decompress(path.read_bytes()), 0
+            )
     raise FileNotFoundError(f"{source}/{name}")

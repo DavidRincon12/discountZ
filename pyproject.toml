@@ -87,5 +87,8 @@ testpaths = ["tests"]
 markers = ["integration: requiere Postgres (DISCOUNTZ_TEST_DATABASE_URL)"]
 addopts = "-m 'not integration'"
 
-# «Adaptadores independientes» (independence) se agrega con el primer adaptador (vtex) y
-# crece con cada uno: import-linter falla si un módulo listado aún no existe.
+# Crece con cada adaptador: import-linter falla si un módulo listado aún no existe.
+[[tool.importlinter.contracts]]
+name = "Adaptadores independientes"
+type = "independence"
+modules = ["discountz.sources.vtex"]

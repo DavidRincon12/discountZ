@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Literal, Protocol
 
@@ -75,6 +76,7 @@ class SourceContext:
     http: HttpClient  # ya envuelto en PacedClient
     credentials: CredentialStore
     deadline_monotonic: float
+    now: datetime  # instante del ciclo: los adaptadores no leen el reloj
 
 
 @dataclass(frozen=True, slots=True)

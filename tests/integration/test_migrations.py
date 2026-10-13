@@ -42,9 +42,16 @@ def test_up_down_up(empty_db_url: str) -> None:
 def test_seed_sources_and_gates(db: psycopg.Connection) -> None:
     rows = db.execute("SELECT code, enabled FROM discountz.source ORDER BY code").fetchall()
     assert dict(rows) == {
-        "amazon_us": True, "bestbuy_us": False, "carulla": True, "exito": True, "newegg": True,
-        "olimpica": True, "panamericana": True, "slickdeals": True, "walmart_us": False,
-    }  # fmt: skip
+        "amazon_us": True,
+        "bestbuy_us": False,
+        "carulla": True,
+        "exito": True,
+        "newegg": True,
+        "olimpica": True,
+        "panamericana": True,
+        "slickdeals": True,
+        "walmart_us": False,
+    }
 
 
 def _listing(conn: psycopg.Connection) -> int:
@@ -118,16 +125,19 @@ def test_migrate_waits_for_lease_then_gives_up(db: psycopg.Connection) -> None:
         clock[0] += s
 
     with pytest.raises(LeaseBusy):
-        migrate_with_lease(db, "head", holder="migrate:9", wait_s=20,
-                           sleep=fake_sleep, monotonic=lambda: clock[0])  # fmt: skip
+        migrate_with_lease(
+            db, "head", holder="migrate:9", wait_s=20, sleep=fake_sleep, monotonic=lambda: clock[0]
+        )
     assert clock[0] >= 20
 
 
 def test_migrate_with_free_lease_releases_it(db: psycopg.Connection) -> None:
-    assert migrate_with_lease(db, 0, holder="migrate:9", wait_s=1,
-                              sleep=lambda s: None, monotonic=lambda: 0.0) == [1]  # fmt: skip
-    assert migrate_with_lease(db, "head", holder="migrate:9", wait_s=1,
-                              sleep=lambda s: None, monotonic=lambda: 0.0) == [1]  # fmt: skip
+    assert migrate_with_lease(
+        db, 0, holder="migrate:9", wait_s=1, sleep=lambda s: None, monotonic=lambda: 0.0
+    ) == [1]
+    assert migrate_with_lease(
+        db, "head", holder="migrate:9", wait_s=1, sleep=lambda s: None, monotonic=lambda: 0.0
+    ) == [1]
     assert _scalar(db, "SELECT holder FROM discountz.run_lease") is None
 
 

@@ -4,8 +4,12 @@ from discountz.infra.http import HttpResponse
 from discountz.sources.blocks import BlockKind, detect_block_common
 
 
-def resp(body: bytes = b"<html>ok</html>", status: int = 200, url: str = "https://x.com/p",
-         headers: dict[str, str] | None = None) -> HttpResponse:  # fmt: skip
+def resp(
+    body: bytes = b"<html>ok</html>",
+    status: int = 200,
+    url: str = "https://x.com/p",
+    headers: dict[str, str] | None = None,
+) -> HttpResponse:
     return HttpResponse(status, url, headers or {}, body, 5)
 
 
