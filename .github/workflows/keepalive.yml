@@ -1,0 +1,21 @@
+name: keepalive
+# En su propio archivo para que GitHub no lo desactive junto con `cycle` a los 60 días.
+on:
+  schedule:
+    - cron: '41 13 * * 1'            # lunes 08:41 en Bogotá
+  workflow_dispatch:
+permissions:
+  actions: write
+jobs:
+  keepalive:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Reactivar workflows programados
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          for wf in cycle.yml keepalive.yml; do
+            gh api --method PUT "repos/$REPO/actions/workflows/$wf/enable"
+          done
