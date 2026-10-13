@@ -14,7 +14,8 @@ from typing import Literal
 
 import psycopg
 
-from discountz.domain.errors import LeaseBusy
+from discountz.config import load_canaries, load_params, load_settings
+from discountz.domain.errors import ConfigError, LeaseBusy
 from discountz.infra.db import connect
 from discountz.infra.http import CurlClient, HttpxClient
 from discountz.infra.migrate import MigrationError, migrate_with_lease
@@ -110,10 +111,27 @@ def _cmd_record_fixture(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_check_config() -> int:
+    try:
+        load_settings()
+        params = load_params()
+        canaries = load_canaries()
+    except ConfigError as exc:
+        print(f"check-config: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    print(
+        f"check-config: OK ({len(params.budgets)} fuentes, {len(params.events)} eventos, "
+        f"canarios en {len(canaries)} tiendas)"
+    )
+    return EXIT_OK
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "migrate":
         return _cmd_migrate(args)
+    if args.command == "check-config":
+        return _cmd_check_config()
     if args.command == "record-fixture":
         return _cmd_record_fixture(args)
     print(f"{args.command}: no implementado", file=sys.stderr)

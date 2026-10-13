@@ -1,0 +1,248 @@
+# Parámetros públicos de discountZ (spec §3.9, §4.5 y §6.2). Sin secretos.
+# Duraciones con sufijo de unidad: _d días, _h horas, _min minutos, _s segundos.
+
+[quiet_hours]  # hora de Bogotá; se envía sin sonido salvo price_error (spec §3.8)
+start = "23:00"
+end = "07:00"
+
+[pricing]
+h_min_h = 12
+flash_max_h = 6
+validity_min_d = 7
+adapt_min_coverage_d = 60
+rho_bp = 800
+anchor_window_d = 180
+power10_tol_bp = 300
+confirm_tol_bp = 100
+persistence_gap_min = 20
+peers_min = 8
+peers_price_bp = 3500
+peers_list_bp = 6000
+storm_min = 2
+jump_window_d = 7
+gap_before_d = 7
+min_abs_cop = 10000
+min_abs_usd = 500
+rarity_tol_bp = 50
+improve_bp = 300
+rearm_h = 24
+glitch_reclass_d = 7
+
+[categories.tecnologia]
+window_d = 90
+mature_coverage_d = 21
+t_good_bp = 1200
+t_floor_bp = 800
+d_low_bp = 600
+d_floor_bp = 300
+epsilon_bp = 200
+g_bp = 5000
+f_max_bp = 1000
+cooldown_h = 72
+allow_marketplace = false
+k_d = 14
+d_trend_bp = 1000
+
+[categories.componentes]
+window_d = 90
+mature_coverage_d = 21
+t_good_bp = 1000
+t_floor_bp = 700
+d_low_bp = 500
+d_floor_bp = 300
+epsilon_bp = 200
+g_bp = 5000
+f_max_bp = 1000
+cooldown_h = 72
+allow_marketplace = true
+k_d = 14
+d_trend_bp = 1000
+
+[categories.hogar]
+window_d = 90
+mature_coverage_d = 21
+t_good_bp = 2000
+t_floor_bp = 1000
+d_low_bp = 800
+d_floor_bp = 400
+epsilon_bp = 200
+g_bp = 6000
+f_max_bp = 1000
+cooldown_h = 96
+allow_marketplace = true
+k_d = 14
+d_trend_bp = 1000
+
+[categories.ropa]
+window_d = 60
+mature_coverage_d = 14
+t_good_bp = 3000
+t_floor_bp = 2000
+d_low_bp = 1500
+d_floor_bp = 1000
+epsilon_bp = 300
+g_bp = 7500
+f_max_bp = 1500
+cooldown_h = 120
+allow_marketplace = true
+k_d = 10
+d_trend_bp = 2000
+
+[categories.otros]
+window_d = 90
+mature_coverage_d = 21
+t_good_bp = 1500
+t_floor_bp = 800
+d_low_bp = 600
+d_floor_bp = 300
+epsilon_bp = 200
+g_bp = 6000
+f_max_bp = 1000
+cooldown_h = 72
+allow_marketplace = true
+k_d = 14
+d_trend_bp = 1000
+
+# Presupuesto por fuente (spec §4.5). Los VTEX se leen en lote (M2: hasta 50 SKUs), así que su
+# seguimiento es de 1 ciclo (spec §6.2): `watch_interval_min = 1` queda acotado al ciclo real.
+# El máximo de 24 h de un grupo se comparte entre sus fuentes (exito + carulla).
+[sources.exito]
+group = "grupo_exito"
+min_pause_s = 2
+jitter_s = 2
+max_per_run = 30
+max_per_24h = 1500
+watch_interval_min = 1
+search_interval_min = 180
+max_batch = 50
+
+[sources.carulla]
+group = "grupo_exito"
+min_pause_s = 2
+jitter_s = 2
+max_per_run = 30
+max_per_24h = 1500
+watch_interval_min = 1
+search_interval_min = 180
+max_batch = 50
+
+[sources.olimpica]
+group = "olimpica"
+min_pause_s = 2
+jitter_s = 2
+max_per_run = 20
+max_per_24h = 800
+watch_interval_min = 1
+search_interval_min = 180
+max_batch = 50
+
+[sources.panamericana]
+group = "panamericana"
+min_pause_s = 2
+jitter_s = 2
+max_per_run = 20
+max_per_24h = 800
+watch_interval_min = 1
+search_interval_min = 180
+max_batch = 50
+
+[sources.amazon_us]
+group = "amazon_us"
+min_pause_s = 6
+jitter_s = 6
+max_per_run = 12
+max_per_24h = 400
+watch_interval_min = 180
+search_interval_min = 360
+max_batch = 1
+
+[sources.newegg]
+group = "newegg"
+min_pause_s = 4
+jitter_s = 4
+max_per_run = 12
+max_per_24h = 400
+watch_interval_min = 180
+search_interval_min = 360
+max_batch = 1
+
+[sources.walmart_us]
+group = "walmart_us"
+min_pause_s = 8
+jitter_s = 8
+max_per_run = 8
+max_per_24h = 200
+watch_interval_min = 360
+search_interval_min = 720
+max_batch = 1
+
+[sources.bestbuy_us]
+group = "bestbuy_us"
+min_pause_s = 6
+jitter_s = 6
+max_per_run = 8
+max_per_24h = 200
+watch_interval_min = 360
+search_interval_min = 720
+max_batch = 1
+
+[sources.slickdeals]
+group = "slickdeals"
+min_pause_s = 0
+jitter_s = 0
+max_per_run = 1
+max_per_24h = 60
+watch_interval_min = 30
+search_interval_min = 30
+max_batch = 1
+
+# Calendario de eventos (spec §6.2): hora de Bogotá; fin exclusivo.
+# FECHAS A CONFIRMAR por David antes de cada evento: las tiendas las anuncian con pocas semanas.
+
+[[events]]
+name = "Black Friday"
+sources = ["amazon_us", "newegg", "walmart_us", "bestbuy_us", "slickdeals"]
+starts = "2026-11-27T00:00"
+ends = "2026-11-28T00:00"
+
+[[events]]
+name = "Black Days"
+sources = ["exito", "carulla", "olimpica", "panamericana"]
+starts = "2026-11-26T00:00"
+ends = "2026-11-30T00:00"
+
+[[events]]
+name = "Cyber Monday"
+sources = ["amazon_us", "newegg", "walmart_us", "bestbuy_us", "slickdeals"]
+starts = "2026-11-30T00:00"
+ends = "2026-12-01T00:00"
+
+[[events]]
+name = "Cyber Lunes"
+sources = ["exito", "carulla", "olimpica", "panamericana"]
+starts = "2026-11-30T00:00"
+ends = "2026-12-01T00:00"
+
+[[events]]
+name = "Hot Sale"
+sources = ["exito", "carulla", "olimpica", "panamericana"]
+starts = "2027-05-24T00:00"
+ends = "2027-05-27T00:00"
+
+[[events]]
+name = "Prime Day"
+sources = ["amazon_us"]
+starts = "2027-07-13T00:00"
+ends = "2027-07-15T00:00"
+
+[[events]]
+name = "Black Friday"
+sources = ["amazon_us", "newegg", "walmart_us", "bestbuy_us", "slickdeals"]
+starts = "2027-11-26T00:00"
+ends = "2027-11-27T00:00"
+
+[[events]]
+name = "Cyber Monday"
+sources = ["amazon_us", "newegg", "walmart_us", "bestbuy_us", "slickdeals"]
+starts = "2027-11-29T00:00"
+ends = "2027-11-30T00:00"
