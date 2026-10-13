@@ -94,6 +94,12 @@ class BudgetExhausted(SourceError):
     kind = "budget"
 
 
+class CredentialUnavailable(SourceError):
+    """La fuente necesita credenciales que no hay (v1: ninguna fuente las usa)."""
+
+    kind = "unavailable"
+
+
 # Telegram
 class TelegramError(DiscountzError):
     """Error al hablar con la API de Telegram."""

@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
 import time
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Literal
 
 import psycopg
 
 from discountz.domain.errors import LeaseBusy
 from discountz.infra.db import connect
+from discountz.infra.http import CurlClient, HttpxClient
 from discountz.infra.migrate import MigrationError, migrate_with_lease
+from discountz.sources.fixtures import FIXTURES_DIR, save_fixture
+from discountz.sources.registry import load_all
 
 EXIT_OK, EXIT_BUG, EXIT_CONFIG, EXIT_DB = 0, 1, 2, 3
 _DURATION_RE = re.compile(r"^(\d+)([smh])$")
@@ -45,7 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
     mig.add_argument("--to", type=_target, required=True, help="Versión destino o 'head'.")
     mig.add_argument("--wait-lease", type=parse_duration, default=0, help="Espera máxima.")
     sub.add_parser("check-config", help="Valida la configuración y las variables de entorno.")
-    sub.add_parser("record-fixture", help="Graba una respuesta real como fixture (solo local).")
+    rec = sub.add_parser("record-fixture", help="Graba una respuesta real como fixture (local).")
+    rec.add_argument("source", help="Código de la fuente (p. ej. exito).")
+    rec.add_argument("name", help="Nombre de la fixture (p. ej. busqueda_ssd).")
+    rec.add_argument("url", help="URL a pedir (consultas genéricas, nunca datos personales).")
+    rec.add_argument("--folder", default=None, help="Carpeta dentro de tests/fixtures.")
+    rec.add_argument("--post-json", default=None, help="Cuerpo JSON para un POST.")
     return parser
 
 
@@ -80,10 +90,32 @@ def _cmd_migrate(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_record_fixture(args: argparse.Namespace) -> int:
+    source = load_all().get(args.source)
+    if source is None:
+        print(f"record-fixture: fuente desconocida: {args.source}", file=sys.stderr)
+        return EXIT_CONFIG
+    client: HttpxClient | CurlClient = (
+        CurlClient(args.source) if source.descriptor.client == "curl" else HttpxClient(args.source)
+    )
+    try:
+        body = json.loads(args.post_json) if args.post_json else None
+        resp = client.request("POST" if body is not None else "GET", args.url, json=body)
+    finally:
+        client.close()
+    folder = args.folder or args.source
+    today = datetime.now(UTC).date().isoformat()
+    path = save_fixture(FIXTURES_DIR, folder, args.name, resp, recorded_at=today)
+    print(f"record-fixture: {resp.status} → {path.relative_to(FIXTURES_DIR)}")
+    return EXIT_OK
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "migrate":
         return _cmd_migrate(args)
+    if args.command == "record-fixture":
+        return _cmd_record_fixture(args)
     print(f"{args.command}: no implementado", file=sys.stderr)
     return EXIT_CONFIG
 
