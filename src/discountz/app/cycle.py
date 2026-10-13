@@ -21,6 +21,12 @@ from discountz.app.compose import compose_alerts
 from discountz.app.confirm import confirm_candidates
 from discountz.app.deliver import deliver
 from discountz.app.inbox import process_inbox
+from discountz.app.maintenance import (
+    maintenance_due,
+    run_maintenance,
+    send_daily_summary,
+    summary_due,
+)
 from discountz.app.render import local, source_name
 from discountz.config import AppParams, Canary, Settings
 from discountz.domain.errors import TelegramError
@@ -182,6 +188,7 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
             event(log, "confirm_failed", logging.ERROR, source=r.code, error=type(exc).__name__)
         _close_source(conn, r, now)
     compose_alerts(conn, collector.views, now, params)
+    _daily(conn, now, params)
     updates += _inbox(deps, now)
     delivery = deliver(
         conn,
@@ -214,6 +221,18 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
         exit=exit_code,
     )
     return CycleResult(status, exit_code, run_id)
+
+
+def _daily(conn: psycopg.Connection, now: datetime, params: AppParams) -> None:
+    """Paso 14: errores registrados, el ciclo sigue (el resumen sale en esta misma entrega)."""
+    try:
+        if maintenance_due(conn, now):
+            report = run_maintenance(conn, now, params)
+            event(log, "maintenance", count=report.segments_deleted + report.retention_deleted)
+        if summary_due(conn, now):
+            send_daily_summary(conn, now)
+    except Exception as exc:
+        event(log, "maintenance_failed", logging.ERROR, error=type(exc).__name__)
 
 
 def _source_runs(

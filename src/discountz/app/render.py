@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import html
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -125,6 +125,15 @@ class DailyView:
     alerts: int
     source_notes: Sequence[str]
     db_bytes: int
+    by_trigger: Mapping[str, int] = field(default_factory=dict)  # trigger_kind → ciclos
+    warnings: Sequence[str] = ()
+
+
+_TRIGGERS = (
+    ("workflow_dispatch", "por disparo externo"),
+    ("schedule", "por schedule"),
+    ("local", "locales"),
+)
 
 
 def visible_length(body: str) -> int:
@@ -361,8 +370,13 @@ def render_health(s: StatusSnapshot, now: datetime) -> RenderedMessage:
 def render_daily(v: DailyView) -> RenderedMessage:
     """Resumen diario silencioso, que también funciona como latido (spec §5.5)."""
     last = f" (último {local(v.last_cycle_at):%H:%M})" if v.last_cycle_at is not None else ""
-    parts = [f"discountZ: {v.cycles} ciclos en 24 h{last}", f"{v.alerts} alertas"]
+    parts = [f"discountZ: {v.cycles} ciclos en 24 h{last}"]
+    by = ", ".join(f"{v.by_trigger[k]} {label}" for k, label in _TRIGGERS if v.by_trigger.get(k))
+    if by:
+        parts.append(by)
+    parts.append(f"{v.alerts} alertas")
     if v.source_notes:
         parts.append(esc(", ".join(v.source_notes)))
     parts.append(f"BD {_mb(v.db_bytes)} MB de {DB_LIMIT_MB}")
+    parts.extend(esc(w) for w in v.warnings)
     return RenderedMessage(" · ".join(parts), [], silent=True)

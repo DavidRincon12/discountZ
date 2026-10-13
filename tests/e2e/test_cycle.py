@@ -142,6 +142,11 @@ def deps(
 def conn(db: psycopg.Connection) -> Iterator[psycopg.Connection]:  # noqa: F811
     # Canarios al día: las pruebas no los ejercitan.
     db.execute("UPDATE discountz.source SET canary_checked_at = %s, canary_ok = true", (T,))
+    # Mantenimiento y resumen diario ya hechos hoy: tienen sus propias pruebas.
+    db.execute(
+        "UPDATE discountz.bot_state SET last_maintenance_on = %s, last_summary_on = %s",
+        (T.date(), T.date()),
+    )
     yield db
 
 

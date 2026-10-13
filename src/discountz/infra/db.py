@@ -1287,6 +1287,189 @@ def recent_run_statuses(conn: psycopg.Connection, n: int) -> list[str]:
     return [str(r[0]) for r in rows]
 
 
+# ───────────── Mantenimiento (spec §2.4)
+
+BATCH = 5000
+
+
+def _delete_batched(conn: psycopg.Connection, table: str, where: str, params: Any) -> int:
+    """Borra por lotes de 5.000 filas (cada lote en su transacción) y devuelve el total."""
+    total = 0
+    while True:
+        with conn.transaction():
+            cur = conn.execute(
+                f"""DELETE FROM discountz.{table} WHERE ctid IN (
+                        SELECT ctid FROM discountz.{table} WHERE {where} LIMIT {BATCH})""",
+                params,
+            )
+        total += cur.rowcount
+        if cur.rowcount < BATCH:
+            return total
+
+
+def keep_alltime_min(conn: psycopg.Connection, cutoff: datetime, flash_max: timedelta) -> int:
+    """Lleva a `listing.alltime_min_*` el mínimo de los segmentos que van a salir.
+
+    Excluye `s`/`g`, los sin stock y los relámpagos (duración observada < `flash_max`).
+    """
+    cur = conn.execute(
+        """WITH outgoing AS (
+               SELECT DISTINCT ON (listing_id) listing_id, price_minor, started_at
+                 FROM discountz.price_segment
+                WHERE ended_at < %(cutoff)s AND status = 'o' AND in_stock
+                  AND price_minor IS NOT NULL AND last_seen_at - started_at >= %(flash)s
+                ORDER BY listing_id, price_minor, started_at)
+           UPDATE discountz.listing l
+              SET alltime_min_minor = o.price_minor, alltime_min_at = o.started_at
+             FROM outgoing o
+            WHERE l.id = o.listing_id
+              AND (l.alltime_min_minor IS NULL OR o.price_minor < l.alltime_min_minor)""",
+        {"cutoff": cutoff, "flash": flash_max},
+    )
+    return cur.rowcount
+
+
+def delete_old_segments(conn: psycopg.Connection, cutoff: datetime) -> int:
+    return _delete_batched(conn, "price_segment", "ended_at < %(cutoff)s", {"cutoff": cutoff})
+
+
+def reclassify_glitches(conn: psycopg.Connection, before: datetime) -> int:
+    """`g` con más de 7 d pasa a `o`: un «error» que dura una semana es el precio real."""
+    cur = conn.execute(
+        "UPDATE discountz.price_segment SET status = 'o' WHERE status = 'g' AND started_at < %s",
+        (before,),
+    )
+    return cur.rowcount
+
+
+def apply_retention(conn: psycopg.Connection, now: datetime) -> int:
+    total = _delete_batched(
+        conn, "run", "started_at < %(t)s AND status <> 'running'", {"t": now - timedelta(days=30)}
+    )
+    total += _delete_batched(
+        conn,
+        "outbox",
+        "created_at < %(t)s AND status <> 'sending'",  # a los 30 d todo TTL ya venció
+        {"t": now - timedelta(days=30)},
+    )
+    total += _delete_batched(
+        conn, "source_hourly_stat", "hour_start < %(t)s", {"t": now - timedelta(days=90)}
+    )
+    total += _delete_batched(conn, "alert", "created_at < %(t)s", {"t": now - timedelta(days=400)})
+    return total
+
+
+def prune_discoveries(
+    conn: psycopg.Connection, not_seen_since: datetime, alerts_since: datetime | None
+) -> int:
+    """Listings descubiertos (sin seguimiento) sin verse desde `not_seen_since` y sin alertas
+    (desde `alerts_since`, o nunca si es `None`); sus segmentos caen en cascada."""
+    alert_cond = "" if alerts_since is None else "AND a.created_at >= %(alerts)s"
+    where = f"""last_seen_at < %(seen)s
+        AND NOT EXISTS (SELECT 1 FROM discountz.watch w WHERE w.listing_id = listing.id)
+        AND NOT EXISTS (SELECT 1 FROM discountz.alert a WHERE a.listing_id = listing.id
+                        {alert_cond})"""
+    return _delete_batched(conn, "listing", where, {"seen": not_seen_since, "alerts": alerts_since})
+
+
+def prune_unwatched_segments(conn: psycopg.Connection, before: datetime) -> int:
+    where = """ended_at < %(t)s AND NOT EXISTS (
+        SELECT 1 FROM discountz.watch w WHERE w.listing_id = price_segment.listing_id)"""
+    return _delete_batched(conn, "price_segment", where, {"t": before})
+
+
+def db_size(conn: psycopg.Connection) -> int:
+    return int(_required(_one(conn, "SELECT pg_database_size(current_database())"))[0])
+
+
+def top_tables(conn: psycopg.Connection, n: int = 5) -> list[tuple[str, int]]:
+    rows = conn.execute(
+        """SELECT c.relname, pg_total_relation_size(c.oid)
+             FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+            WHERE ns.nspname = 'discountz' AND c.relkind = 'r'
+            ORDER BY 2 DESC LIMIT %s""",
+        (n,),
+    ).fetchall()
+    return [(str(r[0]), int(r[1])) for r in rows]
+
+
+@dataclass(frozen=True, slots=True)
+class BotState:
+    last_maintenance_on: date | None
+    last_summary_on: date | None
+    discovery_paused: bool
+    dispatch_token_expires_on: date | None
+
+
+def bot_state(conn: psycopg.Connection) -> BotState:
+    row = _required(
+        _one(
+            conn,
+            """SELECT last_maintenance_on, last_summary_on, discovery_paused,
+                      dispatch_token_expires_on FROM discountz.bot_state WHERE id = 1""",
+        )
+    )
+    return BotState(row[0], row[1], bool(row[2]), row[3])
+
+
+def set_maintenance_state(
+    conn: psycopg.Connection, day: date, size_bytes: int, discovery_paused: bool
+) -> None:
+    conn.execute(
+        """UPDATE discountz.bot_state
+              SET last_maintenance_on = %s, last_db_size_bytes = %s, discovery_paused = %s
+            WHERE id = 1""",
+        (day, size_bytes, discovery_paused),
+    )
+
+
+def set_summary_on(conn: psycopg.Connection, day: date) -> None:
+    conn.execute("UPDATE discountz.bot_state SET last_summary_on = %s WHERE id = 1", (day,))
+
+
+@dataclass(frozen=True, slots=True)
+class DayActivity:
+    by_trigger: dict[str, int]
+    last_cycle_at: datetime | None
+    alerts: int
+    sources: list[tuple[str, str, int]]  # (código, salud, bloqueos 24 h)
+
+
+def day_activity(conn: psycopg.Connection, now: datetime) -> DayActivity:
+    since = now - timedelta(hours=24)
+    trig = conn.execute(
+        """SELECT trigger_kind, count(*) FROM discountz.run
+            WHERE started_at > %s AND status IN ('ok','partial') GROUP BY 1""",
+        (since,),
+    ).fetchall()
+    last = _one(
+        conn,
+        "SELECT max(started_at) FROM discountz.run WHERE status IN ('ok','partial')",
+    )
+    alerts = _required(
+        _one(
+            conn,
+            """SELECT count(*) FROM discountz.alert
+                WHERE created_at > %s AND delivery IN ('new','queued')""",
+            (since,),
+        )
+    )
+    sources = conn.execute(
+        """SELECT s.code, s.health, coalesce(sum(h.blocked), 0)
+             FROM discountz.source s
+             LEFT JOIN discountz.source_hourly_stat h
+               ON h.source = s.code AND h.hour_start > %s
+            WHERE s.enabled GROUP BY s.code, s.health ORDER BY s.code""",
+        (since,),
+    ).fetchall()
+    return DayActivity(
+        {str(r[0]): int(r[1]) for r in trig},
+        None if last is None else last[0],
+        int(alerts[0]),
+        [(str(r[0]), str(r[1]), int(r[2])) for r in sources],
+    )
+
+
 # ───────────── Plan
 
 

@@ -43,7 +43,13 @@ from discountz.domain.evaluate import (
     evaluate,
 )
 from discountz.domain.guards import batch_is_constant, check_offer
-from discountz.domain.health import BreakerEvent, BreakerState, HourStat, breaker_transition
+from discountz.domain.health import (
+    QUARANTINE_CYCLES,
+    BreakerEvent,
+    BreakerState,
+    HourStat,
+    breaker_transition,
+)
 from discountz.domain.model import AlertKind, Flag, ListingRef, Offer, SellerClass
 from discountz.domain.money import Money, format_money
 from discountz.domain.params import CategoryParams
@@ -245,6 +251,9 @@ class Collector:
             ):
                 ok = False
         r.canary_ok = ok
+        if not ok:  # fuera de rango: posible cambio de formato ⇒ cuarentena (spec §4.7)
+            quarantine = max(r.breaker.quarantine_cycles, QUARANTINE_CYCLES)
+            r.breaker = replace(r.breaker, quarantine_cycles=quarantine)
         db.record_canary(self.conn, r.code, ok, self.now)
         if half_open:
             self.breaker_event(r, BreakerEvent.PROBE_OK if ok else BreakerEvent.PROBE_FAIL)
