@@ -8,7 +8,7 @@
 - Aún no hay Telegram, configuración, ciclo ni workflows de despliegue.
 
 ## Último cambio
-- Rama `claude/discountz-v1-plan-execution-ur365u`: Tasks 1-16 del plan.
+- Rama `claude/discountz-v1-plan-execution-ur365u`: Tasks 1-16 del plan y revisión completa de esas tareas (5 hallazgos importantes y 3 menores corregidos con pruebas).
 
 ## Siguiente paso
 - Plan `docs/superpowers/plans/2026-10-13-discountz-v1.md` en modo **Native** (superpowers:executing-plans): continuar en la **Task 17** (Telegram: cliente, render y bandeja de entrada).
@@ -27,6 +27,7 @@
 - Carulla ya no responde en `/api`: redirige (308) a `/io/api`, igual que Éxito. Olímpica y Panamericana siguen en `/api`.
 - Éxito y Olímpica venden mucho por marketplace (vendedor por defecto ≠ "1" ⇒ `m`); la simulación necesita ese vendedor.
 - El `now` del ciclo viaja en `SourceContext.now`: los adaptadores no leen el reloj.
+- El ciclo (Task 19) debe pasar `deadline=` (plazo blando) a cada `PacedClient`; sin él, los reintentos no miran el plazo.
 - ruff 0.17 formatea Markdown: `docs/` está excluido en `pyproject.toml`.
 - La imagen `postgres:17` del CI no tiene digest fijado. En la sesión en la nube se usa el Postgres 16 del sistema (`service postgresql start`).
 - El contrato «Adaptadores independientes» de import-linter crece con cada adaptador (falla si un módulo listado no existe).
