@@ -6,6 +6,8 @@ Por eso los errores llevan códigos cortos y ubicaciones, nunca el valor que fal
 
 from __future__ import annotations
 
+from typing import ClassVar, Literal
+
 
 class DiscountzError(Exception):
     """Raíz de todos los errores propios."""
@@ -49,6 +51,47 @@ class UnsafeUrl(DomainError):
     def __init__(self, code: str = "unsafe_url") -> None:
         super().__init__(code)
         self.code = code
+
+
+# Fuentes
+SourceErrorKind = Literal["blocked", "unavailable", "parse", "gone", "budget"]
+
+
+class SourceError(DiscountzError):
+    """Falla al leer una fuente. Solo lleva el código de fuente, un código corto y el status."""
+
+    kind: ClassVar[SourceErrorKind] = "unavailable"
+
+    def __init__(self, source: str, code: str, http_status: int | None = None) -> None:
+        detail = f"{source}:{code}" if http_status is None else f"{source}:{code}:{http_status}"
+        super().__init__(detail)
+        self.source = source
+        self.code = code
+        self.http_status = http_status
+
+
+class HardBlock(SourceError):
+    """Bloqueo duro (captcha, challenge, 403): sin reintento; abre el breaker."""
+
+    kind = "blocked"
+
+
+class Unavailable(SourceError):
+    """Timeout, error de red o 5xx tras los reintentos; 5 seguidos abren el breaker."""
+
+    kind = "unavailable"
+
+
+class NotFound(SourceError):
+    """404: el listing parece retirado; no afecta el breaker."""
+
+    kind = "gone"
+
+
+class BudgetExhausted(SourceError):
+    """Se agotó el presupuesto de peticiones de la fuente en este ciclo."""
+
+    kind = "budget"
 
 
 # Telegram
