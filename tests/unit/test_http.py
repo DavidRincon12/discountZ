@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Iterator
 from datetime import timedelta
 
+import httpx
 import pytest
 
 from discountz.domain.errors import BudgetExhausted, HardBlock, NotFound, SourceError, Unavailable
@@ -12,6 +14,7 @@ from discountz.infra.http import (
     BlockKind,
     FakeHttp,
     HttpResponse,
+    HttpxClient,
     PacedClient,
 )
 
@@ -135,3 +138,52 @@ def test_fake_http_keys_include_params() -> None:
 
 def test_source_errors_share_base() -> None:
     assert issubclass(HardBlock, SourceError) and issubclass(NotFound, SourceError)
+
+
+def test_no_retry_when_it_would_pass_the_soft_deadline() -> None:
+    clock = Clock()
+    fake = FakeHttp({URL: [ok(status=503), ok()]})
+    client = PacedClient(
+        fake,
+        BUDGET,
+        clock.sleep,
+        clock.monotonic,
+        random.Random(0),
+        captcha,
+        source="exito",
+        deadline=clock.now + 10,
+    )
+    with pytest.raises(Unavailable):
+        client.request("GET", URL)
+    assert len(fake.calls) == 1
+
+
+def test_httpx_client_sends_browser_headers_by_default() -> None:
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(request.headers)
+        return httpx.Response(200, content=b"{}")
+
+    client = HttpxClient("exito", transport=httpx.MockTransport(handler))
+    client.request("GET", URL)
+    assert "python-httpx" not in seen["user-agent"] and "Chrome" in seen["user-agent"]
+    assert seen["accept-language"].startswith("es-CO")
+    assert "sec-ch-ua" in seen
+
+
+def test_httpx_client_enforces_total_time_per_request() -> None:
+    clock = Clock()
+
+    def slow_chunks() -> Iterator[bytes]:
+        for _ in range(10):
+            clock.now += 5  # cada fragmento tarda 5 s
+            yield b"x"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=slow_chunks())
+
+    client = HttpxClient("exito", transport=httpx.MockTransport(handler), monotonic=clock.monotonic)
+    with pytest.raises(Unavailable) as exc:
+        client.request("GET", URL)
+    assert exc.value.code == "deadline"

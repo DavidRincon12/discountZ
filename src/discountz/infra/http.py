@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import random
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -24,6 +25,18 @@ MAX_RETRIES = 2
 MAX_RETRY_AFTER_S = 60.0
 BACKOFF_CAP_S = 20.0
 RETRY_STATUS = frozenset({500, 502, 503, 504, 429})
+# Juego completo de cabeceras de Chrome para httpx (spec §4.4), fijo durante la ejecución.
+BROWSER_HEADERS: Mapping[str, str] = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/136.0.0.0 Safari/537.36"
+    ),
+    "sec-ch-ua": '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+    "Accept-Language": "es-CO,es;q=0.9",
+}
 
 Method = Literal["GET", "POST"]
 # Una secuencia de pares permite repetir claves (VTEX: `fq=skuId:A&fq=skuId:B`).
@@ -76,12 +89,21 @@ def _full_url(url: str, params: Params | None) -> str:
 class HttpxClient:
     """httpx sin redirecciones automáticas, con tope de tamaño y de tiempo."""
 
-    def __init__(self, source: str, headers: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        source: str,
+        headers: Mapping[str, str] | None = None,
+        *,
+        transport: httpx.BaseTransport | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._source = source
+        self._monotonic = monotonic
         self._client = httpx.Client(
             timeout=httpx.Timeout(TIMEOUT_S, connect=5.0),
             follow_redirects=False,
-            headers=dict(headers or {}),
+            headers={**BROWSER_HEADERS, **(headers or {})},
+            transport=transport,
         )
 
     def request(
@@ -94,6 +116,8 @@ class HttpxClient:
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
     ) -> HttpResponse:
+        start = self._monotonic()
+        deadline = start + TIMEOUT_S
         try:
             with self._client.stream(
                 method,
@@ -109,13 +133,15 @@ class HttpxClient:
                     size += len(chunk)
                     if size > MAX_BODY_BYTES:
                         raise Unavailable(self._source, "too_large", resp.status_code)
+                    if self._monotonic() > deadline:
+                        raise Unavailable(self._source, "deadline", resp.status_code)
                     chunks.append(chunk)
                 return HttpResponse(
                     resp.status_code,
                     str(resp.url),
                     dict(resp.headers),
                     b"".join(chunks),
-                    int(resp.elapsed.total_seconds() * 1000),
+                    int((self._monotonic() - start) * 1000),
                 )
         except httpx.TimeoutException as exc:
             raise Unavailable(self._source, "timeout") from exc
@@ -193,6 +219,7 @@ class PacedClient:
         *,
         source: str,
         pace_multiplier: int = 1,
+        deadline: float | None = None,
     ) -> None:
         self._inner = inner
         self._budget = budget
@@ -202,6 +229,7 @@ class PacedClient:
         self._detect_block = detect_block
         self._source = source
         self._pace = pace_multiplier
+        self._deadline = deadline  # plazo blando del ciclo (monotonic): no se reintenta tras él
         self._last_end: float | None = None
         self.used = 0
         self.blocked: BlockKind | None = None
@@ -241,7 +269,7 @@ class PacedClient:
             if attempt == attempts:
                 break
             wait = self._retry_wait(resp, attempt)
-            if wait is None:
+            if wait is None or self._past_deadline(wait):
                 break
             self._sleep(wait)
         raise Unavailable(self._source, "retries_exhausted", last_status)
@@ -275,6 +303,11 @@ class PacedClient:
         remaining = self._last_end + gap - self._monotonic()
         if remaining > 0:
             self._sleep(remaining)
+
+    def _past_deadline(self, wait: float) -> bool:
+        if self._deadline is None:
+            return False
+        return self._monotonic() + wait + TIMEOUT_S > self._deadline
 
     def _retry_wait(self, resp: HttpResponse | None, attempt: int) -> float | None:
         if resp is not None and resp.status == 429:
