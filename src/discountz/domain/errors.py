@@ -43,6 +43,14 @@ class ParseError(DomainError):
         self.loc = loc
 
 
+class UnsafeUrl(DomainError):
+    """Una URL no pasa la lista blanca o tiene una forma peligrosa (userinfo, IP, puerto...)."""
+
+    def __init__(self, code: str = "unsafe_url") -> None:
+        super().__init__(code)
+        self.code = code
+
+
 # Telegram
 class TelegramError(DiscountzError):
     """Error al hablar con la API de Telegram."""
