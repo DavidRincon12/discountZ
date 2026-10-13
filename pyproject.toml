@@ -1,0 +1,81 @@
+[project]
+name = "discountz"
+version = "0.1.0"
+description = "Monitor personal de ofertas con histórico de precios y alertas por Telegram"
+requires-python = "==3.13.*"
+dependencies = [
+    "httpx==0.28.1",
+    "curl_cffi==0.16.3",
+    "selectolax==1.0.0",
+    "defusedxml==0.7.1",
+    "pydantic==2.14.1",
+    "pydantic-settings==2.15.0",
+    "psycopg[binary]==3.3.6",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "hypothesis==6.169.0",
+    "ruff==0.17.0",
+    "mypy==2.4.0",
+    "import-linter==2.15",
+    "pre-commit==4.7.0",
+    "types-defusedxml==0.7.0.20260504",
+]
+
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+required-version = "==0.11.32"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+# ruff 0.17 también formatea bloques de código en Markdown; los docs no se tocan.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "DTZ", "TID", "S", "RUF", "SIM"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"datetime.datetime.now".msg = "Usa el `now` inyectado (solo __main__.py e infra/http.py leen el reloj)."
+"datetime.datetime.utcnow".msg = "Usa el `now` inyectado con tz UTC."
+"datetime.date.today".msg = "Usa el `now` inyectado y conviértelo a fecha de Bogotá."
+"time.time".msg = "Usa `monotonic` inyectado o el `now` del ciclo."
+"random.random".msg = "Usa un `random.Random(seed)` inyectado."
+
+[tool.ruff.lint.per-file-ignores]
+"src/discountz/__main__.py" = ["TID251"]
+"src/discountz/infra/http.py" = ["TID251"]
+"tests/**/*.py" = ["S101", "S603"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+python_version = "3.13"
+
+[tool.importlinter]
+root_package = "discountz"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Capas"
+type = "layers"
+layers = ["discountz.app", "discountz.sources", "discountz.infra", "discountz.domain"]
+
+[[tool.importlinter.contracts]]
+name = "Dominio puro"
+type = "forbidden"
+source_modules = ["discountz.domain"]
+forbidden_modules = [
+    "httpx", "curl_cffi", "psycopg", "selectolax", "pydantic", "pydantic_settings", "defusedxml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requiere Postgres (DISCOUNTZ_TEST_DATABASE_URL)"]
+addopts = "-m 'not integration'"
