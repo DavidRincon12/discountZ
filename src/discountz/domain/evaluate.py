@@ -42,6 +42,7 @@ class ListingState:
     history_reset_at: datetime | None
     last_price_minor: int | None
     hot_until: datetime | None
+    muted_until: datetime | None = None  # máx(listing.muted_until, bot_state.muted_until)
 
 
 @dataclass(frozen=True, slots=True)
