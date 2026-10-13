@@ -33,6 +33,7 @@ from discountz.sources.base import (
     SearchPage,
     SourceContext,
     SourceDescriptor,
+    pack_unit_key,
 )
 from discountz.sources.blocks import detect_block_common
 from discountz.sources.registry import register
@@ -41,7 +42,6 @@ MAX_BATCH = 50
 SEARCH_PER_PRODUCT = 3
 _SKU_RE = re.compile(r"^\d{1,12}$")
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_PACK_RE = re.compile(r"(\d{1,3})[- ]?(pack|count|ct|unidades|und)\b", re.IGNORECASE)
 _HEADERS = {
     "Accept": "application/json",
     "Accept-Language": "es-CO,es;q=0.9",
@@ -133,10 +133,8 @@ def _unit_key(item: _Item, title: str) -> str:
     unit = re.sub(r"[^a-z]", "", item.measurementUnit.lower())[:8] or "un"
     mult = format(Decimal(item.unitMultiplier).normalize(), "f")
     key = f"{unit}|{mult}"
-    pack = _PACK_RE.search(title)
-    if key == "un|1" and pack:
-        return f"pk|{int(pack.group(1))}"
-    return key
+    pack = pack_unit_key(title)
+    return pack if key == "un|1" and pack else key
 
 
 def _seller(item: _Item) -> _Seller | None:

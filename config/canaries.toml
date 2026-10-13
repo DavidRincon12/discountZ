@@ -24,3 +24,9 @@ external_id = "659232"
 title = "Datáfono Bold Plus"
 min_minor = 59600
 max_minor = 238400
+
+[[amazon_us]]
+external_id = "B0BHJF2VRN"
+title = "SSD Samsung 990 PRO 1 TB"
+min_minor = 10399
+max_minor = 41598

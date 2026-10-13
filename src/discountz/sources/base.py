@@ -36,7 +36,16 @@ __all__ = [
     "Source",
     "SourceContext",
     "SourceDescriptor",
+    "pack_unit_key",
 ]
+
+# Regla «Pack» común a todas las tiendas (spec §4.2): `(24 Pack)` ⇒ `pk|24`.
+PACK_RE = re.compile(r"(\d{1,3})[- ]?(pack|count|ct|unidades|und)\b", re.IGNORECASE)
+
+
+def pack_unit_key(title: str) -> str | None:
+    m = PACK_RE.search(title)
+    return f"pk|{int(m.group(1))}" if m else None
 
 
 class Capability(StrEnum):

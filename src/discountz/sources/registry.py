@@ -15,7 +15,7 @@ SOURCES: dict[str, Source] = {}
 
 
 # Módulos de adaptadores que se registran al importarse (crece con cada tienda).
-ADAPTER_MODULES: tuple[str, ...] = ("discountz.sources.vtex",)
+ADAPTER_MODULES: tuple[str, ...] = ("discountz.sources.vtex", "discountz.sources.amazon")
 
 
 def load_all() -> Mapping[str, Source]:

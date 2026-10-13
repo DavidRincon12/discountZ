@@ -91,4 +91,4 @@ addopts = "-m 'not integration'"
 [[tool.importlinter.contracts]]
 name = "Adaptadores independientes"
 type = "independence"
-modules = ["discountz.sources.vtex"]
+modules = ["discountz.sources.vtex", "discountz.sources.amazon"]

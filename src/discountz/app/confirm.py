@@ -40,16 +40,16 @@ def confirm_candidates(c: Collector, r: SourceRun) -> None:
             c.on_error(r, exc)
             _defer(c, cand)
             continue
-        if _matches(cand.offer, reading, c.params.glob.confirm_tol_bp):
+        if matches(cand.offer, reading, c.params.glob.confirm_tol_bp):
             _confirmed(c, cand, storm)
         else:
             _mismatch(c, r, cand, reading)
 
 
-def _matches(offer: Offer, reading: Offer | None, tol_bp: int) -> bool:
+def matches(offer: Offer, reading: Offer | None, tol_bp: int) -> bool:
     if reading is None or reading.price is None or offer.price is None or not reading.in_stock:
         return False
-    if reading.ref != offer.ref:
+    if reading.ref != offer.ref or reading.seller_class is not offer.seller_class:
         return False
     p, q = offer.price.minor, reading.price.minor
     return abs(p - q) * 10_000 <= tol_bp * p
