@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+CLAUDE.local.md
+.worktrees/
+.claude/worktrees/
+.superpowers/
