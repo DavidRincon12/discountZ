@@ -7,16 +7,16 @@
 - Suite: 410 pruebas unitarias y 51 de integración (Postgres) en verde el 2026-10-14.
 
 ## Último cambio
-- Rama `claude/discountz-puesta-en-marcha-mlcmm6`: preparación de la puesta en marcha. `/buscar` rechaza las tiendas sin `Capability.SEARCH` y Newegg la pierde: su búsqueda da CAPTCHA desde la nube y desde la red de David, y su parser solo conoce HTML sintético. `cycle` queda detrás del interruptor `DISCOUNTZ_ACTIVO` para que el cron de respaldo no falle cada 30 min mientras faltan los secretos. README: pasos de `check-config` y de encendido.
+- 2026-10-14: discountZ en producción (Supabase, `DISCOUNTZ_ACTIVO=true`, cron-job.org cada 5 min). Amazon dio CAPTCHA desde Actions en el primer ciclo: vigilar.
+- Rama `claude/discountz-puesta-en-marcha-mlcmm6`: spec del rastreo de catálogo completo con alertas en imagen por temas de Telegram (`docs/superpowers/specs/2026-10-14-rastreo-catalogo-design.md`) y ADR 0004.
 
 ## Siguiente paso
-- David hace la puesta en marcha según `README.md`: bot, Supabase, secretos y `production-db`, `check-config`, migración, `DISCOUNTZ_ACTIVO=true`, primer `cycle` manual y cron-job.org.
-- Con el ciclo en marcha: revisar los primeros runs (Amazon con `curl_cffi`, fichas de Newegg y Best Buy desde Actions) y agregar canarios de Newegg.
-- Reactivar la búsqueda de Newegg solo con una fixture real (el spike desde Actions del 2026-10-13 sí leyó precio).
+- David revisa el spec del rastreo; luego plan (`writing-plans`) e implementación con TDD.
+- David: crear la clave de Best Buy (developer.bestbuy.com) y, si quiere, solicitar la API de afiliados de Walmart (SP-7).
 - Después: SP-6 (canales comunitarios de Telegram: DescuentosTech, Clubgratis, cajitatech).
 
 ## Decisiones vigentes
-- Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003).
+- Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo por corridas horarias (ADR 0004, en diseño).
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero».
 - Si spec y plan difieren, manda spec §0.2 y luego el plan.
 - La confirmación exige ±1 %, stock, misma variante y mismo vendedor; en búsquedas sin vendedor visible (Amazon, Newegg) el vendedor es provisional y la ficha decide.
