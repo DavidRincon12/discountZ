@@ -1,14 +1,15 @@
 """Adaptador de Best Buy US (spec §4.2 «Best Buy»), detrás de la puerta de activación (§4.1).
 
 Ruta principal: JSON-LD `Product.offers` (precio y `availability`). Ruta independiente: el
-precio del héroe en el HTML (`.priceView-hero-price.priceView-customer-price
-span[aria-hidden=true]`), que deja fuera los precios de garantías y de la membresía Plus. Best
-Buy siempre vende: `f`.
+estado de Apollo que la ficha trae en línea (`ApolloSSRDataTransport`): el `customerPrice` del
+`ItemPrice` con el mismo `skuId`, que deja fuera garantías y membresía Plus, y los
+`buttonStates` de compra. La ficha no trae el precio renderizado en HTML. El precio regular sale
+de `displayableRegularPrice`. Best Buy siempre vende: `f`.
 
 Medido el 2026-10-13 desde la nube de la sesión: la búsqueda responde, pero su HTML trae los
 productos SIN precio (llega después por GraphQL) y el único «$49.99» es la membresía Plus (el
-precio constante del spike); las fichas responden 502 o se cuelgan, así que sus fixtures son
-sintéticas. `/site/<sku>.p?skuId=<sku>` redirige a `/product/<slug>/<bsin>`.
+precio constante del spike); las fichas responden 502 o se cuelgan. Sus fixtures se grabaron el
+2026-10-14 desde la red de David. `/site/<sku>.p?skuId=<sku>` redirige a `/product/<slug>/<bsin>`.
 """
 
 from __future__ import annotations
@@ -50,7 +51,9 @@ _SITE_PATH = re.compile(r"^/site/(?:[^/]+/)?(\d{6,8})\.p/?$")
 _PRODUCT_PATH = re.compile(r"^/product/[^/]+/[A-Z0-9]+/sku/(\d{6,8})/?$")
 _JSON_PRICE = re.compile(r"^\d{1,7}(?:\.\d{1,2})?$")
 _IN_STOCK = ("schema.org/InStock", "schema.org/LimitedAvailability")
-_HERO_PRICE = ".priceView-hero-price.priceView-customer-price span[aria-hidden=true]"
+_APOLLO_PRICE = re.compile(rb'\{[^{}]*"customerPrice":(\d{1,7}(?:\.\d{1,2})?)(?![\d.])[^{}]*')
+_REGULAR_PRICE = re.compile(rb'"displayableRegularPrice":(\d{1,7}(?:\.\d{1,2})?)(?![\d.])')
+_BUTTON_STATE = re.compile(rb'"buttonStates":\[\{"buttonState":"([A-Z_]+)"')
 _CELL_PRICE = ".priceView-customer-price span[aria-hidden=true]"
 _HEADERS = {"Accept-Language": "en-US,en;q=0.9"}
 _REDIRECTS = (301, 302, 303, 307, 308)
@@ -124,9 +127,22 @@ def _sold_out(scope: LexborNode | None) -> bool:
     return button is not None and "sold out" in button.lower()
 
 
-def _regular_price(tree: LexborHTMLParser) -> Money | None:
-    node = tree.css_first(".pricing-price__regular-price span")
-    return _html_price(node)
+def _usd(raw: bytes) -> Money:
+    return Money(to_minor(Decimal(raw.decode()), Currency.USD), Currency.USD)
+
+
+def _regular_price(body: bytes) -> Money | None:
+    """`displayableRegularPrice` del estado Apollo, solo si todas sus apariciones coinciden."""
+    found = set(_REGULAR_PRICE.findall(body))
+    return _usd(found.pop()) if len(found) == 1 else None
+
+
+def _apollo_price(body: bytes, sku: str) -> Money | None:
+    marker = b'"skuId":"' + sku.encode() + b'"'
+    found = {m[1] for m in _APOLLO_PRICE.finditer(body) if marker in m[0]}
+    if len(found) > 1:
+        raise ParseError("price_mismatch", loc="apollo.customerPrice")
+    return _usd(found.pop()) if found else None
 
 
 def _offer(
@@ -167,7 +183,7 @@ def parse_bestbuy_detail(body: bytes, sku: str, observed_at: datetime) -> Offer 
         observed,
         title,
         _json_price(offer),
-        _regular_price(tree),
+        _regular_price(body),
         any(marker in offer.availability for marker in _IN_STOCK),
         observed_at,
         ExtractionPath.EMBEDDED_JSON,
@@ -175,18 +191,18 @@ def parse_bestbuy_detail(body: bytes, sku: str, observed_at: datetime) -> Offer 
 
 
 def parse_bestbuy_independent(body: bytes, sku: str, observed_at: datetime) -> Offer | None:
-    """Ruta independiente: el precio del héroe y el botón de compra; `None` si no hay héroe."""
-    tree = LexborHTMLParser(body)
-    price = _html_price(tree.css_first(_HERO_PRICE))
+    """Ruta independiente: precio y botones del estado Apollo; `None` si no hay precio del sku."""
+    price = _apollo_price(body, sku)
     if price is None:
         return None
-    title = _text(tree.css_first(".shop-product-title h1")) or ""
+    title = _text(LexborHTMLParser(body).css_first("h1")) or ""
+    buttons = _BUTTON_STATE.findall(body)
     return _offer(
         sku,
         title,
         price,
-        _regular_price(tree),
-        not _sold_out(tree.css_first(".fulfillment-add-to-cart-button")),
+        _regular_price(body),
+        bool(buttons) and all(b == b"ADD_TO_CART" for b in buttons),
         observed_at,
         ExtractionPath.HTML,
     )

@@ -1,7 +1,7 @@
 """Adaptador Best Buy US (spec §4.2 «Best Buy»).
 
-La búsqueda es real (2026-10-13). Las fichas son SINTÉTICAS (ver su `.meta.json`): desde la
-nube de la sesión las fichas reales responden 502 o se cuelgan.
+La búsqueda es real (2026-10-13) y las fichas también (2026-10-14, grabadas con `record-fixture`
+desde la red de David: desde la nube de la sesión responden 502 o se cuelgan).
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ def test_detail_fixture_matches_expected(sku: str) -> None:
 
 @pytest.mark.parametrize("sku", FICHAS)
 def test_independent_route_matches_main_route(sku: str) -> None:
-    """El precio del HTML coincide con el JSON-LD; el de la garantía ($49.99) nunca entra."""
+    """El precio del estado Apollo coincide con el JSON-LD; el de la garantía nunca entra."""
     exp = expected(f"ficha_{sku}")
     main = parse_bestbuy_detail(body(f"ficha_{sku}"), sku, T)
     o = parse_bestbuy_independent(body(f"ficha_{sku}"), sku, T)
@@ -72,6 +72,34 @@ def test_independent_route_matches_main_route(sku: str) -> None:
     assert o.price == main.price == usd(exp["independent_price"])
     assert o.in_stock is main.in_stock
     assert o.seller_class is SellerClass.FIRST_PARTY
+
+
+_APOLLO = (
+    '<html><h1 class="text-5">Samsung - Internal SSD 990 1TB</h1><script>(window[Symbol.for('
+    '"ApolloSSRDataTransport")] ??= []).push({"events":[{"type":"next","value":{"data":'
+    '{"productBySkuId":{"price":{"__typename":"ItemPrice","customerPrice":PRICE,'
+    '"mobileContracts":null,"skuId":"SKU","totalSavings":40},"displayableRegularPrice":229.99,'
+    '"fulfillmentOptions":{"buttonStates":[{"buttonState":"BUTTON"}]}}}}}]})</script></html>'
+)
+
+
+def _apollo(price: str, sku: str, button: str) -> bytes:
+    html = _APOLLO.replace("PRICE", price).replace("SKU", sku).replace("BUTTON", button)
+    return html.encode()
+
+
+def test_independent_route_reads_apollo_price_of_the_same_sku() -> None:
+    o = parse_bestbuy_independent(_apollo("189.99", "6680742", "ADD_TO_CART"), "6680742", T)
+    assert o is not None
+    assert (o.price, o.list_price, o.in_stock) == (usd(18_999), usd(22_999), True)
+    assert o.title == "Samsung - Internal SSD 990 1TB"
+
+
+def test_independent_route_ignores_other_skus_and_sold_out() -> None:
+    other = _apollo("49.99", "6440012", "ADD_TO_CART")
+    assert parse_bestbuy_independent(other, "6680742", T) is None
+    o = parse_bestbuy_independent(_apollo("189.99", "6680742", "SOLD_OUT"), "6680742", T)
+    assert o is not None and o.in_stock is False and o.price is None
 
 
 def test_real_search_has_no_prices_and_never_the_plus_membership() -> None:
@@ -139,7 +167,7 @@ def test_fetch_follows_one_redirect_to_the_product_page() -> None:
     )
     ctx = SourceContext(fake, NoCredentials(), 1e9, T)
     (out,) = BestBuySource().fetch_listings(ctx, [ListingRef("bestbuy_us", "6680742")])
-    assert isinstance(out, ListingFound) and out.offer.price == usd(9_999)
+    assert isinstance(out, ListingFound) and out.offer.price == usd(18_999)
 
 
 def test_registered_curl_and_gated() -> None:
