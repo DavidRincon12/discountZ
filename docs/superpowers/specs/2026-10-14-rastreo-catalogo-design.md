@@ -312,9 +312,11 @@ CREATE TABLE crawl_lease (source text PRIMARY KEY, holder text NOT NULL, expires
 CREATE TABLE topic (code text PRIMARY KEY, title text NOT NULL, thread_id bigint);
 
 ALTER TABLE outbox ADD COLUMN topic text, ADD COLUMN card jsonb;
+ALTER TABLE watch ADD COLUMN origin text NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual', 'auto')),
+                  ADD COLUMN expires_at timestamptz;
 ```
 
-Más el `INSERT INTO source` de `bestbuy_api` (`enabled=false`) y los permisos de `discountz_app` en las tablas nuevas.
+Más el `INSERT INTO source` de `bestbuy_api` y `walmart_api` (`enabled=false`) y los permisos de `discountz_app` en las tablas nuevas.
 
 ### 7.2 Tamaño frente a 500 MB
 
