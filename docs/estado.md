@@ -23,6 +23,7 @@
 - Slickdeals: un solo task `feed` por ciclo para todas sus búsquedas, sin reserva de confirmación; el lead se lee en el SourceRun de la tienda (se crea si no tenía tareas) y se omite si el listing se leyó hace < 6 h.
 
 ## Pendientes y gotchas
+- Supabase: el migrador necesita `GRANT CREATE ON DATABASE postgres TO discountz_owner` (el `CREATE SCHEMA IF NOT EXISTS` revisa el permiso antes que la existencia) y `postgres` debe ser miembro de `discountz_owner` para cederle el esquema. Varios intentos con clave errada pueden dar timeouts pasajeros en el pooler.
 - Postgres en la nube: `service postgresql start` y, si pide clave, `ALTER USER postgres PASSWORD 'postgres'`.
 - Desde la nube de la sesión: Newegg da 403 CAPTCHA (httpx y curl_cffi) y las fichas de Best Buy 502/timeout; Amazon con `curl_cffi` recibe el intersticial de Akamai (fixtures con httpx).
 - La búsqueda de Newegg (`/p/pl?d=…`) da 403 CAPTCHA también desde la red de David, con ambos clientes: está desactivada y su fixture sigue sintética. Las fichas sí responden. No intentar sortear el CAPTCHA.

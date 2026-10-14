@@ -19,12 +19,14 @@ Se hace una sola vez. Cada paso dice dónde se hace y qué se guarda.
 
 1. Crea un proyecto gratuito en [Supabase](https://supabase.com/) (región `us-east-1`).
 2. En *Project Settings → Data API*, **apaga** la Data API: discountZ no la usa.
-3. En el editor SQL, crea el esquema y los dos roles (cambia las claves por valores aleatorios de 32+ caracteres):
+3. En el editor SQL, crea el esquema y los dos roles (cambia las claves por valores aleatorios de 32+ caracteres, solo letras y números para no tener que codificarlos en la URL):
 
    ```sql
    CREATE SCHEMA discountz;
    CREATE ROLE discountz_owner LOGIN PASSWORD '<clave-migrador>';   -- dueño del esquema, sin superusuario
+   GRANT discountz_owner TO postgres;                    -- para poder cederle el esquema
    ALTER SCHEMA discountz OWNER TO discountz_owner;
+   GRANT CREATE ON DATABASE postgres TO discountz_owner;  -- `CREATE SCHEMA IF NOT EXISTS` del migrador lo exige
    CREATE ROLE discountz_app LOGIN PASSWORD '<clave-app>';          -- el ciclo: solo DML
    ALTER ROLE discountz_app SET search_path = discountz;
    ALTER ROLE discountz_app SET timezone = 'UTC';
