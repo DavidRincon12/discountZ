@@ -1,7 +1,7 @@
 # discountZ: rastreo de catálogo completo y alertas con imagen (spec de diseño)
 
 - Fecha: 2026-10-14
-- Estado: diseño aprobado en conversación; pendiente de revisión del documento
+- Estado: aprobado por David el 2026-10-14 (con E7 y E8)
 - Autor: David Santiago Rincón Bautista
 - Base: `docs/superpowers/specs/2026-10-13-discountz-v1-design.md` (v1). Donde este spec no dice nada, manda la v1.
 
@@ -21,6 +21,8 @@ La v1 solo vigila lo que David pide (`/seguir` y `/buscar`, D4). Ahora discountZ
 | E4 | Cada alerta es una **imagen** con la foto del producto y el precio actual, al estilo de los canales de ofertas (PROMOCAJITA, Club de los gratis, DescuentosTech). |
 | E5 | Todas las tiendas, no solo Éxito y Carulla. Las de EE. UU. son las que más le importan. |
 | E6 | Nunca sortear CAPTCHA ni la detección de bots. EE. UU. entra **solo por vías oficiales** (APIs) y por Slickdeals. |
+| E7 | Best Buy por su API se implementa ahora; Walmart por su API de afiliados queda **lista para activar** cuando aprueben a David. |
+| E8 | Ampliar todo lo posible la cobertura de `/seguir` en las tiendas sin catálogo (Amazon, Newegg, Walmart) (§4.4). |
 
 E1 reemplaza el alcance de D4 de la v1 (que se conserva y se amplía).
 
@@ -43,7 +45,7 @@ E1 reemplaza el alcance de D4 de la v1 (que se conserva y se amplía).
 | Tienda | Vía | Estado en este spec |
 |---|---|---|
 | Best Buy | **API oficial** `api.bestbuy.com/v1` con clave gratuita de developer.bestbuy.com | **Incluida**: catálogo completo y cambios por `priceUpdateDate` |
-| Walmart | API de afiliados (walmart.io + programa de afiliados), requiere aprobación | Sub-proyecto SP-7: se conecta si aprueban a David |
+| Walmart | API de afiliados (walmart.io + programa de afiliados), requiere aprobación | **Lista para activar** (E7): adaptador `walmart_api` apagado hasta tener credenciales (§4.5) |
 | Amazon | Creators API (sucesora de PA-API 5 desde 2026-04-30): exige ventas referidas cada 30 días | Fuera: no viable sin ventas. Keepa es de pago. Cubierta por Slickdeals y `/seguir` |
 | Newegg | Sin API pública | Fichas individuales con `/seguir` (v1); sin catálogo |
 | Slickdeals | RSS (v1) | Todas sus categorías, al tema «🇺🇸 Comunidad EE. UU.» |
@@ -185,6 +187,24 @@ El candidato confirmado se convierte en `listing` de la v1 (`upsert_listing`, or
 ### 4.3 Datos de la tarjeta
 
 En la confirmación se leen título, URL de la ficha y URL de la foto (VTEX: `items[].images[0].imageUrl`; Best Buy: `image`). Se guardan en la fila de la `outbox` (`card` JSONB: tienda, tema, título, precio, `U`, `drop_bp`, días de mínimo, URL de foto). La imagen se genera en la entrega.
+
+### 4.4 Más cobertura con `/seguir` (E8)
+
+Para Amazon, Newegg y Walmart no hay catálogo, así que discountZ acumula histórico de todos los productos que pueda leer de forma legítima:
+
+- **Seguimiento automático desde Slickdeals:** cada lead que se resuelve a un producto de una tienda (hoy, Amazon por `data-aps-asin`) crea un seguimiento automático (`watch.origin = 'auto'`) sin objetivo. Vence a los 30 días sin alerta. Tope por tienda (`[sources.<code>] max_auto_watches`, Amazon 300), los más nuevos primero. Así esos productos ya tienen histórico la próxima vez que bajen.
+- **`/seguir` en lote:** hasta 20 URLs por mensaje (antes 5), una por línea. Los enlaces cortos (`a.co`, `amzn.to`) se siguen resolviendo como en la v1.
+- **Botón «Seguir»** en cada tarjeta del catálogo y de la comunidad (v1 `fol:L…`).
+- **Best Buy por API:** una URL de Best Buy en `/seguir` se lee por la API (`products/<sku>.json`) en lugar del HTML, que bloquea desde Actions.
+- **Walmart por API** cuando se active (§4.5); mientras tanto sigue el adaptador HTML de la v1 detrás de `/fuente on`.
+- `/lista` distingue los seguimientos automáticos (`a12`) de los manuales (`p12`); `/dejar a12` y `/dejar auto` (todos) los quitan.
+- Todo dentro del presupuesto por fuente de la v1: si Amazon da CAPTCHA, el circuit breaker la detiene igual que hoy (E6).
+
+### 4.5 Walmart lista para activar (E7)
+
+- Fuente `walmart_api` (USD), `enabled=false`, con `fetch_listings` por `itemId` (`/api-proxy/service/affil/product/v2/items?ids=…`, hasta 20 por petición) y búsqueda (`/search`), firmada con la clave privada RSA según la documentación de walmart.io (cabeceras `WM_CONSUMER.ID`, `WM_CONSUMER.INTIMESTAMP`, `WM_SEC.KEY_VERSION`, `WM_SEC.AUTH_SIGNATURE`).
+- Secretos: `WALMART_CONSUMER_ID`, `WALMART_KEY_VERSION`, `WALMART_PRIVATE_KEY` (PEM) y `WALMART_PUBLISHER_ID`. `check-config` valida que estén los cuatro o ninguno.
+- Fixtures sintéticas marcadas con `"nota"` construidas desde la documentación pública; al aprobarse el acceso, David graba fixtures reales y se activa con `/fuente on walmart_api`. Si la API resulta tener una paginación de catálogo útil, el rastreo de §2 se le agrega sin tocar el núcleo.
 
 ---
 
@@ -345,6 +365,6 @@ Se entregan como pasos de copiar y pegar en el README y en la guía.
 ## 12. Fuera de alcance
 
 - Amazon por API (exige ventas de afiliado); Keepa (de pago).
-- Walmart: SP-7 cuando aprueben la API de afiliados.
+- Rastreo del catálogo completo de Walmart (solo cuando su API esté activa y se mida).
 - Otras tiendas de Colombia (Alkosto, Falabella, Mercado Libre): siguen como SP-1 a SP-3 de la v1.
 - Productos agotados: no se rastrean; vuelven a entrar cuando reaparecen con stock en una vuelta.

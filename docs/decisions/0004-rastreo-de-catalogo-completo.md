@@ -11,7 +11,7 @@ David quiere enterarse de cualquier bajada de precio de las tiendas sin elegir p
 - Un caso de uso nuevo `crawl` (CLI y workflow `crawl.yml`) separado del ciclo de 5 min: un job por tienda en matriz, disparado cada hora desde cron-job.org, de hasta ~45 min, que reanuda una vuelta completa desde un cursor en la BD y antes relee una capa caliente (productos que cambiaron en 7 días).
 - Por producto solo se guardan números (precio, precio habitual, mínimo, fechas, EAN y tema); título y foto se leen al alertar. Del historial, solo los cambios de precio por 90 días.
 - El descuento se mide contra el precio habitual observado por discountZ; nunca contra el `ListPrice` de la tienda.
-- EE. UU. entra solo por APIs oficiales: Best Buy (clave gratuita) ahora; Walmart si aprueban la API de afiliados; Amazon queda en Slickdeals y `/seguir`.
+- EE. UU. entra solo por APIs oficiales: Best Buy (clave gratuita) ahora; Walmart queda lista para activar con su API de afiliados; Amazon queda en Slickdeals y `/seguir`.
 - Las alertas del catálogo se confirman releyendo la ficha y se publican como imagen generada con Pillow en el tema de su categoría de un supergrupo de Telegram; la entrega la hace el ciclo de 5 min para respetar el ritmo de Telegram.
 
 ## Alternativas consideradas
