@@ -36,6 +36,7 @@ Estado actual, siguiente paso y pendientes en `docs/estado.md`: léelo al empeza
 - Logs con lista blanca de campos: nunca URLs con query, cuerpos, mensajes de pydantic/psycopg ni secretos.
 - ruff 0.17 formatea Markdown: `docs/` está en `extend-exclude`.
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero».
+- Producción: el job de `cycle` solo corre con la variable de Actions `DISCOUNTZ_ACTIVO=true`. `/buscar` exige `Capability.SEARCH` (Newegg no la tiene).
 - Fixtures marcadas con `"nota"` en su `.meta.json` son sintéticas (hoy solo la búsqueda de Newegg, que da CAPTCHA en todas las redes probadas). `record-fixture` no sigue redirecciones: grabar la URL final.
 
 ## Reglas de David (prevalecen sobre las skills, incluida superpowers)
