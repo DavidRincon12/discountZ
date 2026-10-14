@@ -7,8 +7,10 @@ de la misma página, con otro parser. «Sold by Newegg» da `f`; el buy box de u
 puede ser de un tercero.
 
 Las fichas se grabaron el 2026-10-14 desde la red de David (`/p/<item>` responde 301 hacia
-`/<slug>/p/<item>`). La búsqueda sigue sintética: Newegg responde 403 con su CAPTCHA a la nube
-de la sesión y a la red de David (el spike desde Actions dio 12/12).
+`/<slug>/p/<item>`). La búsqueda (`/p/pl`) está desactivada: sin `Capability.SEARCH`, `/buscar`
+la rechaza. Responde 403 con su CAPTCHA a la nube de la sesión y a la red de David, así que su
+fixture sigue sintética y el parser nunca vio HTML real (el spike desde Actions del 2026-10-13
+sí leyó precio 12/12). Reactivarla exige una fixture real.
 """
 
 from __future__ import annotations
@@ -272,7 +274,8 @@ class NeweggSource:
             currency=Currency.USD,
             hosts=frozenset({"www.newegg.com", "newegg.com"}),
             client="httpx",
-            capabilities=frozenset({Capability.DETAIL, Capability.SEARCH, Capability.CONFIRM}),
+            # Sin SEARCH: ver el docstring del módulo.
+            capabilities=frozenset({Capability.DETAIL, Capability.CONFIRM}),
             max_batch=1,
             external_id_re=ITEM_RE,
         )

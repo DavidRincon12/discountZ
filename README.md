@@ -52,11 +52,29 @@ En *Settings → Secrets and variables → Actions* del repo:
 
 Luego, en *Settings → Environments*, crea el environment **`production-db`** con tu usuario como revisor obligatorio y agrégale el secreto `DATABASE_URL_MIGRATOR` (URL del rol `discountz_owner`).
 
-### 4. Migración inicial
+### 4. Comprobar la configuración
+
+En tu PC, con las mismas variables que usará el ciclo (PowerShell):
+
+```powershell
+$env:DISCOUNTZ_DATABASE_URL = "<URL del rol discountz_app>"
+$env:DISCOUNTZ_TELEGRAM_BOT_TOKEN = "<token>"
+$env:DISCOUNTZ_TELEGRAM_CHAT_ID = "<chat_id>"
+$env:DISCOUNTZ_TELEGRAM_OWNER_ID = "<owner_id>"
+uv run python -m discountz check-config
+```
+
+Debe imprimir `check-config: OK (…)`. Cierra la ventana al terminar para no dejar las claves en la sesión.
+
+### 5. Migración inicial
 
 *Actions → migrate → Run workflow*, con `to = head`. Apruébala cuando GitHub te lo pida (environment `production-db`). Es el único workflow que cambia el esquema; el ciclo nunca migra y se salta con aviso si la versión no coincide.
 
-### 5. Disparo externo cada 5 minutos
+### 6. Encender el ciclo
+
+El workflow `cycle` se omite mientras no exista el interruptor. Cuando la migración haya terminado, en *Settings → Secrets and variables → Actions → Variables* crea la variable **`DISCOUNTZ_ACTIVO`** con valor `true` y lanza *Actions → cycle → Run workflow* una vez: el run debe quedar en verde y, en el ciclo siguiente, el bot debe responder a `/estado`. Para apagarlo, cambia el valor a `false`.
+
+### 7. Disparo externo cada 5 minutos
 
 El `schedule` de GitHub (cada 30 min, `7,37 * * * *`) es solo el respaldo; el ritmo real lo da [cron-job.org](https://cron-job.org/):
 
@@ -69,7 +87,7 @@ El `schedule` de GitHub (cada 30 min, `7,37 * * * *`) es solo el respaldo; el ri
 
 El workflow `keepalive` reactiva cada lunes los workflows programados para que GitHub no los apague a los 60 días.
 
-### 6. Primer seguimiento
+### 8. Primer seguimiento
 
 En Telegram: `/seguir https://www.exito.com/<producto>/p`. El bot responde en el siguiente ciclo (10-40 min). `/ayuda` lista todos los comandos.
 

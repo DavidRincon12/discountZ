@@ -10,6 +10,8 @@ concurrency:
   cancel-in-progress: false          # nunca matar un ciclo a mitad; GitHub deja 1 pendiente
 jobs:
   cycle:
+    # Interruptor de producción: sin la variable `DISCOUNTZ_ACTIVO=true` el ciclo se omite.
+    if: vars.DISCOUNTZ_ACTIVO == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15              # plazo blando 480 s, duro 12 min; lease TTL 16 min
     steps:

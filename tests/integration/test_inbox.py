@@ -237,6 +237,13 @@ def test_target_category_silence_source_and_list(db: psycopg.Connection) -> None
     assert "No encontré p999" in texts[-1]
 
 
+def test_search_rejected_on_source_without_search(db: psycopg.Connection) -> None:
+    run(db, [[msg(1, "/buscar newegg ssd 1tb")]])
+    assert count(db, "search") == 0
+    (reply,) = replies(db)
+    assert "no admite /buscar" in reply
+
+
 def test_status_command_replies_with_pre(db: psycopg.Connection) -> None:
     run(db, [[msg(1, "/estado")]])
     (reply,) = replies(db)

@@ -25,8 +25,8 @@ from discountz.domain.model import ListingRef
 from discountz.domain.money import Currency, parse_price
 from discountz.infra import db
 from discountz.infra.telegram import CallbackQuery, IncomingMessage, TelegramApi, Update
-from discountz.sources.base import NeedsResolution, Source
-from discountz.sources.registry import route_url
+from discountz.sources.base import Capability, NeedsResolution, Source
+from discountz.sources.registry import SOURCES, route_url
 
 log = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ def _handle_message(
         case c.Follow():
             return [_follow(conn, cmd, m.message_id, now, sources)]
         case c.Search():
-            return [_search(conn, cmd, now)]
+            return [_search(conn, cmd, now, sources)]
         case c.ListCmd(filter=flt):
             return _list(conn, flt)
         case c.Drop(ref):
@@ -266,7 +266,14 @@ def _price(text: str | None, currency: Currency) -> int | None:
     return None if text is None else parse_price(text, currency)
 
 
-def _search(conn: psycopg.Connection, cmd: c.Search, now: datetime) -> str:
+def _search(
+    conn: psycopg.Connection, cmd: c.Search, now: datetime, sources: Mapping[str, Source] | None
+) -> str:
+    source = (SOURCES if sources is None else sources).get(cmd.source)
+    d = source.descriptor if source is not None else None
+    if d is not None and d.kind == "store" and Capability.SEARCH not in d.capabilities:
+        name = esc(source_name(cmd.source))
+        return f"{name} no admite /buscar; usa /seguir con la URL del producto."
     currency = db.source_currency(conn, cmd.source)
     if currency is None:
         return f"No conozco la fuente {esc(cmd.source)}."
