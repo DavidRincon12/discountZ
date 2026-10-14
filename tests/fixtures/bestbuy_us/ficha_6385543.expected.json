@@ -1,11 +1,11 @@
 {
   "external_id": "6385543",
   "title": "PNY - CS900 1TB Internal SSD SATA",
-  "price": null,
-  "list_price": null,
-  "in_stock": false,
+  "price": 14999,
+  "list_price": 19999,
+  "in_stock": true,
   "seller_class": "f",
   "unit_key": "un|1",
   "url_path": "/site/6385543.p?skuId=6385543",
-  "independent_price": null
+  "independent_price": 14999
 }

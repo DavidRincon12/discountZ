@@ -2,5 +2,5 @@
   "status": 200,
   "url": "https://www.newegg.com/p/pl",
   "recorded_at": "2026-10-13",
-  "nota": "sintética: Newegg responde 403 CAPTCHA desde la nube de la sesión; regrabar con record-fixture"
+  "nota": "sintética: Newegg responde 403 CAPTCHA a la búsqueda desde la nube de la sesión y desde la red de David (2026-10-14), con httpx y con curl_cffi"
 }

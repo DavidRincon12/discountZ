@@ -1,11 +1,14 @@
 """Adaptador de Newegg (spec §4.2 «Newegg», §4.3 y §3.6).
 
-Ruta principal: el JSON-LD `Product.offers` de la ficha. Ruta independiente: el HTML del buy
-box (`.product-buy-box .price-current`, `<strong>` + `<sup>`) de la misma página, con otro
-parser. «Sold by Newegg» da `f`.
+Ruta principal: `window.__initialState__.ItemDetail` de la ficha (`FinalPrice`, `Instock`,
+`Seller.SellerName`, `Description.Title`); la ficha real ya no trae JSON-LD `Product`. Ruta
+independiente: el HTML del buy box (`.price-current_2026`, `<strong>` + `<sup>`, y «Sold by»)
+de la misma página, con otro parser. «Sold by Newegg» da `f`; el buy box de un Item# `N82E…`
+puede ser de un tercero.
 
-Las fixtures son sintéticas: Newegg responde 403 con su página CAPTCHA a la nube de la sesión
-de desarrollo (el spike desde Actions dio 12/12). Se regraban con `record-fixture`.
+Las fichas se grabaron el 2026-10-14 desde la red de David (`/p/<item>` responde 301 hacia
+`/<slug>/p/<item>`). La búsqueda sigue sintética: Newegg responde 403 con su CAPTCHA a la nube
+de la sesión y a la red de David (el spike desde Actions dio 12/12).
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, ValidationError
 from selectolax.lexbor import LexborHTMLParser, LexborNode
 
-from discountz.domain.errors import ParseError, SourceError
+from discountz.domain.errors import NotFound, ParseError, SourceError
 from discountz.domain.guards import check_currency_text
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money, parse_price, to_minor
@@ -47,9 +50,11 @@ _PATH_ITEM = re.compile(r"^/(?:[^/]+/)?p/([A-Z0-9]{8,20})/?$")
 _HREF_ITEM = re.compile(r"/p/([A-Z0-9]{8,20})(?:[/?#]|$)")
 _JSON_PRICE = re.compile(r"^\d{1,7}(?:\.\d{1,2})?$")
 _FIRST_PARTY = "newegg"
-_IN_STOCK = ("schema.org/InStock", "schema.org/LimitedAvailability")
+_STATE_PREFIX = "window.__initialState__"
+_BOX_PRICE = ".price-current_2026, .product-price .price-current"
 _HEADERS = {"Accept-Language": "en-US,en;q=0.9"}
 _CAPTCHA_PATHS = ("/areyouahuman",)
+_REDIRECTS = (301, 302, 303, 307, 308)
 
 Number = Decimal | int | str
 
@@ -59,20 +64,18 @@ class _Model(BaseModel):
 
 
 class _Seller(_Model):
-    name: str = ""
+    SellerName: str = ""
 
 
-class _Offer(_Model):
-    price: Number | None = None
-    priceCurrency: str = "USD"
-    availability: str = ""
-    seller: _Seller | None = None
+class _Description(_Model):
+    Title: str
 
 
-class _Product(_Model):
-    name: str
-    sku: str = ""
-    offers: _Offer | list[_Offer]
+class _ItemDetail(_Model):
+    FinalPrice: Number | None = None
+    Instock: bool = False
+    Seller: _Seller | None = None
+    Description: _Description
 
 
 def _tree(body: bytes) -> LexborHTMLParser:
@@ -96,32 +99,35 @@ def _seller_class(name: str | None) -> SellerClass:
     )
 
 
-def _product(tree: LexborHTMLParser) -> _Product:
-    """El primer bloque JSON-LD de tipo `Product`; sin él la página no es una ficha."""
-    for node in tree.css('script[type="application/ld+json"]'):
-        try:
-            data = json.loads(node.text(strip=False), parse_float=Decimal)
-        except (ValueError, RecursionError):
+def _item_detail(tree: LexborHTMLParser) -> _ItemDetail:
+    """`ItemDetail` del estado inicial de la página; sin él la página no es una ficha."""
+    for node in tree.css("script"):
+        text = node.text(strip=False).strip()
+        if not text.startswith(_STATE_PREFIX):
             continue
-        if isinstance(data, dict) and data.get("@type") == "Product":
-            try:
-                return _Product.model_validate(data)
-            except ValidationError as exc:
-                first = exc.errors(include_input=False, include_url=False)[0]
-                loc = ".".join(str(p) for p in first.get("loc", ()))[:60]
-                raise ParseError("schema", loc=loc or None) from None
-    raise ParseError("no_product_ld", loc="ld+json")
+        raw = text[len(_STATE_PREFIX) :].lstrip(" =").rstrip("; \n")
+        try:
+            data = json.loads(raw, parse_float=Decimal)
+        except (ValueError, RecursionError):
+            raise ParseError("bad_state", loc="__initialState__") from None
+        detail = data.get("ItemDetail") if isinstance(data, dict) else None
+        if not isinstance(detail, dict):
+            break
+        try:
+            return _ItemDetail.model_validate(detail)
+        except ValidationError as exc:
+            first = exc.errors(include_input=False, include_url=False)[0]
+            loc = ".".join(str(p) for p in first.get("loc", ()))[:60]
+            raise ParseError("schema", loc=loc or None) from None
+    raise ParseError("no_item_detail", loc="__initialState__")
 
 
-def _json_price(offer: _Offer) -> Money | None:
-    if offer.priceCurrency != "USD":
-        raise ParseError("currency", loc="offers.priceCurrency")
-    raw = offer.price
+def _json_price(raw: Number | None) -> Money | None:
     if raw is None:
         return None
     if isinstance(raw, str):
         if not _JSON_PRICE.fullmatch(raw.strip()):
-            raise ParseError("bad_price", loc="offers.price")
+            raise ParseError("bad_price", loc="ItemDetail.FinalPrice")
         raw = Decimal(raw.strip())
     minor = to_minor(Decimal(raw), Currency.USD)
     return Money(minor, Currency.USD) if minor > 0 else None
@@ -170,36 +176,35 @@ def _offer(
     )
 
 
-def _observed_item(sku: str, item: str) -> str:
-    return sku if ITEM_RE.fullmatch(sku) else item
-
-
 def parse_newegg_detail(body: bytes, item: str, observed_at: datetime) -> Offer | None:
-    """Ficha por JSON-LD. Sin `Product` es `ParseError` (página que no es una ficha)."""
+    """Ficha por `__initialState__`. Sin `ItemDetail` es `ParseError` (no es una ficha)."""
     tree = _tree(body)
-    product = _product(tree)
-    if isinstance(product.offers, list) and not product.offers:
-        raise ParseError("no_offers", loc="offers")
-    offer = product.offers[0] if isinstance(product.offers, list) else product.offers
-    title = " ".join(product.name.split())
+    detail = _item_detail(tree)
+    title = " ".join(detail.Description.Title.split())
     check_currency_text(title, Currency.USD)
-    price = _json_price(offer)
-    in_stock = any(marker in offer.availability for marker in _IN_STOCK)
     return _offer(
-        _observed_item(product.sku, item),
+        item,
         title,
-        price,
+        _json_price(detail.FinalPrice),
         _list_price(_buy_box(tree)),
-        in_stock,
-        _seller_class(offer.seller.name if offer.seller else None),
+        detail.Instock,
+        _seller_class(detail.Seller.SellerName if detail.Seller else None),
         observed_at,
         ExtractionPath.EMBEDDED_JSON,
     )
 
 
 def _html_seller(box: LexborNode) -> SellerClass:
-    node = box.css_first(".product-seller strong")
-    return _seller_class(_text(node))
+    link = box.css_first(".product-seller-sold-by a[title]")
+    if link is not None:
+        return _seller_class(link.attributes.get("title"))
+    return _seller_class(_text(box.css_first(".product-seller strong")))
+
+
+def _html_in_stock(box: LexborNode) -> bool:
+    inventory = (_text(box.css_first(".product-inventory")) or "").lower()
+    button = (_text(box.css_first(".btn-primary")) or "").lower()
+    return "out of stock" not in inventory and "add to cart" in button
 
 
 def parse_newegg_independent(body: bytes, item: str, observed_at: datetime) -> Offer | None:
@@ -208,15 +213,14 @@ def parse_newegg_independent(body: bytes, item: str, observed_at: datetime) -> O
     box = _buy_box(tree)
     if box is None:
         return None
-    price = _html_price(box.css_first(".product-price .price-current"))
-    inventory = (_text(box.css_first(".product-inventory")) or "").lower()
+    price = _html_price(box.css_first(_BOX_PRICE))
     title = _text(tree.css_first("h1.product-title")) or ""
     return _offer(
         item,
         title,
         price,
         _list_price(box),
-        "out of stock" not in inventory,
+        _html_in_stock(box),
         _html_seller(box),
         observed_at,
         ExtractionPath.HTML,
@@ -284,7 +288,16 @@ class NeweggSource:
         raise ParseError("no_resolution")  # Newegg no usa enlaces cortos
 
     def _get(self, ctx: SourceContext, item: str) -> bytes:
+        """`/p/<item>` redirige a `/<slug>/p/<item>`: un salto, validado a mano."""
         resp = ctx.http.request("GET", f"{BASE}/p/{item}", headers=_HEADERS)
+        if resp.status in _REDIRECTS:
+            location = {k.lower(): v for k, v in resp.headers.items()}.get("location", "")
+            parts = urlsplit(location)
+            ok_host = parts.netloc in ("", "www.newegg.com") and parts.scheme in ("", "https")
+            m = _PATH_ITEM.match(parts.path)
+            if not ok_host or m is None or m.group(1) != item:
+                raise NotFound(CODE, "bad_redirect")
+            resp = ctx.http.request("GET", f"{BASE}{parts.path}", headers=_HEADERS)
         self._bodies[item] = resp.body
         return resp.body
 
