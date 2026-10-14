@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, ValidationError
 from selectolax.lexbor import LexborHTMLParser, LexborNode
 
-from discountz.domain.errors import ParseError, SourceError
+from discountz.domain.errors import NotFound, ParseError, SourceError
 from discountz.domain.guards import check_currency_text
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money, parse_price, to_minor
@@ -50,6 +50,7 @@ _FIRST_PARTY = "newegg"
 _IN_STOCK = ("schema.org/InStock", "schema.org/LimitedAvailability")
 _HEADERS = {"Accept-Language": "en-US,en;q=0.9"}
 _CAPTCHA_PATHS = ("/areyouahuman",)
+_REDIRECTS = (301, 302, 303, 307, 308)
 
 Number = Decimal | int | str
 
@@ -284,7 +285,16 @@ class NeweggSource:
         raise ParseError("no_resolution")  # Newegg no usa enlaces cortos
 
     def _get(self, ctx: SourceContext, item: str) -> bytes:
+        """`/p/<item>` redirige a `/<slug>/p/<item>`: un salto, validado a mano."""
         resp = ctx.http.request("GET", f"{BASE}/p/{item}", headers=_HEADERS)
+        if resp.status in _REDIRECTS:
+            location = {k.lower(): v for k, v in resp.headers.items()}.get("location", "")
+            parts = urlsplit(location)
+            ok_host = parts.netloc in ("", "www.newegg.com") and parts.scheme in ("", "https")
+            m = _PATH_ITEM.match(parts.path)
+            if not ok_host or m is None or m.group(1) != item:
+                raise NotFound(CODE, "bad_redirect")
+            resp = ctx.http.request("GET", f"{BASE}{parts.path}", headers=_HEADERS)
         self._bodies[item] = resp.body
         return resp.body
 

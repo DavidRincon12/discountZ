@@ -151,6 +151,40 @@ def test_fetch_listings_reads_canonical_url() -> None:
     assert out.offer.price == usd(16999)
 
 
+def test_fetch_follows_one_redirect_to_the_slug_url() -> None:
+    """`/p/<item>` responde 301 sin cuerpo hacia `/<slug>/p/<item>` (medido el 2026-10-14)."""
+    short = "https://www.newegg.com/p/N82E16820147861"
+    target = "https://www.newegg.com/samsung-990-evo/p/N82E16820147861"
+    fake = FakeHttp(
+        {
+            short: HttpResponse(301, short, {"Location": target}, b"", 1),
+            target: load_fixture("newegg", "ficha_N82E16820147861"),
+        }
+    )
+    ctx = SourceContext(fake, NoCredentials(), 1e9, T)
+    (out,) = NeweggSource().fetch_listings(ctx, [ListingRef("newegg", "N82E16820147861")])
+    assert isinstance(out, ListingFound)
+    assert out.offer.price == usd(16999)
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "https://evil.example/samsung/p/N82E16820147861",
+        "http://www.newegg.com/samsung/p/N82E16820147861",
+        "https://www.newegg.com/samsung/p/N82E16814137771",
+        "https://www.newegg.com/areyouahuman?itn=1",
+    ],
+)
+def test_fetch_rejects_redirects_off_the_same_item(location: str) -> None:
+    short = "https://www.newegg.com/p/N82E16820147861"
+    fake = FakeHttp({short: HttpResponse(301, short, {"location": location}, b"", 1)})
+    ctx = SourceContext(fake, NoCredentials(), 1e9, T)
+    (out,) = NeweggSource().fetch_listings(ctx, [ListingRef("newegg", "N82E16820147861")])
+    assert not isinstance(out, ListingFound)
+    assert len(fake.calls) == 1
+
+
 def test_confirm_reuses_the_detail_body() -> None:
     url = "https://www.newegg.com/p/N82E16820147861"
     fake = FakeHttp({url: load_fixture("newegg", "ficha_N82E16820147861")})
