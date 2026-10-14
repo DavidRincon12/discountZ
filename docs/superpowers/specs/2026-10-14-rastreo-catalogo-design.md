@@ -45,7 +45,7 @@ E1 reemplaza el alcance de D4 de la v1 (que se conserva y se amplía).
 | Tienda | Vía | Estado en este spec |
 |---|---|---|
 | Best Buy | **API oficial** `api.bestbuy.com/v1` con clave gratuita de developer.bestbuy.com | **Incluida**: catálogo completo y cambios por `priceUpdateDate` |
-| Walmart | API de afiliados (walmart.io + programa de afiliados), requiere aprobación | **Lista para activar** (E7): adaptador `walmart_api` apagado hasta tener credenciales (§4.5) |
+| Walmart | API de afiliados (walmart.io + programa de afiliados), requiere aprobación | **Lista para activar** (E7): `walmart_us` usa la API cuando hay credenciales (§4.5) |
 | Amazon | Creators API (sucesora de PA-API 5 desde 2026-04-30): exige ventas referidas cada 30 días | Fuera: no viable sin ventas. Keepa es de pago. Cubierta por Slickdeals y `/seguir` |
 | Newegg | Sin API pública | Fichas individuales con `/seguir` (v1); sin catálogo |
 | Slickdeals | RSS (v1) | Todas sus categorías, al tema «🇺🇸 Comunidad EE. UU.» |
@@ -64,7 +64,7 @@ Se mantiene el monolito síncrono `app → sources → infra → domain` (ADR 00
 | `domain/topics.py` | domain | Puro: temas, umbrales por tema y asignación ruta de categoría de la tienda → tema |
 | `sources/base.py` | sources | `Capability.CATALOG` y protocolo `CatalogSource` (§2.1) |
 | `sources/vtex.py` | sources | `VtexSource` implementa `CatalogSource` (partición por hoja del árbol de categorías) |
-| `sources/bestbuy_api.py` | sources | Fuente nueva `bestbuy_api` (USD) con `CatalogSource` y `fetch_listings` por SKU |
+| `sources/bestbuy.py` | sources | `bestbuy_us` pasa del HTML (bloqueado desde Actions) a la API oficial: `CatalogSource`, `fetch_listings` y búsqueda por SKU/texto. Mismo código de fuente, así se conserva su histórico |
 | `infra/card.py` | infra | Genera la tarjeta PNG con Pillow (§5.2) |
 | `infra/telegram.py` | infra | `send_photo`, `create_forum_topic` y `message_thread_id` en todos los envíos |
 | `infra/db.py` | infra | Repositorio del catálogo, cursores y temas |
@@ -72,7 +72,7 @@ Se mantiene el monolito síncrono `app → sources → infra → domain` (ADR 00
 | `app/deliver.py` | app | Entrega con foto y tema (§5) |
 | `config/topics.toml` | config | Temas, umbrales y reglas de asignación |
 
-Dependencias nuevas: `pillow` (fijada con `==`) y una fuente tipográfica OFL (Inter) versionada en `assets/fonts/` con su licencia.
+Dependencias nuevas: `pillow` y `cryptography` (firma RSA de Walmart), fijadas con `==`, y una fuente tipográfica OFL (Inter) versionada en `assets/fonts/` con su licencia.
 
 ### 1.2 Comandos de la CLI
 
@@ -109,7 +109,7 @@ class CatalogObservation:
 Título, foto y URL **no se guardan**: se leen al alertar (§4.3).
 
 - **VTEX:** particiones = hojas de `/api/catalog_system/pub/category/tree/<n>`; si una hoja pasa de 2.500 productos (tope de paginación), se divide por rango de precio (`fq=P:[a TO b]`). Página = `products/search?fq=C:/<id>/&fq=isAvailablePerSalesChannel_1:1&_from&_to` de 50. Éxito y Carulla siguen el 308 a `/io/api/...` (como la v1).
-- **Best Buy:** una partición `all`: `products(active=true&orderable!=NotAvailable)?show=sku,salePrice,categoryPath.name,upc&pageSize=100&sort=sku.asc`. `fetch_changed` = `products(priceUpdateDate>{since})`. Clave en el secreto `BESTBUY_API_KEY`; nunca en logs (la URL lleva la clave como query: los logs ya excluyen queries).
+- **Best Buy (`bestbuy_us`):** una partición `all`: `products(active=true&orderable!=NotAvailable)?show=sku,salePrice,categoryPath.name,upc&pageSize=100&sort=sku.asc`. `fetch_changed` = `products(priceUpdateDate>{since})`. Clave en el secreto `BESTBUY_API_KEY`; nunca en logs (la URL lleva la clave como query: los logs ya excluyen queries).
 
 ### 2.2 Corrida (`app/crawl.py`)
 
@@ -157,7 +157,7 @@ Con `P` = precio nuevo, `U` = `usual`, `drop_bp = (U − P)·10000 / U`, umbrale
 - Nunca se usa el `ListPrice` de la tienda.
 - Un producto visto por primera vez no puede alertar (no hay `U`).
 - **Cooldown:** una alerta por producto cada 72 h, salvo nueva bajada ≥ 3 % (`improve_bp` de la v1).
-- **Duplicados:** mismo EAN, misma moneda y precio ±1 % en las últimas 6 h ⇒ una sola alerta que nombra las tiendas.
+- **Duplicados:** mismo EAN, misma moneda y precio ±1 % alertado en las últimas 6 h por otra tienda ⇒ la segunda se omite (queda en el log).
 
 ### 3.3 Casos de prueba mínimos
 
@@ -196,15 +196,15 @@ Para Amazon, Newegg y Walmart no hay catálogo, así que discountZ acumula hist�
 - **`/seguir` en lote:** hasta 20 URLs por mensaje (antes 5), una por línea. Los enlaces cortos (`a.co`, `amzn.to`) se siguen resolviendo como en la v1.
 - **Botón «Seguir»** en cada tarjeta del catálogo y de la comunidad (v1 `fol:L…`).
 - **Best Buy por API:** una URL de Best Buy en `/seguir` se lee por la API (`products/<sku>.json`) en lugar del HTML, que bloquea desde Actions.
-- **Walmart por API** cuando se active (§4.5); mientras tanto sigue el adaptador HTML de la v1 detrás de `/fuente on`.
+- **Walmart por API** cuando haya credenciales (§4.5); mientras tanto sigue el HTML de la v1 detrás de `/fuente on`.
 - `/lista` distingue los seguimientos automáticos (`a12`) de los manuales (`p12`); `/dejar a12` y `/dejar auto` (todos) los quitan.
 - Todo dentro del presupuesto por fuente de la v1: si Amazon da CAPTCHA, el circuit breaker la detiene igual que hoy (E6).
 
 ### 4.5 Walmart lista para activar (E7)
 
-- Fuente `walmart_api` (USD), `enabled=false`, con `fetch_listings` por `itemId` (`/api-proxy/service/affil/product/v2/items?ids=…`, hasta 20 por petición) y búsqueda (`/search`), firmada con la clave privada RSA según la documentación de walmart.io (cabeceras `WM_CONSUMER.ID`, `WM_CONSUMER.INTIMESTAMP`, `WM_SEC.KEY_VERSION`, `WM_SEC.AUTH_SIGNATURE`).
+- `walmart_us` (sigue apagada) cambia a la API cuando `CredentialStore` tiene las credenciales de Walmart: `fetch_listings` por `itemId` (`/api-proxy/service/affil/product/v2/items?ids=…`, hasta 20 por petición) y búsqueda (`/search`), firmada con la clave privada RSA según la documentación de walmart.io (cabeceras `WM_CONSUMER.ID`, `WM_CONSUMER.INTIMESTAMP`, `WM_SEC.KEY_VERSION`, `WM_SEC.AUTH_SIGNATURE`).
 - Secretos: `WALMART_CONSUMER_ID`, `WALMART_KEY_VERSION`, `WALMART_PRIVATE_KEY` (PEM) y `WALMART_PUBLISHER_ID`. `check-config` valida que estén los cuatro o ninguno.
-- Fixtures sintéticas marcadas con `"nota"` construidas desde la documentación pública; al aprobarse el acceso, David graba fixtures reales y se activa con `/fuente on walmart_api`. Si la API resulta tener una paginación de catálogo útil, el rastreo de §2 se le agrega sin tocar el núcleo.
+- Fixtures sintéticas marcadas con `"nota"` construidas desde la documentación pública; al aprobarse el acceso, David graba fixtures reales y la activa con `/fuente on walmart_us`. Sin credenciales sigue el HTML de la v1. Si la API resulta tener una paginación de catálogo útil, el rastreo de §2 se le agrega sin tocar el núcleo.
 
 ---
 
@@ -226,7 +226,8 @@ PNG 1080×1080 (maqueta aprobada `/mnt/project-files/rastreo-catalogo/maqueta-ta
 - Foto del producto en un recuadro blanco, escalada sin deformar. Si la descarga falla o no es imagen válida (≤ 5 MB, solo JPEG/PNG/WebP, `Image.verify`), se dibuja un recuadro con el nombre de la tienda en su lugar.
 - Insignia amarilla `-NN%` «vs. su precio».
 - Precio actual grande en verde; «Antes» `U` tachado; línea «Mínimo en N días» o «POSIBLE ERROR DE PRECIO» en rojo para `PRICE_ERROR`; «🇺🇸 Compra por casillero» en USD.
-- Las fotos se descargan con el `HttpClient` de la v1 (sin seguir a otros hosts que no sean el CDN de la tienda).
+- Las fotos se descargan con el `HttpClient` de la v1, solo desde los hosts de imágenes declarados por la fuente (`SourceDescriptor.image_hosts`).
+- `sendPhoto` sube el PNG como `multipart/form-data`: el `HttpClient` gana el parámetro `files`.
 
 ### 5.3 Mensaje
 
@@ -234,7 +235,7 @@ PNG 1080×1080 (maqueta aprobada `/mnt/project-files/rastreo-catalogo/maqueta-ta
 
 ### 5.4 Ritmo
 
-Límite de Telegram: ~20 mensajes por minuto en un grupo. La entrega del ciclo envía como máximo 15 por ciclo, por orden: `PRICE_ERROR`, luego mayor `drop_bp`. Lo demás espera en la `outbox` (no se descarta); si una alerta lleva más de 12 h esperando, se relee el precio antes de enviarla.
+Límite de Telegram: ~20 mensajes por minuto en un grupo. La entrega del ciclo envía como máximo 15 por ciclo, por orden: `PRICE_ERROR`, luego mayor `drop_bp`. Lo demás espera en la `outbox` con capacidad de ~180 por hora; una alerta del catálogo que lleve 24 h sin salir expira, porque su precio ya pudo cambiar.
 
 ---
 
@@ -316,7 +317,7 @@ ALTER TABLE watch ADD COLUMN origin text NOT NULL DEFAULT 'manual' CHECK (origin
                   ADD COLUMN expires_at timestamptz;
 ```
 
-Más el `INSERT INTO source` de `bestbuy_api` y `walmart_api` (`enabled=false`) y los permisos de `discountz_app` en las tablas nuevas.
+Más `alert.kind` con `catalog_drop`, `outbox.purpose` sin cambios y los permisos de `discountz_app` en las tablas nuevas.
 
 ### 7.2 Tamaño frente a 500 MB
 
@@ -353,14 +354,14 @@ Mantenimiento diario (se agrega al de la v1): borrar `catalog_price_change` de m
 2. Crear un grupo, activar «Temas» y agregar el bot como administrador con «Gestionar temas».
 3. Escribir algo en el grupo, leer su id (negativo, `-100…`) y ponerlo en el secreto `TELEGRAM_CHAT_ID`.
 4. Enviar `/temas` en el grupo.
-5. Crear la clave de Best Buy y guardarla en el secreto `BESTBUY_API_KEY`.
+5. Crear la clave de Best Buy, guardarla en el secreto `BESTBUY_API_KEY` y activar la fuente con `/fuente on bestbuy_us`.
 6. Aplicar la migración `0002`, poner `DISCOUNTZ_RASTREO=true` y crear en cron-job.org el disparo horario de `crawl.yml`.
 
 Se entregan como pasos de copiar y pegar en el README y en la guía.
 
 ## 11. Riesgos
 
-- Términos de la API de Best Buy: limitan el cacheo de su contenido. Se guardan solo SKU, precio y fechas (no títulos, fotos ni descripciones); David los revisa al crear la clave y, si lo prohíben, `bestbuy_api` queda apagada.
+- Términos de la API de Best Buy: limitan el cacheo de su contenido. Se guardan solo SKU, precio y fechas (no títulos, fotos ni descripciones); David los revisa al crear la clave y, si lo prohíben, `bestbuy_us` queda apagada.
 - Volumen de Éxito y Carulla (~36.000 peticiones al día entre las dos): si aparecen 429 o bloqueos, el circuit breaker detiene el rastreo y se baja el tope.
 - Avalancha de alertas al principio: los umbrales se ajustan con datos reales (§6).
 
