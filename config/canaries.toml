@@ -1,0 +1,32 @@
+# Canarios (spec §4.7): 1-2 productos GENÉRICOS por tienda y un rango amplio (±60 %).
+# Se leen una vez al día; un precio fuera de rango marca la fuente como `broken`.
+
+[[exito]]
+external_id = "102058783"
+title = "SSD Samsung 980 Pro 1 TB"
+min_minor = 396805
+max_minor = 1587220
+
+[[carulla]]
+external_id = "715872"
+title = "Café Quindío gourmet 250 g"
+min_minor = 11640
+max_minor = 46560
+
+[[olimpica]]
+external_id = "1100253933"
+title = "Televisor TCL 65"
+min_minor = 1239960
+max_minor = 4959840
+
+[[panamericana]]
+external_id = "659232"
+title = "Datáfono Bold Plus"
+min_minor = 59600
+max_minor = 238400
+
+[[amazon_us]]
+external_id = "B0BHJF2VRN"
+title = "SSD Samsung 990 PRO 1 TB"
+min_minor = 10399
+max_minor = 41598
