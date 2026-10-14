@@ -1,8 +1,9 @@
 """Adaptador Newegg contra fixtures (spec §4.2 «Newegg» y §4.3).
 
-Las fixtures de `tests/fixtures/newegg/` son SINTÉTICAS (ver su `.meta.json`): Newegg responde
-403 con su página CAPTCHA a la nube de la sesión. Se regraban con `record-fixture` desde una
-red que Newegg no bloquee.
+Las fichas son reales (2026-10-14, grabadas desde la red de David tras seguir el 301 de
+`/p/<item>`); en ambas el buy box es de un vendedor externo. La búsqueda sigue SINTÉTICA (ver su
+`.meta.json`): Newegg responde 403 con su CAPTCHA a la nube de la sesión y también a la red de
+David.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from discountz.sources.newegg import (
 from discountz.sources.registry import load_all
 
 T = datetime(2026, 10, 13, 15, 0, tzinfo=UTC)
-FICHAS = ["N82E16820147861", "9SIA7S6K0E6253", "N82E16814137771"]
+FICHAS = ["N82E16820147861", "N82E16814137771"]
 
 
 def expected(name: str) -> dict[str, Any]:
@@ -65,7 +66,7 @@ def test_detail_fixture_matches_expected(item: str) -> None:
 
 @pytest.mark.parametrize("item", FICHAS)
 def test_independent_route_matches_main_route(item: str) -> None:
-    """JSON-LD y `.price-current` del buy box coinciden en todas las fichas."""
+    """`__initialState__` y el precio del buy box coinciden en todas las fichas."""
     exp = expected(f"ficha_{item}")
     main = parse_newegg_detail(body(f"ficha_{item}"), item, T)
     o = parse_newegg_independent(body(f"ficha_{item}"), item, T)
@@ -89,33 +90,36 @@ def test_search_skips_sponsored_and_duplicates() -> None:
     assert oos.price is None and not oos.in_stock
 
 
-def test_detail_without_product_json_ld_is_parse_error() -> None:
+def _state(final_price: str, seller: str, instock: str = "true") -> bytes:
+    detail = (
+        '{"Item":"N82E16826104567","FinalPrice":PRICE,"Instock":STOCK,'
+        '"Seller":{"SellerName":"SELLER"},"Description":{"Title":"Logitech Mouse"}}'
+    )
+    detail = detail.replace("PRICE", final_price).replace("SELLER", seller)
+    detail = detail.replace("STOCK", instock)
+    return f'<script defer="">window.__initialState__ = {{"ItemDetail":{detail}}}</script>'.encode()
+
+
+def test_detail_without_initial_state_is_parse_error() -> None:
     with pytest.raises(ParseError):
         parse_newegg_detail(b"<html><body><h1>hola</h1></body></html>", "N82E16820147861", T)
 
 
-def test_detail_with_other_currency_is_parse_error() -> None:
-    html = b"""<script type="application/ld+json">{"@type":"Product","name":"SSD","sku":
-      "N82E16820147861","offers":{"@type":"Offer","price":"520000","priceCurrency":"COP",
-      "availability":"https://schema.org/InStock"}}</script>"""
-    with pytest.raises(ParseError):
-        parse_newegg_detail(html, "N82E16820147861", T)
-
-
 def test_detail_with_malformed_price_is_parse_error() -> None:
-    html = b"""<script type="application/ld+json">{"@type":"Product","name":"SSD","sku":
-      "N82E16820147861","offers":{"@type":"Offer","price":"1,299.99","priceCurrency":"USD",
-      "availability":"https://schema.org/InStock"}}</script>"""
     with pytest.raises(ParseError):
-        parse_newegg_detail(html, "N82E16820147861", T)
+        parse_newegg_detail(_state('"1,299.99"', "Newegg"), "N82E16826104567", T)
 
 
-def test_detail_accepts_offer_list_and_numeric_price() -> None:
-    html = b"""<script type="application/ld+json">{"@type":"Product","name":"Mouse",
-      "sku":"N82E16826104567","offers":[{"@type":"Offer","price":24.5,"priceCurrency":"USD",
-      "availability":"https://schema.org/InStock","seller":{"name":"Newegg"}}]}</script>"""
-    o = parse_newegg_detail(html, "N82E16826104567", T)
+def test_detail_sold_by_newegg_is_first_party() -> None:
+    o = parse_newegg_detail(_state("24.5", "Newegg"), "N82E16826104567", T)
     assert o is not None and o.price == usd(2450) and o.seller_class is SellerClass.FIRST_PARTY
+    assert o.title == "Logitech Mouse" and o.in_stock
+
+
+def test_detail_out_of_stock_has_no_price() -> None:
+    o = parse_newegg_detail(_state("24.5", "Amigos", "false"), "N82E16826104567", T)
+    assert o is not None and o.price is None and not o.in_stock
+    assert o.seller_class is SellerClass.MARKETPLACE
 
 
 def test_independent_without_buy_box_price_is_none() -> None:
@@ -148,7 +152,7 @@ def test_fetch_listings_reads_canonical_url() -> None:
     ctx = SourceContext(fake, NoCredentials(), 1e9, T)
     (out,) = NeweggSource().fetch_listings(ctx, [ListingRef("newegg", "N82E16820147861")])
     assert isinstance(out, ListingFound)
-    assert out.offer.price == usd(16999)
+    assert out.offer.price == usd(39999)
 
 
 def test_fetch_follows_one_redirect_to_the_slug_url() -> None:
@@ -164,7 +168,7 @@ def test_fetch_follows_one_redirect_to_the_slug_url() -> None:
     ctx = SourceContext(fake, NoCredentials(), 1e9, T)
     (out,) = NeweggSource().fetch_listings(ctx, [ListingRef("newegg", "N82E16820147861")])
     assert isinstance(out, ListingFound)
-    assert out.offer.price == usd(16999)
+    assert out.offer.price == usd(39999)
 
 
 @pytest.mark.parametrize(
@@ -193,7 +197,7 @@ def test_confirm_reuses_the_detail_body() -> None:
     (out,) = src.fetch_listings(ctx, [ListingRef("newegg", "N82E16820147861")])
     assert isinstance(out, ListingFound)
     confirmed = src.confirm(ctx, out.offer)
-    assert confirmed is not None and confirmed.price == usd(16999)
+    assert confirmed is not None and confirmed.price == usd(39999)
     assert len(fake.calls) == 1
 
 
