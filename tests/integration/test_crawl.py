@@ -1,0 +1,460 @@
+"""Caso de uso del rastreo de catálogo (spec del rastreo §2.2, §3.2 y §4) contra Postgres real."""
+
+from __future__ import annotations
+
+import random
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
+
+import psycopg
+import pytest
+
+from discountz.app.crawl import CrawlDeps, CrawlResult, run_crawl
+from discountz.config import load_params, load_topics
+from discountz.domain.catalog import CatalogObservation, CatalogState
+from discountz.domain.errors import ParseError
+from discountz.domain.model import (
+    ExtractionPath,
+    Lead,
+    ListingRef,
+    Offer,
+    SearchSpec,
+    SellerClass,
+)
+from discountz.domain.money import Currency, Money
+from discountz.domain.scheduling import CrawlBudget
+from discountz.domain.urls import SafeUrl
+from discountz.infra import db as repo
+from discountz.infra.db import CatalogRow
+from discountz.infra.http import BlockKind, HttpResponse, Method, Params
+from discountz.sources.base import (
+    Capability,
+    CardFacts,
+    CatalogPage,
+    ListingFound,
+    ListingGone,
+    ListingOutcome,
+    NeedsResolution,
+    NoCredentials,
+    SearchPage,
+    SourceContext,
+    SourceDescriptor,
+)
+from discountz.sources.blocks import detect_block_common
+
+pytestmark = pytest.mark.integration
+T = datetime(2026, 10, 16, 12, tzinfo=UTC)
+PATH = "/Tecnología/Celulares/"
+
+
+def obs(ext: str, price: int, *, ean: str | None = None) -> CatalogObservation:
+    return CatalogObservation(ext, Money(price, Currency.COP), PATH, ean, SellerClass.FIRST_PARTY)
+
+
+def offer(ext: str, price: int) -> Offer:
+    return Offer(
+        ref=ListingRef("exito", ext),
+        parent_external_id=None,
+        title=f"Celular {ext}",
+        price=Money(price, Currency.COP),
+        list_price=None,
+        in_stock=True,
+        seller_class=SellerClass.FIRST_PARTY,
+        unit_key="un|1",
+        extraction=ExtractionPath.API_JSON,
+        observed_at=T,
+        url_path=f"/celular-{ext}/p",
+    )
+
+
+@dataclass
+class Clock:
+    t: float = 0.0
+    step: float = 1.0  # segundos que tarda cada petición
+
+    def monotonic(self) -> float:
+        return self.t
+
+    def sleep(self, s: float) -> None:
+        self.t += s
+
+
+@dataclass
+class Transport:
+    clock: Clock
+    blocked: set[str] = field(default_factory=set)
+    urls: list[str] = field(default_factory=list)
+
+    def request(
+        self,
+        method: Method,
+        url: str,
+        *,
+        params: Params | None = None,
+        json: Mapping[str, object] | None = None,
+        headers: Mapping[str, str] | None = None,
+        cookies: Mapping[str, str] | None = None,
+    ) -> HttpResponse:
+        self.clock.t += self.clock.step
+        self.urls.append(url)
+        status = 403 if url in self.blocked else 200
+        return HttpResponse(status, url, {}, b"{}", 1)
+
+    def kinds(self) -> list[str]:
+        return [re.sub(r"https://fake/([a-z_]+).*", r"\1", u) for u in self.urls]
+
+
+@dataclass
+class FakeCatalog:
+    """Fuente de catálogo programada; cada método hace una petición para contar presupuesto."""
+
+    pages: dict[str, list[list[CatalogObservation]]]
+    offers: dict[str, Offer] = field(default_factory=dict)
+    hot: dict[str, CatalogObservation] = field(default_factory=dict)
+    changed: list[list[CatalogObservation]] = field(default_factory=list)
+    errors: set[tuple[str, int]] = field(default_factory=set)
+    code: str = "exito"
+    supports_changed: bool = False
+    max_batch: int = 50
+    since_seen: list[datetime] = field(default_factory=list)
+    descriptor: SourceDescriptor = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.descriptor = SourceDescriptor(
+            code=self.code,
+            kind="store",
+            currency=Currency.COP,
+            hosts=frozenset({"www.exito.com"}),
+            client="httpx",
+            capabilities=frozenset({Capability.DETAIL, Capability.CATALOG}),
+            max_batch=self.max_batch,
+            external_id_re=re.compile(r"^\d+$"),
+            image_hosts=frozenset({"exitocol.vteximg.com.br"}),
+            supports_changed=self.supports_changed,
+        )
+
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]:
+        ctx.http.request("GET", "https://fake/partitions")
+        return list(self.pages)
+
+    def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
+        ctx.http.request("GET", f"https://fake/page/{partition}/{page}")
+        if (partition, page) in self.errors:
+            raise ParseError("schema")
+        pages = self.pages[partition]
+        items = pages[page] if page < len(pages) else []
+        return CatalogPage(items, has_more=page + 1 < len(pages))
+
+    def fetch_changed(self, ctx: SourceContext, since: datetime, page: int) -> CatalogPage:
+        ctx.http.request("GET", f"https://fake/changed/{page}")
+        self.since_seen.append(since)
+        items = self.changed[page] if page < len(self.changed) else []
+        return CatalogPage(items, has_more=page + 1 < len(self.changed))
+
+    def fetch_catalog_items(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> Sequence[CatalogObservation]:
+        ctx.http.request("GET", "https://fake/items")
+        return [self.hot[i] for i in external_ids if i in self.hot]
+
+    def fetch_card_facts(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> dict[str, CardFacts]:
+        ctx.http.request("GET", "https://fake/facts")
+        return {
+            i: CardFacts(
+                f"Celular {i} 256 GB",
+                f"https://www.exito.com/celular-{i}/p",
+                f"https://exitocol.vteximg.com.br/arquivos/ids/{i}/a.jpg",
+            )
+            for i in external_ids
+        }
+
+    def fetch_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        ctx.http.request("GET", "https://fake/listings")
+        return [
+            ListingFound(self.offers[r.external_id])
+            if r.external_id in self.offers
+            else ListingGone(r)
+            for r in refs
+        ]
+
+    def parse_url(self, url: SafeUrl) -> ListingRef | NeedsResolution | None:
+        return None
+
+    def resolve(self, ctx: SourceContext, pending: NeedsResolution) -> ListingRef:
+        raise ParseError("no_resolution")
+
+    def search(self, ctx: SourceContext, spec: SearchSpec, page: int) -> SearchPage:
+        return SearchPage([], None)
+
+    def confirm(self, ctx: SourceContext, offer: Offer) -> Offer | None:
+        return None
+
+    def fetch_leads(self, ctx: SourceContext) -> list[Lead]:
+        return []
+
+    def detect_block(self, resp: HttpResponse) -> BlockKind | None:
+        return detect_block_common(resp)
+
+
+def deps(
+    conn: psycopg.Connection,
+    source: FakeCatalog,
+    clock: Clock,
+    *,
+    max_per_run: int = 1000,
+    holder: str = "gh:1:1",
+) -> tuple[CrawlDeps, Transport]:
+    transport = Transport(clock)
+    d = CrawlDeps(
+        conn=conn,
+        source=source,
+        http=transport,
+        credentials=NoCredentials(),
+        topics=load_topics(),
+        params=load_params(),
+        budget=CrawlBudget(0, 0, max_per_run, 100_000, 2500),
+        holder=holder,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+        rnd=random.Random(1),
+    )
+    return d, transport
+
+
+def count(conn: psycopg.Connection, table: str, where: str = "true") -> int:
+    r = conn.execute(f"SELECT count(*) FROM discountz.{table} WHERE {where}").fetchone()  # noqa: S608
+    assert r is not None
+    return int(r[0])
+
+
+def seed_history(conn: psycopg.Connection, ext: str, price: int, *, ean: str | None = None) -> None:
+    """Producto visto 5 días a `price` estable: ya tiene `usual` y `min_seen`."""
+    start = T - timedelta(days=5)
+    state = CatalogState(price, price, price, start, start, 20, None, None, None)
+    repo.save_catalog_page(
+        conn,
+        "exito",
+        [CatalogRow(ext, ean, "tecnologia", "COP", state, False)],
+        T - timedelta(hours=1),
+    )
+
+
+def page_of(n: int, start: int = 0) -> list[CatalogObservation]:
+    return [obs(str(1000 + start + i), 50_000 + i) for i in range(n)]
+
+
+def test_crawl_resumes_from_cursor_without_duplicates(db: psycopg.Connection) -> None:
+    src = FakeCatalog({"C:/1/": [page_of(2, 0), page_of(2, 2), page_of(2, 4), page_of(2, 6)]})
+    clock = Clock(step=20)
+    d, transport = deps(db, src, clock)
+    first = run_crawl(d, T, minutes=1)
+    assert first.status == "ok"
+    assert transport.kinds() == ["partitions", "page", "page"]
+    cur = repo.get_cursor(db, "exito")
+    assert (cur.sweep_no, cur.partition_idx, cur.page) == (1, 0, 2)
+    assert cur.partitions == ("C:/1/",)
+
+    clock2 = Clock(step=20)
+    d2, transport2 = deps(db, src, clock2)
+    second = run_crawl(d2, T + timedelta(hours=1), minutes=1)
+    assert second.pages == 2
+    assert count(db, "catalog_item") == 8
+    assert count(db, "catalog_price_change") == 8
+    assert transport2.kinds() == ["page", "page"]  # la vuelta terminó: la corrida para
+    cur = repo.get_cursor(db, "exito")
+    assert (cur.sweep_no, cur.partitions, cur.partition_idx, cur.page) == (1, (), 0, 0)
+    assert cur.last_sweep_s == 3600
+    assert cur.day_requests == 5
+
+
+def test_crawl_splits_partition_and_keeps_split_in_cursor(db: psycopg.Connection) -> None:
+    src = FakeCatalog({"C:/1/": [page_of(1)]})
+    bands = {"C:/1/|P:[1 TO 9]": page_of(1, 5)}
+
+    def split(ctx: SourceContext, partition: str, page: int) -> CatalogPage:
+        ctx.http.request("GET", f"https://fake/page/{partition}/{page}")
+        if partition == "C:/1/":
+            return CatalogPage((), has_more=False, split=["C:/1/|P:[1 TO 9]", "C:/1/|P:[10 TO 99]"])
+        return CatalogPage(bands.get(partition, []), has_more=False)
+
+    src.fetch_catalog_page = split  # type: ignore[method-assign]
+    clock = Clock(step=20)
+    d, _ = deps(db, src, clock)
+    run_crawl(d, T, minutes=1)  # particiones, página partida y la primera banda
+    cur = repo.get_cursor(db, "exito")
+    assert cur.partitions == ("C:/1/|P:[1 TO 9]", "C:/1/|P:[10 TO 99]")
+    assert (cur.partition_idx, cur.page) == (1, 0)
+    assert "1005" in repo.load_catalog_states(db, "exito", ["1005"])
+
+
+def test_crawl_hot_tier_first_and_capped(db: psycopg.Connection) -> None:
+    rows = [
+        CatalogRow(
+            str(i),
+            None,
+            "tecnologia",
+            "COP",
+            CatalogState(10_000, None, None, T, T, 1, T - timedelta(hours=1), None, None),
+            False,
+        )
+        for i in range(200)
+    ]
+    repo.save_catalog_page(db, "exito", rows, T - timedelta(hours=1))
+    src = FakeCatalog({"C:/1/": [page_of(1)] * 100}, max_batch=2)
+    d, transport = deps(db, src, Clock(), max_per_run=20)
+    result = run_crawl(d, T, minutes=60)
+    kinds = transport.kinds()
+    assert kinds[:5] == ["items"] * 5  # 25 % de 20
+    assert kinds.count("items") == 5
+    assert result.requests == len(kinds) == 20
+
+
+def test_crawl_hot_tier_uses_fetch_changed_when_supported(db: psycopg.Connection) -> None:
+    src = FakeCatalog({"all": [page_of(1)]}, changed=[[obs("7", 9_000)]], supports_changed=True)
+    d, _ = deps(db, src, Clock(step=1))
+    run_crawl(d, T, minutes=60)
+    assert src.since_seen == []  # primera corrida: sin `changed_since`, no hay capa caliente
+    assert repo.get_cursor(db, "exito").changed_since == T
+
+    later = T + timedelta(hours=1)
+    d2, transport2 = deps(db, src, Clock(step=1))
+    run_crawl(d2, later, minutes=60)
+    assert src.since_seen == [T]
+    assert transport2.kinds()[0] == "changed"
+    assert repo.get_cursor(db, "exito").changed_since == later
+    assert "7" in repo.load_catalog_states(db, "exito", ["7"])
+
+
+def test_crawl_three_parse_errors_in_a_row_stop(db: psycopg.Connection) -> None:
+    pages = [page_of(1, i) for i in range(6)]
+    src = FakeCatalog({"C:/1/": pages}, errors={("C:/1/", 1), ("C:/1/", 2), ("C:/1/", 3)})
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.status == "partial"
+    assert transport.kinds() == ["partitions", "page", "page", "page", "page"]
+    assert repo.get_cursor(db, "exito").page == 4  # la próxima corrida sigue después
+    breaker = repo.load_breakers(db)["exito"]
+    assert breaker.consecutive_parse >= 3 or breaker.state == "open"
+
+
+def test_crawl_single_parse_error_is_skipped(db: psycopg.Connection) -> None:
+    pages = [page_of(1, i) for i in range(3)]
+    src = FakeCatalog({"C:/1/": pages}, errors={("C:/1/", 1)})
+    d, _ = deps(db, src, Clock())
+    run_crawl(d, T, minutes=60)
+    assert set(repo.load_catalog_states(db, "exito", ["1000", "1001", "1002"])) == {"1000", "1002"}
+
+
+def test_crawl_confirmation_mismatch_drops_candidate(db: psycopg.Connection) -> None:
+    seed_history(db, "123", 99_900)
+    src = FakeCatalog({"C:/1/": [[obs("123", 59_900)]]}, offers={"123": offer("123", 61_100)})
+    d, _ = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.alerts == 0
+    assert count(db, "alert") == 0
+    assert count(db, "outbox") == 0
+
+
+def test_crawl_ean_duplicate_is_skipped(db: psycopg.Connection) -> None:
+    ean = "7701234567890"
+    start = T - timedelta(days=5)
+    state = CatalogState(59_900, 99_900, 99_900, start, start, 3, None, None, None)
+    repo.save_catalog_page(
+        db, "carulla", [CatalogRow("9", ean, "tecnologia", "COP", state, False)], T
+    )
+    repo.mark_catalog_alert(db, "carulla", "9", 59_900, T - timedelta(hours=1))
+    seed_history(db, "123", 99_900, ean=ean)
+    src = FakeCatalog(
+        {"C:/1/": [[obs("123", 59_900, ean=ean)]]}, offers={"123": offer("123", 59_900)}
+    )
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.alerts == 0
+    assert "listings" not in transport.kinds()
+    assert count(db, "alert") == 0
+
+
+def test_crawl_block_trips_breaker_and_stops(db: psycopg.Connection) -> None:
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(4)]})
+    d, transport = deps(db, src, Clock())
+    transport.blocked.add("https://fake/page/C:/1//1")
+    result = run_crawl(d, T, minutes=60)
+    assert result.status == "blocked"
+    assert repo.load_breakers(db)["exito"].state == "open"
+    assert repo.get_cursor(db, "exito").page == 1
+    assert transport.kinds() == ["partitions", "page", "page"]
+    again, transport2 = deps(db, src, Clock())
+    assert run_crawl(again, T + timedelta(minutes=5), minutes=60).status == "blocked"
+    assert transport2.urls == []
+
+
+def test_crawl_disabled_source_does_nothing(db: psycopg.Connection) -> None:
+    src = FakeCatalog({"all": [page_of(1)]}, code="bestbuy_us")  # apagada en la semilla
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result == CrawlResult("disabled", 0, 0, 0, 0, 0)
+    assert transport.urls == []
+
+
+def test_crawl_lease_held_skips(db: psycopg.Connection) -> None:
+    assert repo.acquire_crawl_lease(db, "exito", "otro", T, timedelta(minutes=60))
+    src = FakeCatalog({"C:/1/": [page_of(1)]})
+    d, transport = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).status == "skipped_locked"
+    assert transport.urls == []
+
+
+def test_crawl_respects_daily_cap(db: psycopg.Connection) -> None:
+    repo.save_cursor(db, replace(repo.get_cursor(db, "exito"), day=T.date(), day_requests=99_999))
+    src = FakeCatalog({"C:/1/": [page_of(1)] * 5})
+    d, transport = deps(db, src, Clock())
+    run_crawl(d, T, minutes=60)
+    assert len(transport.urls) == 1
+
+
+def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
+    seed_history(db, "123", 99_900)
+    src = FakeCatalog({"C:/1/": [[obs("123", 59_900)]]}, offers={"123": offer("123", 59_900)})
+    d, _ = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.alerts == 1
+    (row,) = repo.claim_outbox(db, 10, T)
+    assert row.topic == "tecnologia"
+    assert row.priority == 5  # máx(2, 9 − 4004 // 1000)
+    assert row.card == {
+        "store": "exito",
+        "topic": "tecnologia",
+        "title": "Celular 123 256 GB",
+        "url": "https://www.exito.com/celular-123/p",
+        "image_url": "https://exitocol.vteximg.com.br/arquivos/ids/123/a.jpg",
+        "price_minor": 59_900,
+        "usual_minor": 99_900,
+        "currency": "COP",
+        "drop_bp": 4004,
+        "min_days": 5,
+        "kind": "catalog_drop",
+    }
+    assert "BAJÓ DE PRECIO" in row.body_html
+    alert = db.execute("SELECT kind, delivery FROM discountz.alert").fetchone()
+    assert alert == ("catalog_drop", "queued")
+    s = repo.load_catalog_states(db, "exito", ["123"])["123"]
+    assert (s.last_alert_at, s.last_alert_minor) == (T, 59_900)
+
+
+def test_crawl_price_error_also_posts_line_in_category(db: psycopg.Connection) -> None:
+    seed_history(db, "123", 99_900)
+    src = FakeCatalog({"C:/1/": [[obs("123", 19_900)]]}, offers={"123": offer("123", 19_900)})
+    d, _ = deps(db, src, Clock())
+    run_crawl(d, T, minutes=60)
+    rows = {r.topic: r for r in repo.claim_outbox(db, 10, T)}
+    assert set(rows) == {"errores", "tecnologia"}
+    assert rows["errores"].priority == 0
+    assert rows["errores"].card is not None
+    assert rows["tecnologia"].card is None
+    assert "Errores de precio" in rows["tecnologia"].body_html

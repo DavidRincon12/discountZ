@@ -8,13 +8,16 @@ from pathlib import Path
 
 import pytest
 
+from discountz.app.compose import PRIORITY
 from discountz.app.render import (
+    CASILLERO,
     MAX_VISIBLE,
     AlertView,
     Button,
     DailyView,
     FlashSeen,
     render_alert,
+    render_catalog_alert,
     render_daily,
     render_health,
     render_list,
@@ -360,3 +363,59 @@ def test_daily_summary_line() -> None:
         "exito sana, amazon_us 2 bloqueos (recuperada) · BD 41 MB de 500"
     )
     assert msg.silent
+
+
+CARD_C01 = {
+    "store": "exito",
+    "topic": "tecnologia",
+    "title": "Celular <Moto> G85 256 GB",
+    "url": "https://www.exito.com/celular-moto-g85/p",
+    "image_url": "https://exitocol.vteximg.com.br/arquivos/ids/1/a.jpg",
+    "price_minor": 59_900,
+    "usual_minor": 99_900,
+    "currency": "COP",
+    "drop_bp": 4004,
+    "min_days": 5,
+    "kind": "catalog_drop",
+}
+
+
+def test_catalog_alert_caption() -> None:
+    msg = render_catalog_alert(CARD_C01, 42, "📱 Tecnología")
+    lines = msg.html.split("\n")
+    assert lines[0] == "<b>BAJÓ DE PRECIO</b> · #tecnologia · Éxito"
+    assert lines[1] == "<b>Celular &lt;Moto&gt; G85 256 GB</b>"
+    assert "<b>$59.900</b>  antes <s>$99.900</s> (-40,0 %)" in lines
+    assert "Mínimo en 5 días" in lines
+    assert lines[-1] == "<i>📱 Tecnología · L42</i>"
+    assert visible_length(msg.html) <= 1024
+    buttons = reply_markup(msg.buttons)["inline_keyboard"]
+    assert buttons[0][0] == {"text": "Abrir en Éxito", "url": CARD_C01["url"]}
+    assert buttons[1][1] == {"text": "Seguir", "callback_data": "fol:L42"}
+
+
+def test_catalog_price_error_caption_usd() -> None:
+    card = CARD_C01 | {
+        "store": "bestbuy_us",
+        "kind": "price_error",
+        "currency": "USD",
+        "price_minor": 1_999,
+        "usual_minor": 19_999,
+        "drop_bp": 9000,
+        "title": "x" * 2000,
+    }
+    msg = render_catalog_alert(card, 7, "📱 Tecnología")
+    assert msg.html.startswith("<b>POSIBLE ERROR DE PRECIO: verifica antes de pagar</b>")
+    assert "<i>La tienda puede anular el pedido.</i>" in msg.html
+    assert CASILLERO in msg.html
+    assert "Mínimo en" not in msg.html
+    assert visible_length(msg.html) <= 1024
+
+
+def test_catalog_drop_has_header_in_text_alerts() -> None:
+    view = dataclasses.replace(GOOD, kind=AlertKind.CATALOG_DROP)
+    assert render_alert(view).html.startswith("<b>BAJÓ DE PRECIO</b>")
+
+
+def test_compose_priority_covers_every_kind() -> None:
+    assert set(PRIORITY) == set(AlertKind)

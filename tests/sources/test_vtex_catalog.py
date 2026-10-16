@@ -227,3 +227,13 @@ class _Router:
         r = self.handler(dict(pairs))
         self.last_total = r.headers.get("resources", "0/0").rsplit("/", 1)[1]
         return r
+
+
+def test_catalog_items_by_sku_batch() -> None:
+    body = [product("101", [("1", True, 59900.0, 3)]), product("102", [("1", True, 0.0, 0)])]
+    fake = _Router(lambda q: resp(body, total=2, end=1))
+    items = VtexSource(STORES["exito"]).fetch_catalog_items(ctx(fake), ["101", "102", "x"])
+    assert [o.external_id for o in items] == ["101"]
+    assert items[0].category_path == "/Tecnología/Celulares/Smartphones/"
+    assert "fq=skuId%3A101&fq=skuId%3A102" in fake.urls[0]
+    assert "skuId%3Ax" not in fake.urls[0]

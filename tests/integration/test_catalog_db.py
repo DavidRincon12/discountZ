@@ -77,7 +77,20 @@ def test_hot_ids_ordered_by_recent_change(db: psycopg.Connection) -> None:
 def test_cursor_roundtrip(db: psycopg.Connection) -> None:
     empty = repo.get_cursor(db, "exito")
     assert empty == CrawlCursor("exito", 0, 0, 0, None, None, None, None)
-    saved = CrawlCursor("exito", 2, 5, 7, T, 3600, T, T - timedelta(hours=1))
+    assert (empty.partitions, empty.day, empty.day_requests) == ((), None, 0)
+    saved = CrawlCursor(
+        "exito",
+        2,
+        5,
+        7,
+        T,
+        3600,
+        T,
+        T - timedelta(hours=1),
+        partitions=("C:/1/", "C:/2/|P:[1 TO 99]"),
+        day=T.date(),
+        day_requests=321,
+    )
     repo.save_cursor(db, saved)
     assert repo.get_cursor(db, "exito") == saved
 

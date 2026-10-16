@@ -248,6 +248,15 @@ class BestBuySource:
         floor = (since - CHANGED_MARGIN).strftime("%Y-%m-%dT%H:%M:%S")
         return self._page(ctx, f"products(priceUpdateDate>{floor}&active=true)", page)
 
+    def fetch_catalog_items(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> list[CatalogObservation]:
+        skus = [s for s in external_ids if SKU_RE.fullmatch(s)][:PAGE_SIZE]
+        if not skus:
+            return []
+        found = self._products(ctx, skus)
+        return [o for p in found.values() if (o := _observation(p)) is not None]
+
     def fetch_card_facts(
         self, ctx: SourceContext, external_ids: Sequence[str]
     ) -> dict[str, CardFacts]:

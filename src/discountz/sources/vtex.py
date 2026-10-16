@@ -421,6 +421,21 @@ class VtexSource:
     def fetch_changed(self, ctx: SourceContext, since: datetime, page: int) -> CatalogPage:
         raise NotImplementedError
 
+    def fetch_catalog_items(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> list[CatalogObservation]:
+        """Relectura por lote (capa caliente) con la misma regla del recorrido."""
+        ids = [i for i in external_ids if _SKU_RE.fullmatch(i)][:MAX_BATCH]
+        if not ids:
+            return []
+        resp = ctx.http.request(
+            "GET",
+            f"{self.store.api_base}/catalog_system/pub/products/search",
+            params=[("fq", f"skuId:{i}") for i in ids],
+            headers=_HEADERS,
+        )
+        return [o for o in parse_vtex_catalog(resp.body) if o.external_id in ids]
+
     def fetch_card_facts(
         self, ctx: SourceContext, external_ids: Sequence[str]
     ) -> dict[str, CardFacts]:

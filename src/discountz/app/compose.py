@@ -32,6 +32,7 @@ PRIORITY = {
     AlertKind.TARGET_REACHED: 1,
     AlertKind.HISTORIC_LOW: 2,
     AlertKind.GOOD_DEAL: 3,
+    AlertKind.CATALOG_DROP: 3,
     AlertKind.COMMUNITY_DEAL: 3,
 }
 _FLAGS = {f.value: f for f in Flag}

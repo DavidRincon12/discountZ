@@ -45,6 +45,7 @@ _HEADERS = {
     AlertKind.PRICE_ERROR: "POSIBLE ERROR DE PRECIO: verifica antes de pagar",
     AlertKind.TARGET_REACHED: "PRECIO OBJETIVO ALCANZADO",
     AlertKind.GOOD_DEAL: "BUENA OFERTA",
+    AlertKind.CATALOG_DROP: "BAJÓ DE PRECIO",
     AlertKind.COMMUNITY_DEAL: (
         "OFERTA DE LA COMUNIDAD (Slickdeals), sin histórico propio suficiente"
     ),
@@ -243,6 +244,43 @@ def render_alert(a: AlertView) -> RenderedMessage:
         lines.append(CASILLERO)
     lines.append(f"<i>Visto {local(a.observed_at):%H:%M} (hora Col.) · L{a.listing_id}</i>")
     return RenderedMessage("\n".join(lines), _alert_buttons(a))
+
+
+CAPTION_MAX = 1024  # límite de `caption` en sendPhoto
+CAPTION_TITLE = 200
+
+
+def render_catalog_alert(
+    card: Mapping[str, Any], listing_id: int, topic_title: str
+) -> RenderedMessage:
+    """Pie de foto de una alerta del catálogo (spec del rastreo §5.3); cabe en 1.024."""
+    kind = AlertKind(str(card["kind"]))
+    currency = Currency(str(card["currency"]))
+    price = Money(int(card["price_minor"]), currency)
+    usual = Money(int(card["usual_minor"]), currency)
+    store = str(card["store"])
+    lines = [
+        f"<b>{_HEADERS[kind]}</b> · #{card['topic']} · {esc(source_name(store))}",
+        f"<b>{esc(truncate(str(card['title']), CAPTION_TITLE))}</b>",
+        "",
+        f"<b>{format_money(price)}</b>  antes <s>{format_money(usual)}</s>"
+        f" (-{pct(int(card['drop_bp']))})",
+    ]
+    if kind is AlertKind.PRICE_ERROR:
+        lines.append("<i>La tienda puede anular el pedido.</i>")
+    else:
+        lines.append(f"Mínimo en {int(card['min_days'])} días")
+    if currency is Currency.USD:
+        lines.append(CASILLERO)
+    lines.append(f"<i>{esc(topic_title)} · L{listing_id}</i>")
+    buttons = [
+        [Button(f"Abrir en {source_name(store)}", url=str(card["url"]))],
+        [
+            Button(f"Silenciar {MUTE_BUTTON_DAYS} d", callback_data=f"mute:L{listing_id}:30"),
+            Button("Seguir", callback_data=f"fol:L{listing_id}"),
+        ],
+    ]
+    return RenderedMessage("\n".join(lines), buttons)
 
 
 def _alert_buttons(a: AlertView) -> list[list[Button]]:

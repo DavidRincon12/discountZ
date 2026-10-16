@@ -197,6 +197,39 @@ watch_interval_min = 30
 search_interval_min = 30
 max_batch = 1
 
+# Rastreo de catálogo (spec del rastreo §2.3): separado del presupuesto de /seguir. Una corrida
+# por hora; `max_per_run` ≈ tope de 24 h / 24. `hot_share_bp`: parte para la capa caliente.
+[crawl.exito]
+min_pause_s = 1
+jitter_s = 1
+max_per_run = 1000
+max_per_24h = 24000
+
+[crawl.carulla]
+min_pause_s = 1
+jitter_s = 1
+max_per_run = 500
+max_per_24h = 12000
+
+[crawl.olimpica]
+min_pause_s = 2
+jitter_s = 1
+max_per_run = 250
+max_per_24h = 6000
+
+[crawl.panamericana]
+min_pause_s = 2
+jitter_s = 1
+max_per_run = 250
+max_per_24h = 6000
+
+# Best Buy API: límite de 5 peticiones/s y 50.000/día por clave.
+[crawl.bestbuy_us]
+min_pause_s = 0.25
+jitter_s = 0
+max_per_run = 1700
+max_per_24h = 40000
+
 # Calendario de eventos (spec §6.2): hora de Bogotá; fin exclusivo.
 # FECHAS A CONFIRMAR por David antes de cada evento: las tiendas las anuncian con pocas semanas.
 

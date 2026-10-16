@@ -47,6 +47,9 @@ CREATE TABLE crawl_cursor (
   last_sweep_s     integer CHECK (last_sweep_s >= 0),
   last_run_at      timestamptz,
   changed_since    timestamptz,
+  partitions       jsonb NOT NULL DEFAULT '[]' CHECK (jsonb_typeof(partitions) = 'array'),
+  day_start        date,
+  day_requests     integer NOT NULL DEFAULT 0 CHECK (day_requests >= 0),
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
 

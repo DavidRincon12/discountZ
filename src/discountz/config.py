@@ -30,7 +30,7 @@ from discountz.domain.commands import CATEGORIES
 from discountz.domain.errors import ConfigError
 from discountz.domain.money import Currency
 from discountz.domain.params import CategoryParams, GlobalParams
-from discountz.domain.scheduling import Event, SourceBudget
+from discountz.domain.scheduling import CrawlBudget, Event, SourceBudget
 from discountz.domain.topics import TOPIC_CODES, TopicParams, TopicRule, normalize_path
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
@@ -182,12 +182,21 @@ class _Event(_Strict):
         return v
 
 
+class _Crawl(_Strict):
+    min_pause_s: Annotated[float, Field(ge=0)]
+    jitter_s: Annotated[float, Field(ge=0)]
+    max_per_run: Pos
+    max_per_24h: Pos
+    hot_share_bp: Annotated[int, Field(ge=0, le=10_000)] = 2500
+
+
 class _Params(_Strict):
     quiet_hours: _Quiet
     pricing: _Pricing
     categories: dict[str, _Category]
     sources: dict[str, _Source]
     events: list[_Event] = Field(default_factory=list)
+    crawl: dict[str, _Crawl] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +207,7 @@ class AppParams:
     events: Sequence[Event]
     quiet_start: time
     quiet_end: time
+    crawl: Mapping[str, CrawlBudget] = MappingProxyType({})
 
 
 def _days(n: int) -> timedelta:
@@ -225,6 +235,8 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
     for name, cat in raw.categories.items():
         if cat.t_floor_bp > cat.t_good_bp or cat.d_floor_bp > cat.d_low_bp:
             raise ConfigError(f"{path.name}:categories.{name}: piso mayor que el umbral")
+    if set(raw.crawl) - set(raw.sources):
+        raise ConfigError(f"{path.name}:crawl: fuente desconocida")
     for e in raw.events:
         unknown = set(e.sources) - set(raw.sources)
         if unknown:
@@ -301,6 +313,14 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
         events=tuple(events),
         quiet_start=raw.quiet_hours.start,
         quiet_end=raw.quiet_hours.end,
+        crawl=MappingProxyType(
+            {
+                code: CrawlBudget(
+                    c.min_pause_s, c.jitter_s, c.max_per_run, c.max_per_24h, c.hot_share_bp
+                )
+                for code, c in raw.crawl.items()
+            }
+        ),
     )
 
 

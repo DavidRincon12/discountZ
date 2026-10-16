@@ -1606,6 +1606,9 @@ class CrawlCursor:
     last_sweep_s: int | None
     last_run_at: datetime | None
     changed_since: datetime | None
+    partitions: tuple[str, ...] = ()  # particiones de la vuelta en curso (con las ya partidas)
+    day: date | None = None  # día UTC de `day_requests`
+    day_requests: int = 0  # peticiones del rastreo en ese día (tope de 24 h)
 
 
 def load_catalog_states(
@@ -1686,23 +1689,39 @@ def get_cursor(conn: psycopg.Connection, source: str) -> CrawlCursor:
     row = _one(
         conn,
         """SELECT source, sweep_no, partition_idx, page, sweep_started_at, last_sweep_s,
-                  last_run_at, changed_since
+                  last_run_at, changed_since, partitions, day_start, day_requests
              FROM discountz.crawl_cursor WHERE source = %s""",
         (source,),
     )
-    return CrawlCursor(*row) if row else CrawlCursor(source, 0, 0, 0, None, None, None, None)
+    if row is None:
+        return CrawlCursor(source, 0, 0, 0, None, None, None, None)
+    return CrawlCursor(
+        row[0],
+        int(row[1]),
+        int(row[2]),
+        int(row[3]),
+        row[4],
+        row[5],
+        row[6],
+        row[7],
+        partitions=tuple(str(p) for p in row[8]),
+        day=row[9],
+        day_requests=int(row[10]),
+    )
 
 
 def save_cursor(conn: psycopg.Connection, c: CrawlCursor) -> None:
     conn.execute(
         """INSERT INTO discountz.crawl_cursor (source, sweep_no, partition_idx, page,
-               sweep_started_at, last_sweep_s, last_run_at, changed_since)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               sweep_started_at, last_sweep_s, last_run_at, changed_since, partitions,
+               day_start, day_requests)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (source) DO UPDATE SET sweep_no = EXCLUDED.sweep_no,
                partition_idx = EXCLUDED.partition_idx, page = EXCLUDED.page,
                sweep_started_at = EXCLUDED.sweep_started_at,
                last_sweep_s = EXCLUDED.last_sweep_s, last_run_at = EXCLUDED.last_run_at,
-               changed_since = EXCLUDED.changed_since""",
+               changed_since = EXCLUDED.changed_since, partitions = EXCLUDED.partitions,
+               day_start = EXCLUDED.day_start, day_requests = EXCLUDED.day_requests""",
         (
             c.source,
             c.sweep_no,
@@ -1712,6 +1731,9 @@ def save_cursor(conn: psycopg.Connection, c: CrawlCursor) -> None:
             c.last_sweep_s,
             c.last_run_at,
             c.changed_since,
+            Jsonb(list(c.partitions)),
+            c.day,
+            c.day_requests,
         ),
     )
 

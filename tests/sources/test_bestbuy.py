@@ -251,3 +251,10 @@ def test_registered_as_api_source() -> None:
         Capability.CATALOG,
     }
     assert "pisces.bbystatic.com" in d.image_hosts
+
+
+def test_catalog_items_by_sku() -> None:
+    api = Api(fixture("api-products"))
+    items = BestBuySource().fetch_catalog_items(ctx(api), ["6680742", "6385543"])
+    assert [o.external_id for o in items] == ["6680742"]  # el otro está agotado
+    assert api.calls[0][0] == "products(sku in(6680742,6385543))"

@@ -28,6 +28,7 @@ __all__ = [
     "CardFacts",
     "CatalogPage",
     "CatalogSource",
+    "CrawlSource",
     "CredentialStore",
     "ExtractionPath",
     "ListingFailed",
@@ -170,6 +171,13 @@ class CatalogSource(Protocol):
     def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]: ...
     def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage: ...
     def fetch_changed(self, ctx: SourceContext, since: datetime, page: int) -> CatalogPage: ...
+    def fetch_catalog_items(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> Sequence[CatalogObservation]: ...
     def fetch_card_facts(
         self, ctx: SourceContext, external_ids: Sequence[str]
     ) -> dict[str, CardFacts]: ...
+
+
+class CrawlSource(Source, CatalogSource, Protocol):
+    """Fuente que se puede rastrear: ficha y búsqueda de la v1 más el catálogo."""
