@@ -166,6 +166,7 @@ class _Source(_Strict):
     watch_interval_min: Pos
     search_interval_min: Pos
     max_batch: Annotated[int, Field(ge=1, le=100)]
+    max_auto_watches: NonNeg = 0
 
 
 class _Event(_Strict):
@@ -294,6 +295,7 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
             watch_interval=timedelta(minutes=s.watch_interval_min),
             search_interval=timedelta(minutes=s.search_interval_min),
             max_batch=s.max_batch,
+            max_auto_watches=s.max_auto_watches,
         )
         for code, s in raw.sources.items()
     }

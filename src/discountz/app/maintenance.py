@@ -70,6 +70,8 @@ def run_maintenance(
         glitches = db.reclassify_glitches(conn, now - GLITCH_RECLASS)  # 3
     retention = db.apply_retention(conn, now)  # 4
     retention += db.prune_discoveries(conn, now - timedelta(days=120), now - timedelta(days=365))
+    with conn.transaction():
+        retention += db.expire_auto_watches(conn, now)
     size = db.db_size(conn) if db_bytes is None else db_bytes
     week = local(now).strftime("%G-W%V")
     listings_pruned = segments_pruned = 0

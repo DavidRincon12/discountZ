@@ -155,6 +155,7 @@ max_per_24h = 400
 watch_interval_min = 180
 search_interval_min = 360
 max_batch = 1
+max_auto_watches = 300
 
 [sources.newegg]
 group = "newegg"
@@ -165,6 +166,7 @@ max_per_24h = 400
 watch_interval_min = 180
 search_interval_min = 360
 max_batch = 1
+max_auto_watches = 100
 
 [sources.walmart_us]
 group = "walmart_us"

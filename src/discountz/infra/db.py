@@ -703,7 +703,18 @@ def create_watch(
         "SELECT id FROM discountz.watch WHERE source = %s AND pending_ref = %s",
         (source, pending_ref),
     )
-    return WatchCreated(int(_required(existing)[0]), False)
+    wid = int(_required(existing)[0])
+    _make_manual(conn, wid)
+    return WatchCreated(wid, False)
+
+
+def _make_manual(conn: psycopg.Connection, watch_id: int) -> None:
+    """Seguir a mano un producto que ya se seguía solo lo vuelve manual y sin vencimiento."""
+    conn.execute(
+        """UPDATE discountz.watch SET origin = 'manual', expires_at = NULL
+            WHERE id = %s AND origin = 'auto'""",
+        (watch_id,),
+    )
 
 
 def create_watch_on_listing(
@@ -726,7 +737,84 @@ def create_watch_on_listing(
     if row is not None:
         return WatchCreated(int(row[0]), True)
     existing = _one(conn, "SELECT id FROM discountz.watch WHERE listing_id = %s", (listing_id,))
-    return WatchCreated(int(_required(existing)[0]), False)
+    wid = int(_required(existing)[0])
+    _make_manual(conn, wid)
+    return WatchCreated(wid, False)
+
+
+def create_auto_watch(
+    conn: psycopg.Connection,
+    source: str,
+    ref: ListingRef,
+    now: datetime,
+    ttl: timedelta,
+    *,
+    cap: int,
+) -> int | None:
+    """Seguimiento automático (spec del rastreo §4.4); `None` si ya hay uno o el tope es 0.
+
+    Con el tope lleno se quita el automático más viejo de la fuente: quedan los más nuevos.
+    """
+    if cap <= 0:
+        return None
+    pending = f"id:{ref.external_id}"
+    taken = _one(
+        conn,
+        """SELECT 1 FROM discountz.watch w
+             LEFT JOIN discountz.listing l ON l.id = w.listing_id
+            WHERE w.source = %s
+              AND (w.pending_ref = %s OR l.external_id = %s)""",
+        (source, pending, ref.external_id),
+    )
+    if taken is not None:
+        return None
+    conn.execute(
+        """DELETE FROM discountz.watch WHERE id IN (
+               SELECT id FROM discountz.watch
+                WHERE source = %s AND origin = 'auto'
+                ORDER BY created_at DESC, id DESC OFFSET %s)""",
+        (source, cap - 1),
+    )
+    found = _one(
+        conn,
+        "SELECT id FROM discountz.listing WHERE source = %s AND external_id = %s",
+        (source, ref.external_id),
+    )
+    row = _one(
+        conn,
+        """INSERT INTO discountz.watch (source, listing_id, pending_ref, status, origin,
+               expires_at, next_check_at, created_at)
+           VALUES (%s, %s, %s, %s, 'auto', %s, %s, %s)
+           RETURNING id""",
+        (
+            source,
+            None if found is None else found[0],
+            pending if found is None else None,
+            "pending" if found is None else "active",
+            now + ttl,
+            now,
+            now,
+        ),
+    )
+    return int(_required(row)[0])
+
+
+def extend_auto_watch(conn: psycopg.Connection, listing_id: int, until: datetime) -> None:
+    """Una alerta del producto alarga su seguimiento automático (también si sigue pendiente)."""
+    conn.execute(
+        """UPDATE discountz.watch w SET expires_at = greatest(w.expires_at, %s)
+             FROM discountz.listing l
+            WHERE l.id = %s AND w.origin = 'auto' AND w.source = l.source
+              AND (w.listing_id = l.id OR w.pending_ref = 'id:' || l.external_id)""",
+        (until, listing_id),
+    )
+
+
+def expire_auto_watches(conn: psycopg.Connection, now: datetime) -> int:
+    """Quita los automáticos vencidos; el listing y su histórico se conservan."""
+    return conn.execute(
+        "DELETE FROM discountz.watch WHERE origin = 'auto' AND expires_at < %s", (now,)
+    ).rowcount
 
 
 def activate_watch(conn: psycopg.Connection, watch_id: int, listing_id: int) -> None:

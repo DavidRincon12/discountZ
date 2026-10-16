@@ -37,6 +37,7 @@ class SourceBudget:
     watch_interval: timedelta
     search_interval: timedelta
     max_batch: int
+    max_auto_watches: int = 0  # tope de seguimientos automáticos (spec del rastreo §4.4)
 
 
 @dataclass(frozen=True, slots=True)

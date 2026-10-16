@@ -81,6 +81,7 @@ GONE_AFTER = 3
 REPLY_TTL = timedelta(hours=24)
 SYSTEM_TTL = timedelta(hours=48)
 LEAD_FRESH = timedelta(hours=6)  # un lead no relee un listing leído hace menos (spec §4.3)
+AUTO_WATCH_TTL = timedelta(days=30)  # vence sin alertas (spec del rastreo §4.4)
 
 
 @dataclass(frozen=True, slots=True)
@@ -478,6 +479,24 @@ class Collector:
                     self._queue_lead(lead, row.spec.category)
             nxt = next_check_at(self.now, interval, 0, False, self.rnd)
             db.record_search_run(self.conn, row.id, self.now, nxt, result_count=len(leads))
+        for lead in leads:
+            self._auto_watch(lead)
+
+    def _auto_watch(self, lead: Lead) -> None:
+        """Todo lead que lleva a una ficha queda en seguimiento automático (rastreo §4.4)."""
+        try:
+            source, ref = route_url(str(lead.target_url), self.stores)
+        except UnsafeUrl:
+            return
+        if not isinstance(ref, ListingRef):
+            return
+        code = source.descriptor.code
+        budget = self.params.budgets.get(code)
+        cap = budget.max_auto_watches if budget is not None else 0
+        with self.conn.transaction():
+            created = db.create_auto_watch(self.conn, code, ref, self.now, AUTO_WATCH_TTL, cap=cap)
+        if created is not None:
+            event(log, "auto_watch_created", source=code)
 
     def _queue_lead(self, lead: Lead, category: str) -> None:
         """Encola la ficha en la tienda de destino si está activa y no se leyó hace poco."""
@@ -727,7 +746,10 @@ class Collector:
                 observed_at=offer.observed_at,
             ),
         )
-        if alert_id is None or delivery != "new":
+        if alert_id is None:
+            return
+        db.extend_auto_watch(self.conn, c.listing_id, self.now + AUTO_WATCH_TTL)
+        if delivery != "new":
             return
         self.alerts_created += 1
         currency = offer.price.currency
