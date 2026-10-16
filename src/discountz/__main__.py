@@ -168,6 +168,7 @@ def _cmd_run() -> int:
         for code, s in sources.items()
     }
     api = HttpxClient("telegram")
+    pics = HttpxClient("fotos")
     health = Healthchecks(settings.healthchecks_url, api)
     holder = (
         f"gh:{settings.gh_run_id}:{settings.gh_run_attempt or 1}"
@@ -198,6 +199,7 @@ def _cmd_run() -> int:
                     rnd=rnd,
                     healthchecks=health,
                     credentials=EnvCredentials(settings),
+                    photos=pics,
                 ),
                 now,
             )
@@ -209,6 +211,7 @@ def _cmd_run() -> int:
         for client in clients.values():
             client.close()
         api.close()
+        pics.close()
     return result.exit_code
 
 

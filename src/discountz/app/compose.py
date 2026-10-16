@@ -24,6 +24,7 @@ from discountz.config import AppParams
 from discountz.domain.decide import PendingAlert, group_summaries
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Money
+from discountz.domain.topics import CATEGORY_TOPIC, DEFAULT_TOPIC
 from discountz.infra import db
 
 ALERT_TTL = timedelta(hours=12)
@@ -69,6 +70,21 @@ def reduced_view(a: db.UnqueuedAlert) -> AlertView:
     )
 
 
+def topic_for(a: db.UnqueuedAlert) -> str:
+    """Tema del grupo de Telegram para una alerta de la v1: Slickdeals va a `comunidad_us`."""
+    if a.source == "slickdeals" or a.kind is AlertKind.COMMUNITY_DEAL:
+        return "comunidad_us"
+    return CATEGORY_TOPIC.get(a.category, DEFAULT_TOPIC)
+
+
+def _group_topic(alerts: list[db.UnqueuedAlert]) -> str:
+    """Un resumen mezcla fuentes de una categoría: solo va a `comunidad_us` si todo es comunidad."""
+    topics = {topic_for(a) for a in alerts}
+    if len(topics) == 1:
+        return topics.pop()
+    return CATEGORY_TOPIC.get(alerts[0].category, DEFAULT_TOPIC)
+
+
 def compose_alerts(
     conn: psycopg.Connection, views: Mapping[int, AlertView], now: datetime, params: AppParams
 ) -> int:
@@ -95,6 +111,7 @@ def compose_alerts(
                 ttl=ALERT_TTL,
                 reply_markup=reply_markup(msg.buttons) if msg.buttons else None,
                 silent=silent,
+                topic=_group_topic([rows[i] for i in ids]),
             )
             db.mark_alerts_queued(conn, ids, outbox_id)
         created += 1
