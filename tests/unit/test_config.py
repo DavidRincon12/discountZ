@@ -54,6 +54,8 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
     assert p.budgets["amazon_us"].max_per_run == 12
     assert p.budgets["amazon_us"].max_per_24h == 400
     assert p.budgets["exito"].max_batch == 50
+    assert p.budgets["bestbuy_us"].max_batch == 100  # API: 100 SKU por consulta
+    assert p.budgets["bestbuy_us"].min_pause_s == 1
     assert p.quiet_start == time(23, 0)
     assert p.quiet_end == time(7, 0)
     names = {e.name for e in p.events}

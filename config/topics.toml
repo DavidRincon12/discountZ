@@ -181,3 +181,38 @@ topic = "ferreteria"
 source = "exito"
 prefixes = ["/electrodomesticos/electrodomesticos de cuidado personal/"]
 topic = "belleza"
+
+# Best Buy (API oficial): categorías de primer nivel en inglés. Se revisan con el árbol real.
+[[rules]]
+source = "bestbuy_us"
+prefixes = [
+  "/computers & tablets/", "/cell phones/", "/audio/", "/cameras, camcorders & drones/",
+  "/tv & home theater/", "/video games/", "/wearable technology/",
+  "/smart home, security & wi-fi/", "/car electronics & gps/",
+]
+topic = "tecnologia"
+
+[[rules]]
+source = "bestbuy_us"
+prefixes = ["/appliances/"]
+topic = "electro"
+
+[[rules]]
+source = "bestbuy_us"
+prefixes = ["/home, furniture & office/", "/outdoor living/"]
+topic = "hogar"
+
+[[rules]]
+source = "bestbuy_us"
+prefixes = ["/health, fitness & beauty/"]
+topic = "belleza"
+
+[[rules]]
+source = "bestbuy_us"
+prefixes = ["/toys, games & collectibles/"]
+topic = "bebes"
+
+[[rules]]
+source = "bestbuy_us"
+prefixes = ["/movies & music/", "/office supplies & ink/"]
+topic = "libros"

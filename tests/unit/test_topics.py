@@ -90,3 +90,25 @@ def test_every_first_level_category_is_mapped(store: str) -> None:
         if assign_topic(topics.rules, store, path) == "otros" and not intentional:
             unmapped.append(cat["name"])
     assert unmapped == []
+
+
+# Categorías de primer nivel de Best Buy según su sitio y la documentación de la API; se revisan
+# con el árbol real al grabar las fixtures con la clave de David.
+BESTBUY_TOP = (
+    "Appliances", "Audio", "Cameras, Camcorders & Drones", "Car Electronics & GPS",
+    "Cell Phones", "Computers & Tablets", "Health, Fitness & Beauty",
+    "Home, Furniture & Office", "Movies & Music", "Office Supplies & Ink", "Outdoor Living",
+    "Smart Home, Security & Wi-Fi", "Toys, Games & Collectibles", "TV & Home Theater",
+    "Video Games", "Wearable Technology",
+)  # fmt: skip
+
+
+@pytest.mark.parametrize("name", BESTBUY_TOP)
+def test_bestbuy_first_level_categories_are_mapped(name: str) -> None:
+    assert assign_topic(load_topics().rules, "bestbuy_us", f"/{name}/") != "otros"
+
+
+def test_bestbuy_appliances_go_to_electro() -> None:
+    rules = load_topics().rules
+    assert assign_topic(rules, "bestbuy_us", "/Appliances/Washers & Dryers/") == "electro"
+    assert assign_topic(rules, "bestbuy_us", "/Computers & Tablets/Laptops/") == "tecnologia"

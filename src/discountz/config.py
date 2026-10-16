@@ -165,7 +165,7 @@ class _Source(_Strict):
     max_per_24h: Pos
     watch_interval_min: Pos
     search_interval_min: Pos
-    max_batch: Annotated[int, Field(ge=1, le=50)]
+    max_batch: Annotated[int, Field(ge=1, le=100)]
 
 
 class _Event(_Strict):
