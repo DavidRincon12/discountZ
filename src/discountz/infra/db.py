@@ -15,6 +15,7 @@ import psycopg
 from psycopg import errors
 from psycopg.types.json import Jsonb
 
+from discountz.domain.catalog import CatalogState
 from discountz.domain.evaluate import AlertRecord, ListingState
 from discountz.domain.health import BreakerState, HourStat
 from discountz.domain.model import AlertKind, ListingRef, Maturity, Offer, SearchSpec, SellerClass
@@ -29,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -463,6 +464,8 @@ class OutboxRow:
     silent: bool
     reply_to_message_id: int | None
     attempts: int
+    topic: str | None = None
+    card: dict[str, Any] | None = None
 
 
 def enqueue(
@@ -477,13 +480,15 @@ def enqueue(
     reply_markup: Mapping[str, Any] | None = None,
     silent: bool = False,
     reply_to_message_id: int | None = None,
+    topic: str | None = None,
+    card: Mapping[str, Any] | None = None,
 ) -> int:
     """Encola un mensaje; si el `dedup_key` ya existe devuelve el id existente."""
     row = _one(
         conn,
         """INSERT INTO discountz.outbox (purpose, dedup_key, priority, body_html, reply_markup,
-               silent, reply_to_message_id, not_before, expires_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+               silent, reply_to_message_id, not_before, expires_at, topic, card)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (dedup_key) DO NOTHING
            RETURNING id""",
         (
@@ -496,6 +501,8 @@ def enqueue(
             reply_to_message_id,
             now,
             now + ttl,
+            topic,
+            None if card is None else Jsonb(dict(card)),
         ),
     )
     if row is None:
@@ -519,7 +526,7 @@ def claim_outbox(conn: psycopg.Connection, limit: int, now: datetime) -> list[Ou
                         LIMIT %(limit)s FOR UPDATE SKIP LOCKED) ready
                 WHERE o.id = ready.id
             RETURNING o.id, o.purpose, o.dedup_key, o.priority, o.body_html, o.reply_markup,
-                      o.silent, o.reply_to_message_id, o.attempts""",
+                      o.silent, o.reply_to_message_id, o.attempts, o.topic, o.card""",
             {"now": now, "limit": limit},
         ).fetchall()
     out = [OutboxRow(*row) for row in rows]
@@ -1569,3 +1576,209 @@ def load_plan_input(
 
 def is_unique_violation(exc: BaseException) -> bool:
     return isinstance(exc, errors.UniqueViolation)
+
+
+# ───────────── Catálogo (spec del rastreo §7.1)
+
+_CAT_COLS = (
+    "price_minor, usual_minor, min_seen_minor, first_seen_at, stable_since, reads_at_price,"
+    " last_changed_at, last_alert_at, last_alert_minor"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogRow:
+    external_id: str
+    ean: str | None
+    topic: str
+    currency: str
+    state: CatalogState
+    price_changed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlCursor:
+    source: str
+    sweep_no: int
+    partition_idx: int
+    page: int
+    sweep_started_at: datetime | None
+    last_sweep_s: int | None
+    last_run_at: datetime | None
+    changed_since: datetime | None
+
+
+def load_catalog_states(
+    conn: psycopg.Connection, source: str, external_ids: Sequence[str]
+) -> dict[str, CatalogState]:
+    rows = conn.execute(
+        f"""SELECT external_id, {_CAT_COLS} FROM discountz.catalog_item
+             WHERE source = %s AND external_id = ANY(%s)""",
+        (source, list(external_ids)),
+    ).fetchall()
+    return {r[0]: CatalogState(*r[1:]) for r in rows}
+
+
+def save_catalog_page(
+    conn: psycopg.Connection, source: str, rows: Sequence[CatalogRow], now: datetime
+) -> None:
+    """Guarda una página en lote y registra los cambios de precio (una transacción)."""
+    if not rows:
+        return
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany(
+            f"""INSERT INTO discountz.catalog_item (source, external_id, ean, topic, currency,
+                    {_CAT_COLS}, last_seen_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source, external_id) DO UPDATE SET
+                    ean = coalesce(EXCLUDED.ean, catalog_item.ean), topic = EXCLUDED.topic,
+                    price_minor = EXCLUDED.price_minor, usual_minor = EXCLUDED.usual_minor,
+                    min_seen_minor = EXCLUDED.min_seen_minor,
+                    stable_since = EXCLUDED.stable_since,
+                    reads_at_price = EXCLUDED.reads_at_price,
+                    last_changed_at = EXCLUDED.last_changed_at,
+                    last_seen_at = greatest(catalog_item.last_seen_at, EXCLUDED.last_seen_at)""",
+            [
+                (
+                    source,
+                    r.external_id,
+                    r.ean,
+                    r.topic,
+                    r.currency,
+                    r.state.price_minor,
+                    r.state.usual_minor,
+                    r.state.min_seen_minor,
+                    r.state.first_seen_at,
+                    r.state.stable_since,
+                    r.state.reads_at_price,
+                    r.state.last_changed_at,
+                    r.state.last_alert_at,
+                    r.state.last_alert_minor,
+                    now,
+                )
+                for r in rows
+            ],
+        )
+        changed = [(r.external_id, r.state.price_minor) for r in rows if r.price_changed]
+        if changed:
+            cur.executemany(
+                """INSERT INTO discountz.catalog_price_change (item_id, at, price_minor)
+                   SELECT id, %s, %s FROM discountz.catalog_item
+                    WHERE source = %s AND external_id = %s
+                   ON CONFLICT DO NOTHING""",
+                [(now, price, source, ext) for ext, price in changed],
+            )
+
+
+def hot_catalog_ids(
+    conn: psycopg.Connection, source: str, since: datetime, limit: int
+) -> list[str]:
+    rows = conn.execute(
+        """SELECT external_id FROM discountz.catalog_item
+            WHERE source = %s AND last_changed_at >= %s
+            ORDER BY last_changed_at DESC LIMIT %s""",
+        (source, since, limit),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def get_cursor(conn: psycopg.Connection, source: str) -> CrawlCursor:
+    row = _one(
+        conn,
+        """SELECT source, sweep_no, partition_idx, page, sweep_started_at, last_sweep_s,
+                  last_run_at, changed_since
+             FROM discountz.crawl_cursor WHERE source = %s""",
+        (source,),
+    )
+    return CrawlCursor(*row) if row else CrawlCursor(source, 0, 0, 0, None, None, None, None)
+
+
+def save_cursor(conn: psycopg.Connection, c: CrawlCursor) -> None:
+    conn.execute(
+        """INSERT INTO discountz.crawl_cursor (source, sweep_no, partition_idx, page,
+               sweep_started_at, last_sweep_s, last_run_at, changed_since)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+           ON CONFLICT (source) DO UPDATE SET sweep_no = EXCLUDED.sweep_no,
+               partition_idx = EXCLUDED.partition_idx, page = EXCLUDED.page,
+               sweep_started_at = EXCLUDED.sweep_started_at,
+               last_sweep_s = EXCLUDED.last_sweep_s, last_run_at = EXCLUDED.last_run_at,
+               changed_since = EXCLUDED.changed_since""",
+        (
+            c.source,
+            c.sweep_no,
+            c.partition_idx,
+            c.page,
+            c.sweep_started_at,
+            c.last_sweep_s,
+            c.last_run_at,
+            c.changed_since,
+        ),
+    )
+
+
+def acquire_crawl_lease(
+    conn: psycopg.Connection, source: str, holder: str, now: datetime, ttl: timedelta
+) -> bool:
+    row = _one(
+        conn,
+        """INSERT INTO discountz.crawl_lease (source, holder, expires_at) VALUES (%s, %s, %s)
+           ON CONFLICT (source) DO UPDATE SET holder = EXCLUDED.holder,
+               expires_at = EXCLUDED.expires_at
+            WHERE crawl_lease.expires_at < %s OR crawl_lease.holder = EXCLUDED.holder
+           RETURNING holder""",
+        (source, holder, now + ttl, now),
+    )
+    return row is not None
+
+
+def release_crawl_lease(conn: psycopg.Connection, source: str, holder: str) -> None:
+    conn.execute(
+        "DELETE FROM discountz.crawl_lease WHERE source = %s AND holder = %s", (source, holder)
+    )
+
+
+def recent_alert_for_ean(
+    conn: psycopg.Connection,
+    ean: str,
+    currency: str,
+    price_minor: int,
+    since: datetime,
+    *,
+    exclude_source: str,
+) -> bool:
+    """¿Otra tienda alertó el mismo EAN a ±1 % desde `since`? (duplicados, spec §3.2)."""
+    row = _one(
+        conn,
+        """SELECT 1 FROM discountz.catalog_item
+            WHERE ean = %s AND currency = %s AND source <> %s AND last_alert_at >= %s
+              AND abs(last_alert_minor - %s) * 100 <= last_alert_minor
+            LIMIT 1""",
+        (ean, currency, exclude_source, since, price_minor),
+    )
+    return row is not None
+
+
+def mark_catalog_alert(
+    conn: psycopg.Connection, source: str, external_id: str, price_minor: int, now: datetime
+) -> None:
+    conn.execute(
+        """UPDATE discountz.catalog_item SET last_alert_at = %s, last_alert_minor = %s
+            WHERE source = %s AND external_id = %s""",
+        (now, price_minor, source, external_id),
+    )
+
+
+def topic_threads(conn: psycopg.Connection) -> dict[str, int]:
+    rows = conn.execute(
+        "SELECT code, thread_id FROM discountz.topic WHERE thread_id IS NOT NULL"
+    ).fetchall()
+    return {r[0]: int(r[1]) for r in rows}
+
+
+def save_topic(conn: psycopg.Connection, code: str, title: str, thread_id: int | None) -> None:
+    conn.execute(
+        """INSERT INTO discountz.topic (code, title, thread_id) VALUES (%s, %s, %s)
+           ON CONFLICT (code) DO UPDATE
+              SET title = EXCLUDED.title, thread_id = EXCLUDED.thread_id""",
+        (code, title, thread_id),
+    )
