@@ -284,6 +284,7 @@ def _watch(i: int, cat: str, **kw: object) -> WatchItem:
         "price": cop(289_900),
         "target": cop(250_000),
         "pending": False,
+        "auto": False,
     }
     base.update(kw)
     return WatchItem(**base)  # type: ignore[arg-type]
@@ -304,6 +305,12 @@ def test_list_groups_by_category_and_paginates_15() -> None:
     assert "<b>#hogar</b>" in rest
     assert "p30 · Licuadora &lt;x&gt; · Éxito · pendiente de primera lectura" in rest
     assert sum(m.html.count("\np") + m.html.count("\nb") for m in msgs) == 19
+
+
+def test_list_marks_auto_watches() -> None:
+    (msg,) = render_list([_watch(12, "tecnologia", auto=True), _watch(13, "tecnologia")], [])
+    assert "a12 · SSD 12" in msg.html
+    assert "p13 · SSD 13" in msg.html
 
 
 def test_empty_list_explains_how_to_start() -> None:

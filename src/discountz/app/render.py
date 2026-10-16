@@ -348,7 +348,8 @@ def render_list(
 
 
 def _watch_line(w: WatchItem) -> str:
-    parts = [f"p{w.id}", esc(truncate(w.title, LIST_TITLE)), esc(source_name(w.source))]
+    ref = f"{'a' if w.auto else 'p'}{w.id}"
+    parts = [ref, esc(truncate(w.title, LIST_TITLE)), esc(source_name(w.source))]
     if w.pending:
         parts.append("pendiente de primera lectura")
     else:

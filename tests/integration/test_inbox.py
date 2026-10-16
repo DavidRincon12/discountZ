@@ -34,6 +34,7 @@ class FakeTelegram:
     batches: list[list[Update]]
     offsets: list[int] = field(default_factory=list)
     answered: list[str] = field(default_factory=list)
+    created: list[tuple[int, str]] = field(default_factory=list)
 
     def get_updates(self, offset: int, timeout_s: int = 0) -> list[Update]:
         self.offsets.append(offset)
@@ -41,6 +42,10 @@ class FakeTelegram:
 
     def answer_callback(self, callback_id: str, text: str | None = None) -> None:
         self.answered.append(callback_id)
+
+    def create_forum_topic(self, chat_id: int, name: str) -> int:
+        self.created.append((chat_id, name))
+        return 100 + len(self.created)
 
 
 def msg(update_id: int, text: str, *, from_id: int = OWNER, chat_id: int = CHAT) -> Update:
@@ -248,3 +253,53 @@ def test_status_command_replies_with_pre(db: psycopg.Connection) -> None:
     run(db, [[msg(1, "/estado")]])
     (reply,) = replies(db)
     assert reply.startswith("<pre>discountZ")
+
+
+def test_temas_creates_missing_topics_once(db: psycopg.Connection) -> None:
+    repo.save_topic(db, "errores", "🚨 Errores de precio", 7)  # ya existía
+    _, tg = run(db, [[msg(1, "/temas")]])
+    names = [name for _, name in tg.created]
+    assert len(names) == 13
+    assert all(chat == CHAT for chat, _ in tg.created)
+    assert not any("Errores" in n for n in names)
+    threads = repo.topic_threads(db)
+    assert len(threads) == 14
+    assert threads["errores"] == 7
+    assert "Creé 13 temas" in replies(db)[0]
+    _, again = run(db, [[msg(2, "/temas")]])
+    assert again.created == []
+    assert "ya existen" in replies(db)[1]
+
+
+def _auto_and_manual(db: psycopg.Connection) -> tuple[int, int]:
+    ids = []
+    for ext, origin in (("1", "auto"), ("2", "manual")):
+        o = offer(source="exito", external_id=ext)
+        lid = repo.upsert_listing(db, o, "tecnologia", f"https://www.exito.com/{ext}/p", T).id
+        row = db.execute(
+            """INSERT INTO discountz.watch (source, listing_id, status, origin, next_check_at)
+               VALUES ('exito', %s, 'active', %s, %s) RETURNING id""",
+            (lid, origin, T),
+        ).fetchone()
+        assert row is not None
+        ids.append(int(row[0]))
+    return ids[0], ids[1]
+
+
+def test_list_marks_auto_watches(db: psycopg.Connection) -> None:
+    auto, manual = _auto_and_manual(db)
+    run(db, [[msg(1, "/lista")]])
+    text = replies(db)[0]
+    assert f"a{auto} · " in text
+    assert f"p{manual} · " in text
+
+
+def test_drop_auto_removes_only_auto(db: psycopg.Connection) -> None:
+    auto, manual = _auto_and_manual(db)
+    run(db, [[msg(1, f"/dejar p{auto}")]])
+    assert count(db, "watch") == 2  # pN no toca seguimientos automáticos
+    run(db, [[msg(2, "/dejar auto")]])
+    assert count(db, "watch") == 1
+    assert "1 seguimiento automático" in replies(db)[1]
+    run(db, [[msg(3, f"/dejar a{manual}")]])
+    assert count(db, "watch") == 1

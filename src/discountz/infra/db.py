@@ -763,12 +763,23 @@ def create_search(
 
 
 def drop_ref(conn: psycopg.Connection, ref: str) -> bool:
-    """Borra el `watch` (pN) o la `search` (bN). El listing y su histórico se conservan."""
-    table = {"p": "watch", "b": "search"}.get(ref[:1])
-    if table is None or not ref[1:].isdigit():
+    """Borra el `watch` manual (pN), el automático (aN) o la `search` (bN).
+
+    El listing y su histórico se conservan.
+    """
+    sql = {
+        "p": "DELETE FROM discountz.watch WHERE id = %s AND origin = 'manual'",
+        "a": "DELETE FROM discountz.watch WHERE id = %s AND origin = 'auto'",
+        "b": "DELETE FROM discountz.search WHERE id = %s",
+    }.get(ref[:1])
+    if sql is None or not ref[1:].isdigit():
         return False
-    cur = conn.execute(f"DELETE FROM discountz.{table} WHERE id = %s", (int(ref[1:]),))
-    return cur.rowcount == 1
+    return conn.execute(sql, (int(ref[1:]),)).rowcount == 1
+
+
+def drop_auto_watches(conn: psycopg.Connection) -> int:
+    """`/dejar auto`: quita todos los seguimientos automáticos; devuelve cuántos."""
+    return conn.execute("DELETE FROM discountz.watch WHERE origin = 'auto'").rowcount
 
 
 # ───────────── Telegram: offset y comandos
@@ -894,6 +905,7 @@ class WatchItem:
     price: Money | None
     target: Money | None
     pending: bool
+    auto: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -909,14 +921,14 @@ def list_watches(conn: psycopg.Connection) -> list[WatchItem]:
     rows = conn.execute(
         """SELECT w.id, w.source, coalesce(l.title, w.pending_ref),
                   coalesce(l.category, w.requested_category), l.last_price_minor,
-                  w.target_price_minor, w.listing_id IS NULL, s.currency
+                  w.target_price_minor, w.listing_id IS NULL, s.currency, w.origin = 'auto'
              FROM discountz.watch w
              JOIN discountz.source s ON s.code = w.source
              LEFT JOIN discountz.listing l ON l.id = w.listing_id
             ORDER BY w.id"""
     ).fetchall()
     out = []
-    for wid, source, title, category, price, target, pending, currency in rows:
+    for wid, source, title, category, price, target, pending, currency, auto in rows:
         cur = Currency(currency.strip())
         out.append(
             WatchItem(
@@ -927,6 +939,7 @@ def list_watches(conn: psycopg.Connection) -> list[WatchItem]:
                 None if price is None else Money(int(price), cur),
                 None if target is None else Money(int(target), cur),
                 bool(pending),
+                bool(auto),
             )
         )
     return out
