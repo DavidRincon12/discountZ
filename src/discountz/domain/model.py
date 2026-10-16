@@ -108,6 +108,7 @@ class AlertKind(StrEnum):
     HISTORIC_LOW = "historic_low"
     TARGET_REACHED = "target_reached"
     GOOD_DEAL = "good_deal"
+    CATALOG_DROP = "catalog_drop"  # bajada del rastreo del catálogo (spec del rastreo §3)
     COMMUNITY_DEAL = "community_deal"
 
     @property
@@ -120,6 +121,7 @@ _RANK = {
     AlertKind.HISTORIC_LOW: 4,
     AlertKind.TARGET_REACHED: 3,
     AlertKind.GOOD_DEAL: 2,
+    AlertKind.CATALOG_DROP: 2,
     AlertKind.COMMUNITY_DEAL: 1,
 }
 
