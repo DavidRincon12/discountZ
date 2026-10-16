@@ -79,6 +79,7 @@ class SourceDescriptor:
 class CredentialStore(Protocol):
     def bearer(self, provider: str) -> SecretStr: ...
     def signed_headers(self, provider: str, now: datetime) -> Mapping[str, str]: ...
+    def public_id(self, provider: str) -> str: ...  # identificador no secreto (publisherId)
 
 
 class NoCredentials:
@@ -88,6 +89,9 @@ class NoCredentials:
         raise CredentialUnavailable(provider, "no_credentials")
 
     def signed_headers(self, provider: str, now: datetime) -> Mapping[str, str]:
+        raise CredentialUnavailable(provider, "no_credentials")
+
+    def public_id(self, provider: str) -> str:
         raise CredentialUnavailable(provider, "no_credentials")
 
 

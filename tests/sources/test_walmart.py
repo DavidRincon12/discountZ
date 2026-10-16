@@ -3,18 +3,27 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
-from discountz.domain.errors import NotFound, ParseError
+from discountz.domain.errors import CredentialUnavailable, NotFound, ParseError
 from discountz.domain.guards import batch_is_constant
-from discountz.domain.model import ListingRef, SellerClass
+from discountz.domain.model import ListingRef, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
-from discountz.infra.http import FakeHttp, HttpResponse
-from discountz.sources.base import ListingFailed, ListingFound, NoCredentials, SourceContext
+from discountz.infra.http import FakeHttp, HttpResponse, Method, Params
+from discountz.sources.base import (
+    ListingFailed,
+    ListingFound,
+    ListingGone,
+    NoCredentials,
+    SourceContext,
+)
 from discountz.sources.fixtures import FIXTURES_DIR, load_fixture
 from discountz.sources.registry import load_all
 from discountz.sources.walmart import (
@@ -25,6 +34,7 @@ from discountz.sources.walmart import (
 )
 
 T = datetime(2026, 10, 13, 15, 0, tzinfo=UTC)
+BASE_URL = "https://www.walmart.com"
 FICHAS = ["13573063573", "19912811513", "5113175776"]
 
 
@@ -169,3 +179,138 @@ def test_fetch_rejects_foreign_redirects(location: str) -> None:
 def test_registered_and_curl() -> None:
     src = load_all()["walmart_us"]
     assert src.descriptor.client == "curl"
+
+
+# ───────────── Modo API de afiliados (spec del rastreo §4.5): sintético hasta la aprobación.
+
+API = "https://developer.api.walmart.com/api-proxy/service/affil/product/v2"
+SIGNED = {
+    "WM_CONSUMER.ID": "c0ffee",
+    "WM_CONSUMER.INTIMESTAMP": "1",
+    "WM_SEC.KEY_VERSION": "1",
+    "WM_SEC.AUTH_SIGNATURE": "c2ln",
+}
+
+
+class WalmartKeys:
+    def bearer(self, provider: str) -> SecretStr:
+        raise CredentialUnavailable(provider, "missing")
+
+    def signed_headers(self, provider: str, now: datetime) -> Mapping[str, str]:
+        assert provider == "walmart"
+        return SIGNED
+
+    def public_id(self, provider: str) -> str:
+        assert provider == "walmart"
+        return "pub9"
+
+
+@dataclass
+class Recorder:
+    resp: HttpResponse
+    calls: list[tuple[str, dict[str, str], dict[str, str]]] = field(default_factory=list)
+
+    def request(
+        self,
+        method: Method,
+        url: str,
+        *,
+        params: Params | None = None,
+        json: Mapping[str, object] | None = None,
+        headers: Mapping[str, str] | None = None,
+        cookies: Mapping[str, str] | None = None,
+    ) -> HttpResponse:
+        pairs = list(params.items()) if isinstance(params, Mapping) else list(params or [])
+        self.calls.append((url, dict(pairs), dict(headers or {})))
+        return self.resp
+
+
+def test_api_mode_when_credentials() -> None:
+    rec = Recorder(load_fixture("walmart_us", "api-items"))
+    ctx = SourceContext(rec, WalmartKeys(), 1e9, T)
+    refs = [ListingRef("walmart_us", i) for i in ("5113175776", "19912811513", "13573063573")]
+    out = WalmartSource().fetch_listings(ctx, refs)
+    assert all(isinstance(o, ListingFound) for o in out)
+    (call,) = rec.calls
+    url, query, headers = call
+    assert url == f"{API}/items"
+    assert query["ids"] == "5113175776,19912811513,13573063573"
+    assert query["publisherId"] == "pub9"
+    assert SIGNED.items() <= headers.items()
+
+
+def test_parse_api_items() -> None:
+    rec = Recorder(load_fixture("walmart_us", "api-items"))
+    ctx = SourceContext(rec, WalmartKeys(), 1e9, T)
+    refs = [ListingRef("walmart_us", i) for i in ("5113175776", "19912811513", "13573063573")]
+    offers = {
+        o.offer.ref.external_id: o.offer
+        for o in WalmartSource().fetch_listings(ctx, refs)
+        if isinstance(o, ListingFound)
+    }
+    tv = offers["5113175776"]
+    assert tv.price == Money(12_999, Currency.USD)
+    assert tv.list_price == Money(19_800, Currency.USD)
+    assert tv.in_stock
+    assert tv.seller_class is SellerClass.FIRST_PARTY
+    hub = offers["19912811513"]
+    assert hub.in_stock  # «Limited Supply» sigue en stock
+    assert hub.seller_class is SellerClass.MARKETPLACE
+    assert not offers["13573063573"].in_stock
+    assert offers["13573063573"].price is None
+
+
+def test_api_batches_of_twenty() -> None:
+    rec = Recorder(HttpResponse(200, "x", {}, b'{"items": []}', 0))
+    ctx = SourceContext(rec, WalmartKeys(), 1e9, T)
+    refs = [ListingRef("walmart_us", str(10_000 + i)) for i in range(45)]
+    out = WalmartSource().fetch_listings(ctx, refs)
+    assert len(rec.calls) == 3
+    assert len(out) == 45
+    assert all(isinstance(o, ListingGone) for o in out)
+
+
+def test_api_search_and_card_facts() -> None:
+    rec = Recorder(load_fixture("walmart_us", "api-search"))
+    ctx = SourceContext(rec, WalmartKeys(), 1e9, T)
+    spec = SearchSpec("walmart_us", "tv 50", (), None, None, "tecnologia")
+    page = WalmartSource().search(ctx, spec, 0)
+    assert {o.ref.external_id for o in page.offers} == {"5113175776", "19912811513", "13573063573"}
+    url, query, _ = rec.calls[0]
+    assert url == f"{API}/search"
+    assert query["query"] == "tv 50"
+    rec2 = Recorder(load_fixture("walmart_us", "api-items"))
+    facts = WalmartSource().fetch_card_facts(
+        SourceContext(rec2, WalmartKeys(), 1e9, T), ["5113175776"]
+    )
+    assert facts["5113175776"].url == "https://www.walmart.com/ip/5113175776"
+    assert (
+        facts["5113175776"].image_url
+        == "https://i5.walmartimages.com/asr/abc.jpeg?odnHeight=450&odnWidth=450"
+    )
+
+
+def test_html_mode_without_credentials() -> None:
+    canonical = f"{BASE_URL}/ip/5113175776"
+    fake = FakeHttp({canonical: load_fixture("walmart_us", "ficha_5113175776")})
+    ctx = SourceContext(fake, NoCredentials(), 1e9, T)
+    (out,) = WalmartSource().fetch_listings(ctx, [ListingRef("walmart_us", "5113175776")])
+    assert isinstance(out, ListingFound)
+    assert fake.calls[0][1] == canonical
+
+
+def test_descriptor_image_hosts() -> None:
+    assert WalmartSource().descriptor.image_hosts == {"i5.walmartimages.com"}
+
+
+def test_api_confirm_rereads_item() -> None:
+    rec = Recorder(load_fixture("walmart_us", "api-items"))
+    ctx = SourceContext(rec, WalmartKeys(), 1e9, T)
+    src = WalmartSource()
+    (found,) = src.fetch_listings(ctx, [ListingRef("walmart_us", "5113175776")])
+    assert isinstance(found, ListingFound)
+    confirmed = src.confirm(ctx, found.offer)
+    assert confirmed is not None
+    assert confirmed.price == Money(12_999, Currency.USD)
+    assert rec.calls[-1][1]["ids"] == "5113175776"
+    assert all(url.startswith(API) for url, _, _ in rec.calls)

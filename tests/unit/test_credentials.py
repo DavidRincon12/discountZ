@@ -141,3 +141,18 @@ def test_empty_env_values_mean_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.walmart_private_key is None
     with pytest.raises(CredentialUnavailable):
         EnvCredentials(s).bearer("bestbuy")
+
+
+def test_walmart_public_id(monkeypatch: pytest.MonkeyPatch, rsa_key: rsa.RSAPrivateKey) -> None:
+    s = settings(
+        monkeypatch,
+        DISCOUNTZ_WALMART_CONSUMER_ID="c0ffee",
+        DISCOUNTZ_WALMART_KEY_VERSION="1",
+        DISCOUNTZ_WALMART_PRIVATE_KEY=pem(rsa_key),
+        DISCOUNTZ_WALMART_PUBLISHER_ID="pub9",
+    )
+    assert EnvCredentials(s).public_id("walmart") == "pub9"
+    with pytest.raises(CredentialUnavailable):
+        EnvCredentials(settings(monkeypatch)).public_id("walmart")
+    with pytest.raises(CredentialUnavailable):
+        NoCredentials().public_id("walmart")

@@ -21,6 +21,7 @@ class EnvCredentials:
     def __init__(self, settings: Settings) -> None:
         self._bestbuy = settings.bestbuy_api_key
         self._walmart: tuple[str, str, SecretStr] | None = None
+        self._publisher = settings.walmart_publisher_id
         if (
             settings.walmart_consumer_id
             and settings.walmart_key_version
@@ -41,6 +42,11 @@ class EnvCredentials:
     def bearer(self, provider: str) -> SecretStr:
         if provider == "bestbuy" and self._bestbuy is not None:
             return self._bestbuy
+        raise CredentialUnavailable(provider, "missing")
+
+    def public_id(self, provider: str) -> str:
+        if provider == "walmart" and self._walmart is not None and self._publisher:
+            return self._publisher
         raise CredentialUnavailable(provider, "missing")
 
     def signed_headers(self, provider: str, now: datetime) -> Mapping[str, str]:
