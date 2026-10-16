@@ -16,7 +16,7 @@ from discountz.domain.guards import batch_is_constant
 from discountz.domain.model import ListingRef, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
-from discountz.infra.http import FakeHttp, HttpResponse, Method, Params
+from discountz.infra.http import FakeHttp, Files, HttpResponse, Method, Params
 from discountz.sources.base import (
     ListingFailed,
     ListingFound,
@@ -219,6 +219,8 @@ class Recorder:
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> HttpResponse:
         pairs = list(params.items()) if isinstance(params, Mapping) else list(params or [])
         self.calls.append((url, dict(pairs), dict(headers or {})))

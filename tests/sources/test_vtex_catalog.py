@@ -14,7 +14,7 @@ import pytest
 from discountz.domain.errors import ParseError
 from discountz.domain.model import SellerClass
 from discountz.domain.money import Currency, Money
-from discountz.infra.http import FakeHttp, HttpResponse, Method, Params
+from discountz.infra.http import FakeHttp, Files, HttpResponse, Method, Params
 from discountz.sources.base import Capability, CatalogPage, NoCredentials, SourceContext
 from discountz.sources.fixtures import load_fixture
 from discountz.sources.vtex import CATALOG_CAP, STORES, VtexSource
@@ -219,6 +219,8 @@ class _Router:
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> HttpResponse:
         assert url.endswith(SEARCH)
         pairs = list(params.items()) if isinstance(params, Mapping) else list(params or [])

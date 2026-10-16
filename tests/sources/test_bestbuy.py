@@ -20,7 +20,7 @@ from discountz.domain.model import ExtractionPath, ListingRef, SearchSpec, Selle
 from discountz.domain.money import Currency, Money
 from discountz.domain.scheduling import SourceBudget
 from discountz.domain.urls import SafeUrl
-from discountz.infra.http import HttpResponse, Method, PacedClient, Params
+from discountz.infra.http import Files, HttpResponse, Method, PacedClient, Params
 from discountz.sources.base import (
     Capability,
     ListingFailed,
@@ -62,6 +62,8 @@ class Api:
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> HttpResponse:
         pairs = list(params.items()) if isinstance(params, Mapping) else list(params or [])
         resource = unquote(urlsplit(url).path).removeprefix("/v1/")

@@ -28,7 +28,7 @@ from discountz.domain.scheduling import CrawlBudget
 from discountz.domain.urls import SafeUrl
 from discountz.infra import db as repo
 from discountz.infra.db import CatalogRow
-from discountz.infra.http import BlockKind, HttpResponse, Method, Params
+from discountz.infra.http import BlockKind, Files, HttpResponse, Method, Params
 from discountz.sources.base import (
     Capability,
     CardFacts,
@@ -96,6 +96,8 @@ class Transport:
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> HttpResponse:
         self.clock.t += self.clock.step
         self.urls.append(url)
