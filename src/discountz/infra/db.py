@@ -1905,3 +1905,52 @@ def save_topic(conn: psycopg.Connection, code: str, title: str, thread_id: int |
               SET title = EXCLUDED.title, thread_id = EXCLUDED.thread_id""",
         (code, title, thread_id),
     )
+
+
+# ───────────── Catálogo: retención y resumen diario (spec del rastreo §7.2 y §8)
+
+
+def delete_old_catalog_changes(conn: psycopg.Connection, cutoff: datetime) -> int:
+    return conn.execute(
+        "DELETE FROM discountz.catalog_price_change WHERE at < %s", (cutoff,)
+    ).rowcount
+
+
+def delete_unseen_catalog_items(conn: psycopg.Connection, cutoff: datetime) -> int:
+    """Productos que el rastreo dejó de ver (sin stock o retirados); sus cambios caen en cascada."""
+    return conn.execute(
+        "DELETE FROM discountz.catalog_item WHERE last_seen_at < %s", (cutoff,)
+    ).rowcount
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogDaily:
+    items_by_source: Mapping[str, int]
+    changes_today: int
+    alerts_by_topic: Mapping[str, int]
+    last_sweep_s_by_source: Mapping[str, int]
+
+
+def catalog_daily_stats(conn: psycopg.Connection, now: datetime) -> CatalogDaily:
+    since = now - timedelta(hours=24)
+    items = conn.execute(
+        "SELECT source, count(*) FROM discountz.catalog_item GROUP BY source"
+    ).fetchall()
+    changes = _one(
+        conn, "SELECT count(*) FROM discountz.catalog_price_change WHERE at >= %s", (since,)
+    )
+    alerts = conn.execute(
+        """SELECT topic, count(*) FROM discountz.outbox
+            WHERE purpose IN ('alert', 'digest') AND topic IS NOT NULL AND created_at >= %s
+            GROUP BY topic""",
+        (since,),
+    ).fetchall()
+    sweeps = conn.execute(
+        "SELECT source, last_sweep_s FROM discountz.crawl_cursor WHERE last_sweep_s IS NOT NULL"
+    ).fetchall()
+    return CatalogDaily(
+        items_by_source={r[0]: int(r[1]) for r in items},
+        changes_today=int(_required(changes)[0]),
+        alerts_by_topic={r[0]: int(r[1]) for r in alerts},
+        last_sweep_s_by_source={r[0]: int(r[1]) for r in sweeps},
+    )

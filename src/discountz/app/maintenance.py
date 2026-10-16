@@ -21,6 +21,9 @@ PRUNE_BYTES = 400 * MB
 PAUSE_BYTES = 450 * MB
 SEGMENT_KEEP = timedelta(days=400)
 GLITCH_RECLASS = timedelta(days=7)
+CATALOG_CHANGES_KEEP = timedelta(days=90)  # spec del rastreo §7.2
+CATALOG_CHANGES_KEEP_TIGHT = timedelta(days=45)  # con la BD en ≥ 400 MB
+CATALOG_UNSEEN = timedelta(days=30)
 MAINTENANCE_AT = time(3, 0)
 SUMMARY_AT = time(8, 0)
 TOKEN_WARN_DAYS = 14
@@ -72,6 +75,8 @@ def run_maintenance(
     retention += db.prune_discoveries(conn, now - timedelta(days=120), now - timedelta(days=365))
     with conn.transaction():
         retention += db.expire_auto_watches(conn, now)
+    retention += db.delete_old_catalog_changes(conn, now - CATALOG_CHANGES_KEEP)
+    retention += db.delete_unseen_catalog_items(conn, now - CATALOG_UNSEEN)
     size = db.db_size(conn) if db_bytes is None else db_bytes
     week = local(now).strftime("%G-W%V")
     listings_pruned = segments_pruned = 0
@@ -81,12 +86,13 @@ def run_maintenance(
     if size >= PRUNE_BYTES:
         listings_pruned = db.prune_discoveries(conn, now - timedelta(days=60), None)
         segments_pruned = db.prune_unwatched_segments(conn, now - timedelta(days=180))
+        retention += db.delete_old_catalog_changes(conn, now - CATALOG_CHANGES_KEEP_TIGHT)
     if size >= PAUSE_BYTES:
         paused = True
         _notice(
             conn,
-            f"⚠️ BD en {size // MB} MB (≥ 450 de 500): pauso las búsquedas; "
-            "siguen los seguimientos.",
+            f"⚠️ BD en {size // MB} MB (≥ 450 de 500): pauso las búsquedas y el rastreo de "
+            "Éxito y Carulla; siguen los seguimientos.",
             f"db450:{local(now).date().isoformat()}",
             now,
             0,
@@ -122,6 +128,7 @@ def daily_summary(conn: psycopg.Connection, now: datetime) -> DailyView:
         db_bytes=db.db_size(conn),
         by_trigger=act.by_trigger,
         warnings=tuple(warnings),
+        catalog=db.catalog_daily_stats(conn, now),
     )
 
 

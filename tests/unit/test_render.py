@@ -27,7 +27,7 @@ from discountz.app.render import (
 )
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money
-from discountz.infra.db import SearchItem, SourceStatus, StatusSnapshot, WatchItem
+from discountz.infra.db import CatalogDaily, SearchItem, SourceStatus, StatusSnapshot, WatchItem
 
 GOLDEN = Path(__file__).parent.parent / "golden"
 SEEN = datetime(2026, 10, 13, 15, 2, tzinfo=UTC)  # 10:02 en Bogotá
@@ -370,6 +370,26 @@ def test_daily_summary_line() -> None:
         "exito sana, amazon_us 2 bloqueos (recuperada) · BD 41 MB de 500"
     )
     assert msg.silent
+
+
+def test_daily_summary_catalog_lines() -> None:
+    view = DailyView(
+        cycles=92,
+        last_cycle_at=None,
+        alerts=6,
+        source_notes=(),
+        db_bytes=41 * 1024 * 1024,
+        catalog=CatalogDaily(
+            items_by_source={"exito": 305_000, "carulla": 126_000},
+            changes_today=1_234,
+            alerts_by_topic={"tecnologia": 3, "hogar": 1},
+            last_sweep_s_by_source={"exito": 18_720},
+        ),
+    )
+    html = render_daily(view).html
+    assert "\nCatálogo: Carulla 126.000, Éxito 305.000 (vuelta 5 h 12 min)" in html
+    assert "1.234 cambios hoy" in html
+    assert "alertas por tema: hogar 1, tecnologia 3" in html
 
 
 CARD_C01 = {

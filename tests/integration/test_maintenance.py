@@ -10,6 +10,7 @@ import psycopg
 import pytest
 
 from discountz.app.collect import Collector, SourceRun
+from discountz.app.crawl import run_crawl
 from discountz.app.maintenance import (
     MB,
     daily_summary,
@@ -26,6 +27,7 @@ from discountz.infra.http import FakeHttp, PacedClient
 from discountz.sources.fixtures import load_fixture
 from discountz.sources.vtex import STORES, VtexSource
 from tests.factories import offer
+from tests.integration.test_crawl import Clock, FakeCatalog, deps, page_of
 from tests.unit.series import T
 
 pytestmark = pytest.mark.integration
@@ -184,3 +186,79 @@ def test_out_of_range_canary_puts_source_in_quarantine(db: psycopg.Connection) -
     assert run.breaker.quarantine_cycles == 3
     row = db.execute("SELECT canary_ok FROM discountz.source WHERE code = 'exito'").fetchone()
     assert row == (False,)
+
+
+# ───────────── Catálogo (spec del rastreo §7.2 y §8)
+
+
+def _item(conn: psycopg.Connection, ext: str, seen_days_ago: int, source: str = "exito") -> int:
+    seen = T - seen_days_ago * DAY
+    row = conn.execute(
+        """INSERT INTO discountz.catalog_item (source, external_id, topic, currency, price_minor,
+               first_seen_at, stable_since, last_seen_at)
+           VALUES (%s, %s, 'tecnologia', 'COP', 1000, %s, %s, %s) RETURNING id""",
+        (source, ext, seen, seen, seen),
+    ).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def _change(conn: psycopg.Connection, item_id: int, days_ago: int) -> None:
+    conn.execute(
+        """INSERT INTO discountz.catalog_price_change (item_id, at, price_minor)
+           VALUES (%s, %s, 900)""",
+        (item_id, T - days_ago * DAY),
+    )
+
+
+def _changes(conn: psycopg.Connection) -> int:
+    row = conn.execute("SELECT count(*) FROM discountz.catalog_price_change").fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def test_catalog_retention_90d_and_unseen_30d(db: psycopg.Connection) -> None:
+    fresh = _item(db, "1", 0)
+    _item(db, "2", 31)
+    for days in (1, 60, 91):
+        _change(db, fresh, days)
+    run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    items = db.execute("SELECT external_id FROM discountz.catalog_item").fetchall()
+    assert items == [("1",)]
+    assert _changes(db) == 2
+
+
+def test_size_guard_400_shortens_retention_to_45d(db: psycopg.Connection) -> None:
+    fresh = _item(db, "1", 0)
+    for days in (1, 44, 46):
+        _change(db, fresh, days)
+    run_maintenance(db, T, load_params(), db_bytes=410 * MB)
+    assert _changes(db) == 2
+
+
+def test_size_guard_450_pauses_exito_carulla_crawl(db: psycopg.Connection) -> None:
+    run_maintenance(db, T, load_params(), db_bytes=455 * MB)
+    for code, expected in (("exito", "disabled"), ("carulla", "disabled"), ("olimpica", "ok")):
+        src = FakeCatalog({"all": [page_of(1)]}, code=code)
+        d, _ = deps(db, src, Clock())
+        assert run_crawl(d, T, minutes=60).status == expected
+    notice = db.execute(
+        "SELECT body_html FROM discountz.outbox WHERE purpose = 'system' AND priority = 0"
+    ).fetchone()
+    assert notice is not None and "Éxito y Carulla" in notice[0]
+
+
+def test_daily_summary_has_catalog_lines(db: psycopg.Connection) -> None:
+    item = _item(db, "1", 0)
+    _item(db, "2", 0, source="carulla")
+    _change(db, item, 0)
+    db.execute("INSERT INTO discountz.crawl_cursor (source, last_sweep_s) VALUES ('exito', 18720)")
+    repo.enqueue(
+        db, "alert", "x", priority=3, dedup_key="cat:1", now=T, ttl=DAY, topic="tecnologia"
+    )
+    view = daily_summary(db, T)
+    assert view.catalog is not None
+    assert view.catalog.items_by_source["exito"] == 1
+    assert view.catalog.changes_today == 1
+    assert view.catalog.alerts_by_topic == {"tecnologia": 1}
+    assert view.catalog.last_sweep_s_by_source["exito"] == 18_720

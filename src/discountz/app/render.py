@@ -15,7 +15,7 @@ from typing import Any
 
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money, format_money
-from discountz.infra.db import SearchItem, StatusSnapshot, WatchItem
+from discountz.infra.db import CatalogDaily, SearchItem, StatusSnapshot, WatchItem
 
 MAX_VISIBLE = 4096
 MAX_TITLE = 120
@@ -128,6 +128,7 @@ class DailyView:
     db_bytes: int
     by_trigger: Mapping[str, int] = field(default_factory=dict)  # trigger_kind → ciclos
     warnings: Sequence[str] = ()
+    catalog: CatalogDaily | None = None
 
 
 _TRIGGERS = (
@@ -418,4 +419,28 @@ def render_daily(v: DailyView) -> RenderedMessage:
         parts.append(esc(", ".join(v.source_notes)))
     parts.append(f"BD {_mb(v.db_bytes)} MB de {DB_LIMIT_MB}")
     parts.extend(esc(w) for w in v.warnings)
-    return RenderedMessage(" · ".join(parts), [], silent=True)
+    text = " · ".join(parts)
+    if v.catalog is not None and v.catalog.items_by_source:
+        text += "\n" + _catalog_line(v.catalog)
+    return RenderedMessage(text, [], silent=True)
+
+
+def _thousands(n: int) -> str:
+    return f"{n:,}".replace(",", ".")
+
+
+def _catalog_line(c: CatalogDaily) -> str:
+    """Productos activos y última vuelta por tienda, cambios del día y alertas por tema."""
+    stores = []
+    for code in sorted(c.items_by_source, key=source_name):
+        part = f"{esc(source_name(code))} {_thousands(c.items_by_source[code])}"
+        sweep = c.last_sweep_s_by_source.get(code)
+        if sweep is not None:
+            hours, minutes = divmod(sweep // 60, 60)
+            part += f" (vuelta {hours} h {minutes} min)"
+        stores.append(part)
+    line = f"Catálogo: {', '.join(stores)} · {_thousands(c.changes_today)} cambios hoy"
+    if c.alerts_by_topic:
+        topics = ", ".join(f"{esc(t)} {n}" for t, n in sorted(c.alerts_by_topic.items()))
+        line += f" · alertas por tema: {topics}"
+    return line

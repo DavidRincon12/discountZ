@@ -50,6 +50,9 @@ CONFIRM_TOL_PCT = 1  # la relectura debe quedar a ±1 % del precio visto
 SAMPLE_GAP = gap_h(timedelta(hours=6))
 ERRORS_TOPIC = "errores"
 
+# Con la BD en ≥ 450 MB el mantenimiento pausa el descubrimiento: también el rastreo de las
+# tiendas más grandes (spec del rastreo §7.2).
+PAUSED_AT_450 = frozenset({"exito", "carulla"})
 CrawlStatus = Literal["ok", "partial", "blocked", "skipped_locked", "disabled"]
 
 
@@ -451,7 +454,7 @@ def _error_line(store: str, title: str, cand: CatalogCandidate, listing_id: int)
 def run_crawl(deps: CrawlDeps, now: datetime, minutes: int) -> CrawlResult:
     code = deps.source.descriptor.code
     breaker = db.load_breakers(deps.conn).get(code)
-    if breaker is None:
+    if breaker is None or (code in PAUSED_AT_450 and db.bot_state(deps.conn).discovery_paused):
         return CrawlResult("disabled", 0, 0, 0, 0, 0)
     if effective_state(breaker, now) == "open":
         return CrawlResult("blocked", 0, 0, 0, 0, 0)
