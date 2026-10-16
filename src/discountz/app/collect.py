@@ -62,6 +62,7 @@ from discountz.infra.http import PacedClient
 from discountz.infra.log import event
 from discountz.sources.base import (
     Capability,
+    CredentialStore,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -167,6 +168,7 @@ class Collector:
         *,
         stores: Mapping[str, Source] | None = None,
         spawn: Callable[[str], SourceRun | None] | None = None,
+        credentials: CredentialStore | None = None,
     ) -> None:
         self.conn = conn
         self.now = now
@@ -183,6 +185,7 @@ class Collector:
         # tienda no tenía tareas en este ciclo.
         self.stores: Mapping[str, Source] = stores or {}
         self.spawn = spawn
+        self.credentials: CredentialStore = credentials or NoCredentials()
         self._runs: list[SourceRun] = []
         self._lead_refs: set[ListingRef] = set()
 
@@ -239,7 +242,7 @@ class Collector:
             )
 
     def ctx(self, r: SourceRun) -> SourceContext:
-        return SourceContext(r.http, NoCredentials(), self.deadline, self.now)
+        return SourceContext(r.http, self.credentials, self.deadline, self.now)
 
     # ───────────── Errores y breaker
 

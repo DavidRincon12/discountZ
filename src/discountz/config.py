@@ -14,7 +14,16 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from discountz.domain.commands import CATEGORIES
@@ -49,6 +58,36 @@ class Settings(BaseSettings):
     gh_run_id: int | None = None
     gh_run_attempt: Annotated[int, Field(ge=1)] | None = None
     trigger: str = "local"
+    # Rastreo de EE. UU. (spec del rastreo §2.1 y §4.5): sin clave, la fuente queda apagada.
+    bestbuy_api_key: SecretStr | None = None
+    walmart_consumer_id: str | None = None
+    walmart_key_version: str | None = None
+    walmart_private_key: SecretStr | None = None
+    walmart_publisher_id: str | None = None
+
+    @field_validator(
+        "bestbuy_api_key",
+        "walmart_consumer_id",
+        "walmart_key_version",
+        "walmart_private_key",
+        "walmart_publisher_id",
+        mode="before",
+    )
+    @classmethod
+    def _blank_is_none(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @model_validator(mode="after")
+    def _walmart_all_or_none(self) -> Settings:
+        given = (
+            self.walmart_consumer_id,
+            self.walmart_key_version,
+            self.walmart_private_key,
+            self.walmart_publisher_id,
+        )
+        if any(v is not None for v in given) and not all(v is not None for v in given):
+            raise PydanticCustomError("walmart_incomplete", "faltan credenciales de Walmart")
+        return self
 
 
 def _describe(exc: ValidationError, prefix: str) -> str:

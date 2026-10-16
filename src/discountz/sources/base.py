@@ -7,7 +7,7 @@ Pensado para que Mercado Libre (OAuth), eBay, Reddit y las APIs tipo Algolia ent
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -78,12 +78,16 @@ class SourceDescriptor:
 
 class CredentialStore(Protocol):
     def bearer(self, provider: str) -> SecretStr: ...
+    def signed_headers(self, provider: str, now: datetime) -> Mapping[str, str]: ...
 
 
 class NoCredentials:
-    """v1: ninguna fuente usa credenciales."""
+    """Sin credenciales: toda fuente que las pida queda no disponible."""
 
     def bearer(self, provider: str) -> SecretStr:
+        raise CredentialUnavailable(provider, "no_credentials")
+
+    def signed_headers(self, provider: str, now: datetime) -> Mapping[str, str]:
         raise CredentialUnavailable(provider, "no_credentials")
 
 

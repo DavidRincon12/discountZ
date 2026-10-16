@@ -10,7 +10,7 @@ import logging
 import random
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -37,7 +37,7 @@ from discountz.infra.healthchecks import Healthchecks
 from discountz.infra.http import HttpClient, PacedClient
 from discountz.infra.log import event
 from discountz.infra.telegram import TelegramClient
-from discountz.sources.base import Source
+from discountz.sources.base import CredentialStore, NoCredentials, Source
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ class CycleDeps:
     sleep: Callable[[float], None]
     rnd: random.Random
     healthchecks: Healthchecks
+    credentials: CredentialStore = field(default_factory=NoCredentials)
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +192,7 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
         CYCLE,
         stores=stores,
         spawn=lambda code: _spawn_run(deps, inp, code, now, deadline),
+        credentials=deps.credentials,
     )
     runs = _source_runs(deps, plan, inp.breakers, deadline)
     collector.run(runs)

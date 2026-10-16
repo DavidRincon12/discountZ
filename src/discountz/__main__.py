@@ -20,6 +20,7 @@ import psycopg
 from discountz.app.cycle import CycleDeps, run_cycle
 from discountz.config import Settings, load_canaries, load_params, load_settings
 from discountz.domain.errors import ConfigError, LeaseBusy
+from discountz.infra.credentials import EnvCredentials
 from discountz.infra.db import connect
 from discountz.infra.healthchecks import Healthchecks
 from discountz.infra.http import CurlClient, HttpClient, HttpxClient
@@ -196,6 +197,7 @@ def _cmd_run() -> int:
                     sleep=time.sleep,
                     rnd=rnd,
                     healthchecks=health,
+                    credentials=EnvCredentials(settings),
                 ),
                 now,
             )
