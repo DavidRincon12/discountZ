@@ -15,6 +15,9 @@ flowchart LR
   gha -->|getUpdates / sendMessage| tg[[Telegram Bot API]]
   david([David]) <-->|comandos y alertas| tg
   gha -.->|ping opcional| hc[[healthchecks.io]]
+  cron -->|workflow_dispatch cada hora| crawl[GitHub Actions<br/>python -m discountz crawl<br/>un job por tienda]
+  crawl -->|catálogo VTEX y API de Best Buy| stores
+  crawl --> db
 ```
 
 ## Estilo y módulos
@@ -25,8 +28,8 @@ Monolito modular hexagonal-lite **síncrono** (ADR 0001). Paquete `src/discountz
 | `domain/` | Puro: `Money`, modelo, `SafeUrl`, segmentos, estadísticos, guardas, `evaluate`, `decide`, comandos, planificador, salud. Sin I/O, reloj ni azar del sistema |
 | `infra/` | HTTP (`PacedClient` como Decorator), BD (Repository de funciones), migraciones, Telegram, logs, healthchecks |
 | `sources/` | Contrato `Source`, registro (`SOURCES`, `route_url`), detección de bloqueos y un adaptador por plataforma |
-| `app/` | Casos de uso del ciclo: bandeja de entrada, recolección, confirmación, composición, entrega, mantenimiento, render |
-| `__main__.py` | Composition root y CLI: `run`, `migrate`, `check-config`, `record-fixture` |
+| `app/` | Casos de uso: ciclo (bandeja de entrada, recolección, confirmación, composición, entrega, mantenimiento, render) y rastreo del catálogo (`crawl`) |
+| `__main__.py` | Composition root y CLI: `run`, `crawl`, `migrate`, `check-config`, `record-fixture` |
 
 Regla de dependencias `app → sources → infra → domain`, comprobada por import-linter en pre-commit y CI:
 
@@ -51,6 +54,14 @@ Esquema `discountz` (migración `0001_init`):
 - `bot_state`, `run_lease`, `run`: singletons de operación, lease con TTL y registro de ciclos.
 - `schema_migrations`: versión y sha256 de cada migración aplicada.
 
+Migración `0002_catalogo` (rastreo):
+
+- `catalog_item`: un producto del catálogo, solo números (precio, «antes» estable, mínimo, EAN, tema); título y foto se leen al alertar.
+- `catalog_price_change`: cambios de precio, 90 días (45 con la BD en ≥ 400 MB).
+- `crawl_cursor` y `crawl_lease`: dónde va la vuelta de cada tienda (partición, página, bandas de precio partidas, peticiones del día) y quién la corre.
+- `topic`: tema del grupo de Telegram por código y su `message_thread_id`.
+- `outbox` gana `topic` y `card` (datos de la tarjeta); `watch` gana `origin` (`manual`/`auto`) y `expires_at`.
+
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
 ## Flujos clave
@@ -66,7 +77,13 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
    9. Composición al outbox, segunda pasada de la bandeja y entrega (≤ 15 mensajes).
    10. Mantenimiento diario, resumen de las 08:00, contadores, cierre y liberación del lease.
 2. **Comando `/seguir`**: crea un `watch` pendiente sin HTTP → el plan lo resuelve → la primera lectura crea el `listing` y encola la respuesta.
-3. **Feed de Slickdeals**: una tarea `feed` baja el RSS una vez para todas las búsquedas `source='slickdeals'` vencidas → cada lead que coincide y apunta a una tienda activa (sin red: `href`, `u2=` o `data-aps-asin`) encola en memoria una lectura de ficha en esa tienda, antes que sus demás tareas → `evaluate(origin="lead")` puede dar `COMMUNITY_DEAL`. Los leads no se guardan.
+3. **Rastreo** (`python -m discountz crawl --source <tienda>`, un job por tienda cada hora):
+   1. Breaker abierto ⇒ `blocked`; tienda apagada (o Éxito y Carulla con la BD en ≥ 450 MB) ⇒ `disabled`; lease por tienda.
+   2. Capa caliente (≤ 25 % del presupuesto): `fetch_changed` en Best Buy, relectura de lo que cambió hace poco en VTEX.
+   3. Barrido desde el cursor: particiones por categoría raíz y, si pasan de 2.500 productos, bandas de precio partidas a demanda.
+   4. Cada página va a `domain/catalog.py` (puro); una bajada real contra el «antes» estable se confirma en la ficha (±1 %, stock, vendedor) y se descarta si otra tienda alertó el mismo EAN.
+   5. La alerta entra a `outbox` con su tema y su tarjeta; el ciclo la entrega como foto (`sendPhoto`) en ese tema.
+4. **Feed de Slickdeals**: una tarea `feed` baja el RSS una vez para todas las búsquedas `source='slickdeals'` vencidas → cada lead que coincide y apunta a una tienda activa (sin red: `href`, `u2=` o `data-aps-asin`) encola en memoria una lectura de ficha en esa tienda, antes que sus demás tareas → `evaluate(origin="lead")` puede dar `COMMUNITY_DEAL`. Los leads no se guardan, pero todo lead que lleva a una ficha crea un seguimiento automático (`aNN`, 30 días sin alerta, tope por tienda).
 
 ## Atributos de calidad
 1. **Corrección de alertas**: ninguna alerta por un error de parseo o un descuento inflado (guardas G1-G14, confirmación independiente, tabla U01-U37).
@@ -86,4 +103,6 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
 - Términos de uso de Actions y de las tiendas · ritmo conservador, sin evasión.
 - Un mensaje duplicado si el proceso cae entre la API de Telegram y el commit · aceptado (at-least-once).
 - Comandos perdidos tras más de 24 h de caída · healthchecks avisa.
+- El `ListPrice` de VTEX está inflado en el marketplace: el rastreo nunca lo usa; el descuento se mide contra precios observados · aceptado.
+- Las fixtures de la API de Best Buy y de Walmart son sintéticas hasta que David grabe las reales con su clave · pendiente.
 - Newegg y las fichas de Best Buy no responden a la nube de desarrollo: sus fixtures son sintéticas y hay que medirlas desde Actions antes de confiar en ellas · Walmart y Best Buy siguen detrás de `/fuente on`.

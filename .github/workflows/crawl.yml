@@ -1,0 +1,44 @@
+name: crawl
+on:
+  schedule:
+    - cron: '17 */3 * * *'           # respaldo cada 3 h; el disparo principal es externo (spec del rastreo §2.4)
+  workflow_dispatch:                 # cron-job.org lo llama cada hora
+permissions:
+  contents: read
+jobs:
+  crawl:
+    # Interruptor del rastreo: sin la variable `DISCOUNTZ_RASTREO=true` no corre.
+    if: vars.DISCOUNTZ_RASTREO == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55              # la corrida se corta sola a los 45 min (--minutes)
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [exito, carulla, olimpica, panamericana, bestbuy_us]
+    concurrency:
+      group: discountz-crawl-${{ matrix.source }}
+      cancel-in-progress: false      # el cursor y el lease protegen igual; no se mata a mitad
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          version-file: pyproject.toml
+          python-version: '3.13'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --no-dev
+      - name: Rastreo
+        run: uv run --no-sync python -m discountz crawl --source "$SOURCE" --minutes 45
+        env:
+          SOURCE: ${{ matrix.source }}
+          DISCOUNTZ_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DISCOUNTZ_TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          DISCOUNTZ_TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCOUNTZ_TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+          DISCOUNTZ_BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
+          DISCOUNTZ_GH_RUN_ID: ${{ github.run_id }}
+          DISCOUNTZ_GH_RUN_ATTEMPT: ${{ github.run_attempt }}
+          DISCOUNTZ_TRIGGER: ${{ github.event_name }}

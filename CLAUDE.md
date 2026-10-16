@@ -13,7 +13,7 @@ Monitor personal de ofertas para David (Colombia): rastrea tiendas CO (COP) y de
 - Verificación completa (debe quedar en verde): `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run lint-imports && uv run pytest -q`
 - Una prueba: `uv run pytest tests/unit/test_money.py -q -k regional`
 - Integración (Postgres): `DISCOUNTZ_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres uv run pytest -q -m integration`
-- CLI: `uv run python -m discountz {run,migrate,check-config,record-fixture}`
+- CLI: `uv run python -m discountz {run,crawl,migrate,check-config,record-fixture}` (`crawl --source exito [--minutes 45]`)
 
 ## Estructura
 - `src/discountz/domain/`: núcleo puro (dinero, modelo, segmentos, estadísticos, guardas, evaluación, comandos, planificador, salud)
@@ -21,7 +21,8 @@ Monitor personal de ofertas para David (Colombia): rastrea tiendas CO (COP) y de
 - `src/discountz/sources/`: contrato `Source`, registro y un adaptador por plataforma
 - `src/discountz/app/`: casos de uso del ciclo
 - `tests/{unit,sources,integration,e2e,arch}/`, fixtures en `tests/fixtures/<fuente>/`, HTML esperado de Telegram en `tests/golden/`
-- `config/`: TOML público con parámetros, presupuestos, eventos y canarios
+- `config/`: TOML público con parámetros, presupuestos, eventos y canarios; `config/topics.toml` con los temas de Telegram y las reglas ruta → tema
+- `assets/fonts/`: Inter (OFL) para las tarjetas PNG (`infra/card.py`)
 
 ## Arquitectura
 Monolito hexagonal-lite síncrono. Regla `app → sources → infra → domain`, comprobada por import-linter (contratos «Capas», «Dominio puro» y «Adaptadores independientes»). Detalle en `docs/architecture.md`; decisiones en `docs/decisions/`; diseño en `docs/superpowers/specs/2026-10-13-discountz-v1-design.md`.
@@ -37,7 +38,8 @@ Estado actual, siguiente paso y pendientes en `docs/estado.md`: léelo al empeza
 - ruff 0.17 formatea Markdown: `docs/` está en `extend-exclude`.
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero».
 - Producción: el job de `cycle` solo corre con la variable de Actions `DISCOUNTZ_ACTIVO=true`. `/buscar` exige `Capability.SEARCH` (Newegg no la tiene).
-- Fixtures marcadas con `"nota"` en su `.meta.json` son sintéticas (hoy solo la búsqueda de Newegg, que da CAPTCHA en todas las redes probadas). `record-fixture` no sigue redirecciones: grabar la URL final.
+- Rastreo: el `ListPrice` de VTEX viene inflado (nunca usarlo); `*.vtexassets.com` está bloqueado por el proxy de la sesión en la nube (no desde Actions). El job `crawl` solo corre con `DISCOUNTZ_RASTREO=true`.
+- Fixtures marcadas con `"nota"` en su `.meta.json` son sintéticas (la búsqueda de Newegg, que da CAPTCHA en todas las redes probadas, y las de las API de Best Buy y Walmart hasta grabarlas con las claves de David). `record-fixture` no sigue redirecciones: grabar la URL final.
 
 ## Reglas de David (prevalecen sobre las skills, incluida superpowers)
 - Autoría: todo a nombre de David Santiago Rincón Bautista <davidsantiagorb@ufps.edu.co>, sin `Co-Authored-By`, `Claude-Session` ni menciones a IA. `.claude/hooks/git-guard.sh` fija la identidad al iniciar sesión; antes de push, `bash .claude/hooks/git-guard.sh check`.
