@@ -12,6 +12,8 @@ dependencies = [
     "pydantic==2.14.1",
     "pydantic-settings==2.15.0",
     "psycopg[binary]==3.3.6",
+    "pillow==12.0.0",
+    "cryptography==46.0.3",
 ]
 
 [dependency-groups]
@@ -80,6 +82,7 @@ type = "forbidden"
 source_modules = ["discountz.domain"]
 forbidden_modules = [
     "httpx", "curl_cffi", "psycopg", "selectolax", "pydantic", "pydantic_settings", "defusedxml",
+    "PIL", "cryptography",
 ]
 
 [tool.pytest.ini_options]

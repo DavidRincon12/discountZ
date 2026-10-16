@@ -22,10 +22,12 @@ from discountz.domain.errors import ConfigError
 from discountz.domain.money import Currency
 from discountz.domain.params import CategoryParams, GlobalParams
 from discountz.domain.scheduling import Event, SourceBudget
+from discountz.domain.topics import TOPIC_CODES, TopicParams, TopicRule, normalize_path
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 PARAMS_PATH = CONFIG_DIR / "discountz.toml"
 CANARIES_PATH = CONFIG_DIR / "canaries.toml"
+TOPICS_PATH = CONFIG_DIR / "topics.toml"
 BOGOTA = timezone(timedelta(hours=-5), "COT")
 
 NonNeg = Annotated[int, Field(ge=0)]
@@ -304,3 +306,68 @@ def load_canaries(path: Path = CANARIES_PATH) -> Mapping[str, list[Canary]]:
                 Canary(source, c.external_id, c.title, c.min_minor, c.max_minor)
             )
     return MappingProxyType(out)
+
+
+# ───────────── Temas (config/topics.toml)
+
+
+class _Topic(_Strict):
+    title: Annotated[str, Field(min_length=1, max_length=60)]
+    t_bp: Bp | None = None
+    g_bp: Bp | None = None
+    category: str
+
+
+class _Rule(_Strict):
+    source: Annotated[str, Field(pattern=r"^(\*|[a-z][a-z0-9_]{1,31})$")] = "*"
+    prefixes: Annotated[list[Annotated[str, Field(min_length=2)]], Field(min_length=1)]
+    topic: str
+
+
+class _Topics(_Strict):
+    topics: dict[str, _Topic]
+    intentional_otros: list[str] = Field(default_factory=list)
+    rules: list[_Rule]
+
+
+@dataclass(frozen=True, slots=True)
+class Topics:
+    params: Mapping[str, TopicParams]  # en el orden de TOPIC_CODES
+    rules: tuple[TopicRule, ...]
+    intentional_otros: frozenset[str]  # «fuente:/ruta/» normalizada
+
+
+def load_topics(path: Path = TOPICS_PATH) -> Topics:
+    try:
+        raw = _Topics.model_validate(_read_toml(path))
+    except ValidationError as exc:
+        raise ConfigError(_describe(exc, f"{path.name}:")) from None
+    if set(raw.topics) != set(TOPIC_CODES):
+        raise ConfigError(f"{path.name}: los temas deben ser {', '.join(TOPIC_CODES)}")
+    for code, t in raw.topics.items():
+        if t.category not in CATEGORIES:
+            raise ConfigError(f"{path.name}:topics.{code}: categoría desconocida")
+        if (t.t_bp is None) != (t.g_bp is None):
+            raise ConfigError(f"{path.name}:topics.{code}: t_bp y g_bp van juntos")
+    rules: list[TopicRule] = []
+    for i, r in enumerate(raw.rules):
+        if r.topic not in raw.topics:
+            raise ConfigError(f"{path.name}:rules.{i}: tema desconocido")
+        rules.extend(TopicRule(r.source, normalize_path(p), r.topic) for p in r.prefixes)
+    otros = set()
+    for item in raw.intentional_otros:
+        source, sep, route = item.partition(":")
+        if not sep:
+            raise ConfigError(f"{path.name}:intentional_otros: formato «fuente:/ruta/»")
+        otros.add(f"{source}:{normalize_path(route)}")
+    params = {
+        code: TopicParams(
+            code,
+            raw.topics[code].title,
+            raw.topics[code].t_bp,
+            raw.topics[code].g_bp,
+            raw.topics[code].category,
+        )
+        for code in TOPIC_CODES
+    }
+    return Topics(MappingProxyType(params), tuple(rules), frozenset(otros))
