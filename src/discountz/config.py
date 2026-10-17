@@ -27,7 +27,9 @@ from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from discountz.domain.commands import CATEGORIES
+from discountz.domain.community import ChannelRule
 from discountz.domain.errors import ConfigError
+from discountz.domain.model import normalize_title
 from discountz.domain.money import Currency
 from discountz.domain.params import CategoryParams, GlobalParams
 from discountz.domain.scheduling import CrawlBudget, Event, SourceBudget
@@ -191,6 +193,10 @@ class _Crawl(_Strict):
     hot_share_bp: Annotated[int, Field(ge=0, le=10_000)] = 2500
 
 
+class _Channels(_Strict):
+    interval_min: Pos = 10
+
+
 class _Params(_Strict):
     quiet_hours: _Quiet
     pricing: _Pricing
@@ -198,6 +204,7 @@ class _Params(_Strict):
     sources: dict[str, _Source]
     events: list[_Event] = Field(default_factory=list)
     crawl: dict[str, _Crawl] = Field(default_factory=dict)
+    channels: _Channels = Field(default_factory=_Channels)
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +216,7 @@ class AppParams:
     quiet_start: time
     quiet_end: time
     crawl: Mapping[str, CrawlBudget] = MappingProxyType({})
+    channel_interval: timedelta = timedelta(minutes=10)  # cada canal como máximo cada N
 
 
 def _days(n: int) -> timedelta:
@@ -323,6 +331,7 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
                 for code, c in raw.crawl.items()
             }
         ),
+        channel_interval=timedelta(minutes=raw.channels.interval_min),
     )
 
 
@@ -385,10 +394,16 @@ class _Rule(_Strict):
     topic: str
 
 
+class _ChannelRule(_Strict):
+    topic: str
+    words: Annotated[list[Annotated[str, Field(min_length=1)]], Field(min_length=1)]
+
+
 class _Topics(_Strict):
     topics: dict[str, _Topic]
     intentional_otros: list[str] = Field(default_factory=list)
     rules: list[_Rule]
+    channel_rules: list[_ChannelRule] = Field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -396,6 +411,7 @@ class Topics:
     params: Mapping[str, TopicParams]  # en el orden de TOPIC_CODES
     rules: tuple[TopicRule, ...]
     intentional_otros: frozenset[str]  # «fuente:/ruta/» normalizada
+    channel_rules: tuple[ChannelRule, ...] = ()  # tema de las ofertas de canales
 
 
 def load_topics(path: Path = TOPICS_PATH) -> Topics:
@@ -431,4 +447,10 @@ def load_topics(path: Path = TOPICS_PATH) -> Topics:
         )
         for code in TOPIC_CODES
     }
-    return Topics(MappingProxyType(params), tuple(rules), frozenset(otros))
+    channel_rules: list[ChannelRule] = []
+    for i, cr in enumerate(raw.channel_rules):
+        if cr.topic not in raw.topics:
+            raise ConfigError(f"{path.name}:channel_rules.{i}: tema desconocido")
+        words = frozenset(w for phrase in cr.words for w in normalize_title(phrase).split())
+        channel_rules.append(ChannelRule(cr.topic, words))
+    return Topics(MappingProxyType(params), tuple(rules), frozenset(otros), tuple(channel_rules))

@@ -216,3 +216,43 @@ topic = "bebes"
 source = "bestbuy_us"
 prefixes = ["/movies & music/", "/office supplies & ink/"]
 topic = "libros"
+
+# Tema de las ofertas de los canales de Telegram (spec de canales §4.2). Se comparan con los
+# hashtags y las palabras del título (normalizados); gana la regla con más palabras y, a igual
+# número, la que va primero. Sin coincidencias van a «Otros».
+[[channel_rules]]
+topic = "tecnologia"
+words = ["audifonos", "iphone", "celular", "tablet", "laptop", "monitor", "teclado", "raton",
+  "mouse", "control", "videojuego", "consola", "smartwatch", "reloj inteligente", "proyector",
+  "cargador", "accesoriostecnologia", "board", "ssd", "ps5", "xbox", "switch"]
+
+[[channel_rules]]
+topic = "electro"
+words = ["televisor", "tv", "freidora", "aspiradora", "licuadora", "cafetera"]
+
+[[channel_rules]]
+topic = "hogar"
+words = ["cocina", "sartenes", "ollas", "cuchillos", "almohadilla", "decoracion", "navidad",
+  "termo", "botella"]
+
+[[channel_rules]]
+topic = "moda"
+words = ["calzado", "zapatilla", "ropa", "camisa", "sueter", "boxer", "ropahombre", "reloj",
+  "mochila"]
+
+[[channel_rules]]
+topic = "belleza"
+words = ["maquillaje", "cuidadofacial", "cuidadocorporal", "cortapelo", "cuidadodelcabello",
+  "perfume"]
+
+[[channel_rules]]
+topic = "deportes"
+words = ["deportes", "gimnasio", "senderismo", "baloncesto", "bañador"]
+
+[[channel_rules]]
+topic = "bebes"
+words = ["juguete", "ninos", "bebe"]
+
+[[channel_rules]]
+topic = "ferreteria"
+words = ["herramienta", "destornillador", "sierra", "accesorioscarro", "taladro"]

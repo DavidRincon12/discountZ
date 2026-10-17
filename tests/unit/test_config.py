@@ -168,3 +168,21 @@ def test_crawl_section_must_name_a_known_source(tmp_path: Path) -> None:
     path = _bad_toml(tmp_path, "[crawl.exito]", "[crawl.desconocida]")
     with pytest.raises(ConfigError):
         load_params(path)
+
+
+def test_channel_rules_point_to_existing_topics() -> None:
+    from discountz.config import load_topics
+
+    topics = load_topics()
+    assert topics.channel_rules
+    assert all(rule.topic in topics.params for rule in topics.channel_rules)
+    tech = next(r for r in topics.channel_rules if r.topic == "tecnologia")
+    assert {"reloj", "inteligente", "audifonos"} <= tech.words
+    deportes = next(r for r in topics.channel_rules if r.topic == "deportes")
+    assert "banador" in deportes.words
+
+
+def test_channel_interval_is_ten_minutes() -> None:
+    from datetime import timedelta
+
+    assert load_params(PARAMS_PATH).channel_interval == timedelta(minutes=10)
