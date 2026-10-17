@@ -8,7 +8,7 @@ import logging
 import random
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -18,7 +18,7 @@ from pydantic import SecretStr
 
 from discountz.app import cycle as cycle_module
 from discountz.app.cycle import CycleDeps, run_cycle
-from discountz.config import Settings, load_canaries, load_params
+from discountz.config import Settings, load_canaries, load_params, load_topics
 from discountz.domain.money import Currency
 from discountz.domain.scheduling import plan_run
 from discountz.infra import db as repo
@@ -491,3 +491,58 @@ def test_cycle_on_previous_schema_skips_with_notice(empty_db_url: str) -> None: 
         assert result.status == "skipped_schema"
         rows = old.execute("SELECT purpose, body_html FROM discountz.outbox").fetchall()
         assert len(rows) == 1 and "migración pendiente" in rows[0][1]
+
+
+def test_cycle_delivers_channel_deal_card(conn: psycopg.Connection) -> None:
+    now = datetime(2026, 10, 17, 15, 40, tzinfo=UTC)
+    conn.execute(
+        "UPDATE discountz.bot_state SET last_maintenance_on = %s, last_summary_on = %s",
+        (now.date(), now.date()),
+    )
+    for i, code in enumerate(load_topics().params, start=10):
+        repo.save_topic(conn, code, code, i)
+    repo.save_channel_cursor(conn, "tg_cajitatech", 88179, now - timedelta(hours=1))
+    page = load_fixture("telegram", "cajitatech")
+    empty = load_fixture("telegram", "cajitatech-empty")
+    base = "https://t.me/s/cajitatech?after="
+    http = FakeHttp(
+        {
+            f"{base}88179": HttpResponse(200, page.url, {}, page.body, 1),
+            f"{base}88180": HttpResponse(200, empty.url, {}, empty.body, 1),
+        }
+    )
+    img = "https://cdn1.telesco.pe/file/FPmg2nETLET429O23i7sYwo82pkyIfum1pfxCFRZmQhagDMBbkki"
+    buf = io.BytesIO()
+    Image.new("RGB", (200, 200), (10, 120, 200)).save(buf, "JPEG")
+    photos = _AnyPhoto(buf.getvalue())
+    tg = FakeHttp(
+        {
+            **telegram().routes,
+            f"{TG}/sendPhoto": jresp({"ok": True, "result": {"message_id": 2}}),
+        }
+    )
+    run_cycle(replace(deps(conn, {"tg_cajitatech": http}, tg), photos=photos), now)
+    assert [u for u in photos.urls if u.startswith(img)] == photos.urls and len(photos.urls) == 1
+    assert len(tg.uploads) == 1  # solo el post posterior al cursor: el 88180
+    data, _ = tg.uploads[0]
+    assert data is not None
+    topic = conn.execute("SELECT topic FROM discountz.outbox WHERE purpose = 'alert'").fetchone()
+    assert topic is not None
+    assert data["message_thread_id"] == str(repo.topic_threads(conn)[topic[0]])
+    buttons = [
+        b["text"] for row in json.loads(data["reply_markup"])["inline_keyboard"] for b in row
+    ]
+    assert buttons == ["Ver oferta", "Ver en el canal"]
+    assert repo.get_channel_cursor(conn, "tg_cajitatech") == repo.ChannelCursor(88180, now)
+
+
+@dataclass
+class _AnyPhoto:
+    """Transporte de fotos que responde la misma imagen a cualquier URL y la registra."""
+
+    body: bytes
+    urls: list[str] = field(default_factory=list)
+
+    def request(self, method: str, url: str, **kw: object) -> HttpResponse:
+        self.urls.append(url)
+        return HttpResponse(200, url, {}, self.body, 1)

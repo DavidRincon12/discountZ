@@ -262,3 +262,38 @@ def test_daily_summary_has_catalog_lines(db: psycopg.Connection) -> None:
     assert view.catalog.changes_today == 1
     assert view.catalog.alerts_by_topic == {"tecnologia": 1}
     assert view.catalog.last_sweep_s_by_source["exito"] == 18_720
+
+
+def _channel_post(conn: psycopg.Connection, post_id: int, age: timedelta, dup: str | None) -> None:
+    repo.insert_channel_post(
+        conn,
+        "tg_cajitatech",
+        post_id,
+        published_at=T - age,
+        title_norm="set cuchillos",
+        price_minor=1200,
+        currency="USD",
+        coupon=None,
+        topic="hogar",
+        duplicate_of=dup,
+        now=T - age,
+    )
+
+
+def test_maintenance_deletes_channel_posts_after_7_days(db: psycopg.Connection) -> None:
+    _channel_post(db, 1, timedelta(days=8), None)
+    _channel_post(db, 2, timedelta(days=6), None)
+    run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    rows = db.execute("SELECT post_id FROM discountz.channel_post").fetchall()
+    assert rows == [(2,)]
+
+
+def test_daily_summary_counts_channel_posts(db: psycopg.Connection) -> None:
+    for i in range(1, 4):
+        _channel_post(db, i, timedelta(hours=i), None)
+    _channel_post(db, 4, timedelta(hours=2), "tg_clubgratis:1")
+    _channel_post(db, 5, timedelta(hours=30), None)
+    view = daily_summary(db, T)
+    assert view.catalog is not None
+    assert (view.catalog.channel_posts, view.catalog.channel_duplicates) == (3, 1)
+    assert "\nCanales: 3 ofertas (1 repetidas)" in render_daily(view).html

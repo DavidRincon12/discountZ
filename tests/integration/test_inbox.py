@@ -249,6 +249,13 @@ def test_search_rejected_on_source_without_search(db: psycopg.Connection) -> Non
     assert "no admite /buscar" in reply
 
 
+def test_search_rejected_on_channel(db: psycopg.Connection) -> None:
+    run(db, [[msg(1, "/buscar tg_clubgratis iphone")]])
+    assert count(db, "search") == 0
+    (reply,) = replies(db)
+    assert "no admite /buscar" in reply
+
+
 def test_status_command_replies_with_pre(db: psycopg.Connection) -> None:
     run(db, [[msg(1, "/estado")]])
     (reply,) = replies(db)

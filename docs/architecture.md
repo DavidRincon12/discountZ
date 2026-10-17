@@ -11,6 +11,7 @@ flowchart LR
   cron[[cron-job.org]] -->|workflow_dispatch cada 5 min| gha[GitHub Actions<br/>python -m discountz run]
   sched[[schedule 7,37 * * * *]] --> gha
   gha -->|HTTPS con ritmo y presupuesto| stores[[Tiendas y RSS]]
+  gha -->|t.me/s/canal cada 10 min| chan[[Canales públicos de ofertas]]
   gha -->|psycopg, modo sesión, verify-full| db[(Supabase Postgres<br/>esquema discountz)]
   gha -->|getUpdates / sendMessage| tg[[Telegram Bot API]]
   david([David]) <-->|comandos y alertas| tg
@@ -25,9 +26,9 @@ Monolito modular hexagonal-lite **síncrono** (ADR 0001). Paquete `src/discountz
 
 | Módulo | Responsabilidad |
 |---|---|
-| `domain/` | Puro: `Money`, modelo, `SafeUrl`, segmentos, estadísticos, guardas, `evaluate`, `decide`, comandos, planificador, salud. Sin I/O, reloj ni azar del sistema |
+| `domain/` | Puro: `Money`, modelo, `SafeUrl`, segmentos, estadísticos, guardas, `evaluate`, `decide`, comandos, planificador, salud, ofertas de canales (`community`). Sin I/O, reloj ni azar del sistema |
 | `infra/` | HTTP (`PacedClient` como Decorator), BD (Repository de funciones), migraciones, Telegram, logs, healthchecks |
-| `sources/` | Contrato `Source`, registro (`SOURCES`, `route_url`), detección de bloqueos y un adaptador por plataforma |
+| `sources/` | Contrato `Source`, registro (`SOURCES`, `route_url`), detección de bloqueos y un adaptador por plataforma (incluidos los canales de Telegram, `kind="channel"`) |
 | `app/` | Casos de uso: ciclo (bandeja de entrada, recolección, confirmación, composición, entrega, mantenimiento, render) y rastreo del catálogo (`crawl`) |
 | `__main__.py` | Composition root y CLI: `run`, `crawl`, `migrate`, `check-config`, `record-fixture` |
 
@@ -62,6 +63,12 @@ Migración `0002_catalogo` (rastreo):
 - `topic`: tema del grupo de Telegram por código y su `message_thread_id`.
 - `outbox` gana `topic` y `card` (datos de la tarjeta); `watch` gana `origin` (`manual`/`auto`) y `expires_at`.
 
+Migración `0003_canales` (canales de Telegram, ADR 0005):
+
+- `channel_cursor`: último id leído de cada canal.
+- `channel_post`: ofertas leídas de los canales (7 días), con `duplicate_of` cuando ya llegó la misma oferta por otro canal.
+- `source.kind` admite `channel`.
+
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
 ## Flujos clave
@@ -84,6 +91,8 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
    4. Cada página va a `domain/catalog.py` (puro); una bajada real contra el «antes» estable se confirma en la ficha (±1 %, stock, vendedor) y se descarta si otra tienda alertó el mismo EAN.
    5. La alerta entra a `outbox` con su tema y su tarjeta; el ciclo la entrega como foto (`sendPhoto`) en ese tema.
 4. **Feed de Slickdeals**: una tarea `feed` baja el RSS una vez para todas las búsquedas `source='slickdeals'` vencidas → cada lead que coincide y apunta a una tienda activa (sin red: `href`, `u2=` o `data-aps-asin`) encola en memoria una lectura de ficha en esa tienda, antes que sus demás tareas → `evaluate(origin="lead")` puede dar `COMMUNITY_DEAL`. Los leads no se guardan, pero todo lead que lleva a una ficha crea un seguimiento automático (`aNN`, 30 días sin alerta, tope por tienda).
+
+5. **Canales de Telegram** (`app/channels.py`, dentro del ciclo): cada canal que toca (10 min) baja hasta 3 páginas `t.me/s/<canal>?after=<cursor>` con `sources/telegram_channels.py` → `domain/community.py` descarta duplicados (mismo cupón, o precio a ±10 % y títulos parecidos, 24 h) y asigna el tema → por página, en una transacción: guarda las publicaciones, encola la tarjeta «sin verificar» en `outbox` y avanza el cursor. La primera lectura solo fija el cursor.
 
 ## Atributos de calidad
 1. **Corrección de alertas**: ninguna alerta por un error de parseo o un descuento inflado (guardas G1-G14, confirmación independiente, tabla U01-U37).

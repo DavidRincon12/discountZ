@@ -16,6 +16,7 @@ from typing import Literal
 
 import psycopg
 
+from discountz.app.channels import due_channels, run_channels
 from discountz.app.collect import SYSTEM_TTL, Collector, SourceRun
 from discountz.app.compose import compose_alerts
 from discountz.app.confirm import confirm_candidates
@@ -28,7 +29,7 @@ from discountz.app.maintenance import (
     summary_due,
 )
 from discountz.app.render import local, source_name
-from discountz.config import AppParams, Canary, Settings
+from discountz.config import AppParams, Canary, Settings, Topics, load_topics
 from discountz.domain.errors import TelegramError
 from discountz.domain.health import BreakerState, classify_health, effective_state, tick_quarantine
 from discountz.domain.scheduling import PlanInput, Task, plan_run
@@ -73,6 +74,7 @@ class CycleDeps:
     healthchecks: Healthchecks
     credentials: CredentialStore = field(default_factory=NoCredentials)
     photos: HttpClient | None = None  # transporte para las fotos de las tarjetas
+    topics: Topics = field(default_factory=load_topics)  # tema de las ofertas de canales
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +207,11 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
             event(log, "confirm_failed", logging.ERROR, source=r.code, error=type(exc).__name__)
         _close_source(conn, r, now)
     compose_alerts(conn, collector.views, now, params)
+    channel_runs = _channel_runs(deps, inp, now, deadline)
+    run_channels(conn, channel_runs, now, params, deps.topics, deps.rnd, deadline)
+    for r in channel_runs:
+        _close_source(conn, r, now)
+    runs += channel_runs
     _daily(conn, now, params)
     updates += _inbox(deps, now)
     delivery = deliver(
@@ -304,6 +311,22 @@ def _spawn_run(
     if inp.usage_24h.get(budget.group, 0) >= budget.max_per_24h:
         return None
     return _make_run(deps, code, (), inp.breakers, deadline)
+
+
+def _channel_runs(
+    deps: CycleDeps, inp: PlanInput, now: datetime, deadline: float
+) -> list[SourceRun]:
+    """SourceRun de cada canal que toca leer y aún tiene presupuesto de 24 h."""
+    runs = []
+    for code in due_channels(
+        deps.conn, deps.sources, inp.budgets, inp.breakers, now, deps.params.channel_interval
+    ):
+        budget = inp.budgets[code]
+        if inp.usage_24h.get(budget.group, 0) >= budget.max_per_24h:
+            continue
+        if (run := _make_run(deps, code, (), inp.breakers, deadline)) is not None:
+            runs.append(run)
+    return runs
 
 
 def _close_source(conn: psycopg.Connection, r: SourceRun, now: datetime) -> None:

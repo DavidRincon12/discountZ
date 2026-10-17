@@ -13,9 +13,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from discountz.domain.community import ChannelPost
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money, format_money
 from discountz.infra.db import CatalogDaily, SearchItem, StatusSnapshot, WatchItem
+from discountz.sources.telegram_channels import CHANNELS
 
 MAX_VISIBLE = 4096
 MAX_TITLE = 120
@@ -39,6 +41,9 @@ SOURCE_NAMES = {
     "walmart_us": "Walmart US",
     "bestbuy_us": "Best Buy US",
     "slickdeals": "Slickdeals",
+    "tg_descuentostech": "DescuentosTech",
+    "tg_clubgratis": "Clubgratis",
+    "tg_cajitatech": "cajitatech",
 }
 
 _HEADERS = {
@@ -284,6 +289,52 @@ def render_catalog_alert(
     return RenderedMessage("\n".join(lines), buttons)
 
 
+CHANNEL_TITLE = 120  # spec de canales §5
+
+
+def _channel_post_url(post: ChannelPost) -> str:
+    return f"https://t.me/{CHANNELS.get(post.channel, post.channel)}/{post.post_id}"
+
+
+def channel_card(post: ChannelPost, topic: str) -> dict[str, Any]:
+    """Datos de la tarjeta `community` de una oferta de canal (se guardan en `outbox.card`)."""
+    return {
+        "store": post.channel,
+        "topic": topic,
+        "title": post.title,
+        "url": str(post.link),
+        "image_url": str(post.image_url) if post.image_url is not None else None,
+        "price_minor": post.price.minor,
+        "currency": post.price.currency.value,
+        "kind": AlertKind.COMMUNITY_DEAL.value,
+        "coupon": post.coupon,
+        "badge": f"{source_name(post.channel)} · sin verificar",
+    }
+
+
+def render_channel_deal(post: ChannelPost, topic: str) -> RenderedMessage:
+    """Pie de foto de una oferta de canal (spec de canales §5); cabe en 1.024."""
+    head = f"<b>OFERTA DE CANAL</b> · #{topic}"
+    if post.store:
+        head += f" · {esc(post.store)}"
+    lines = [
+        head,
+        f"<b>{esc(truncate(post.title, CHANNEL_TITLE))}</b>",
+        "",
+        f"<b>{format_money(post.price)}</b>",
+    ]
+    if post.coupon:
+        lines.append(f"Cupón <code>{esc(post.coupon)}</code>")
+    lines.append(f"📣 Visto en {esc(source_name(post.channel))} · sin verificar")
+    if post.price.currency is Currency.USD:
+        lines.append(CASILLERO)
+    in_channel = _channel_post_url(post)
+    buttons = [[Button("Ver en el canal", url=in_channel)]]
+    if str(post.link) != in_channel:
+        buttons.insert(0, [Button("Ver oferta", url=str(post.link))])
+    return RenderedMessage("\n".join(lines), buttons)
+
+
 def _alert_buttons(a: AlertView) -> list[list[Button]]:
     second = (
         Button("Dejar de seguir", callback_data=f"unf:p{a.watch_id}")
@@ -422,6 +473,12 @@ def render_daily(v: DailyView) -> RenderedMessage:
     text = " · ".join(parts)
     if v.catalog is not None and v.catalog.items_by_source:
         text += "\n" + _catalog_line(v.catalog)
+    if v.catalog is not None and v.catalog.channel_posts:
+        c = v.catalog
+        text += (
+            f"\nCanales: {_thousands(c.channel_posts)} ofertas"
+            f" ({_thousands(c.channel_duplicates)} repetidas)"
+        )
     return RenderedMessage(text, [], silent=True)
 
 

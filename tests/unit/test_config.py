@@ -49,7 +49,11 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "walmart_us",
         "bestbuy_us",
         "slickdeals",
+        "tg_descuentostech",
+        "tg_clubgratis",
+        "tg_cajitatech",
     }
+    assert p.budgets["tg_clubgratis"].max_per_run == 3  # hasta 3 páginas por lectura
     assert p.budgets["exito"].group == p.budgets["carulla"].group == "grupo_exito"
     assert p.budgets["amazon_us"].max_per_run == 12
     assert p.budgets["amazon_us"].max_per_24h == 400
@@ -168,3 +172,21 @@ def test_crawl_section_must_name_a_known_source(tmp_path: Path) -> None:
     path = _bad_toml(tmp_path, "[crawl.exito]", "[crawl.desconocida]")
     with pytest.raises(ConfigError):
         load_params(path)
+
+
+def test_channel_rules_point_to_existing_topics() -> None:
+    from discountz.config import load_topics
+
+    topics = load_topics()
+    assert topics.channel_rules
+    assert all(rule.topic in topics.params for rule in topics.channel_rules)
+    tech = next(r for r in topics.channel_rules if r.topic == "tecnologia")
+    assert {"reloj", "inteligente", "audifonos"} <= tech.words
+    deportes = next(r for r in topics.channel_rules if r.topic == "deportes")
+    assert "banador" in deportes.words
+
+
+def test_channel_interval_is_ten_minutes() -> None:
+    from datetime import timedelta
+
+    assert load_params(PARAMS_PATH).channel_interval == timedelta(minutes=10)

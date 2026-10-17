@@ -39,6 +39,7 @@ Estado actual, siguiente paso y pendientes en `docs/estado.md`: léelo al empeza
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero».
 - Producción: el job de `cycle` solo corre con la variable de Actions `DISCOUNTZ_ACTIVO=true`. `/buscar` exige `Capability.SEARCH` (Newegg no la tiene).
 - Rastreo: el `ListPrice` de VTEX viene inflado (nunca usarlo); su WAF rechaza `+` como espacio en la query (`infra/http` usa `%20`) y las páginas de catálogo pesan hasta ~7 MB; `*.vtexassets.com` está bloqueado por el proxy de la sesión en la nube (no desde Actions). El job `crawl` solo corre con `DISCOUNTZ_RASTREO=true`.
+- Canales de Telegram (`sources/telegram_channels.py`, `app/channels.py`, migración `0003`): se leen de `t.me/s/<canal>?after=<id>` sin cuenta (20 posts por página); las ofertas salen «sin verificar» directo a `outbox` (sin `alert` ni histórico), y el enlace «Ver oferta» solo pasa con `LINK_HOSTS` y nunca se descarga.
 - Fixtures marcadas con `"nota"` en su `.meta.json` son sintéticas (la búsqueda de Newegg, que da CAPTCHA en todas las redes probadas, y las de las API de Best Buy y Walmart hasta grabarlas con las claves de David). `record-fixture` no sigue redirecciones: grabar la URL final.
 
 ## Reglas de David (prevalecen sobre las skills, incluida superpowers)
@@ -50,4 +51,4 @@ Estado actual, siguiente paso y pendientes en `docs/estado.md`: léelo al empeza
 - Ramas: en local, una rama `feat/…` (o `fix/`, `docs/`…) creada antes del commit del spec; worktree solo si David lo pide. En la nube (`CLAUDE_CODE_REMOTE=true`), solo la rama de la sesión: sin worktrees ni ramas nuevas, salvo la rama local de un spike, que no se publica.
 - Una decisión de arquitectura de un spec aprobado va como ADR en `docs/decisions/`, en la primera tarea del plan.
 - Leer este archivo antes de explorar el código y actualizarlo en 1-2 líneas cuando cambie la estructura o aparezca un gotcha.
-- Skills: `desarrollo-senior`, `arquitectura-y-datos`, `calidad-y-seguridad`, `preparar-repo` y superpowers.
+- Skills: al empezar cualquier desarrollo, y antes de cualquier skill de superpowers, invoca `desarrollo-senior`, `arquitectura-y-datos` y `calidad-y-seguridad` (y `preparar-repo` si falta git-guard o `CLAUDE.md`). Tras una compactación, vuelve a invocarlas.
