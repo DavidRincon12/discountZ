@@ -98,3 +98,10 @@ def test_migration_0003_down_restores_schema_2(db: psycopg.Connection) -> None:
     assert db.execute("SELECT count(*) FROM discountz.source").fetchone() == (9,)
     with pytest.raises(psycopg.errors.CheckViolation):
         db.execute("UPDATE discountz.source SET kind = 'channel' WHERE code = 'exito'")
+
+
+def test_channel_post_ids_only_of_that_channel(db: psycopg.Connection) -> None:
+    _post(db, "dealnews", 22269285)
+    _post(db, "slickdeals_amazon", 20089260)
+    assert dbm.channel_post_ids(db, "dealnews", [22269285, 20089260, 7]) == {22269285}
+    assert dbm.channel_post_ids(db, "dealnews", []) == set()

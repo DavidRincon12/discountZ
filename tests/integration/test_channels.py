@@ -296,3 +296,67 @@ def test_failing_channel_does_not_stop_the_others(
     assert club.failed and not caj.failed
     assert [k for k, _, _ in outbox(db)] == ["canal:tg_cajitatech:101"]
     assert result.sent == 1
+
+
+# ───────────── Feeds sin orden de ids (DealNews y Slickdeals Amazon)
+
+
+def test_unordered_first_read_sends_recent_deals_oldest_first(db: psycopg.Connection) -> None:
+    older = deal("dealnews", 300, title="Teclado mecánico", age=timedelta(minutes=50))
+    fake = FakeChannel("dealnews", [page(deal("dealnews", 100), older)])
+    result = run(db, fake)
+    assert [k for k, _, _ in outbox(db)] == ["canal:dealnews:300", "canal:dealnews:100"]
+    assert fake.afters == [None]
+    assert repo.get_channel_cursor(db, "dealnews") == repo.ChannelCursor(300, T)
+    assert result.sent == 2
+
+
+def test_unordered_reread_sends_only_unseen_ids(db: psycopg.Connection) -> None:
+    keyboard = deal("dealnews", 300, title="Teclado mecánico")
+    run(db, FakeChannel("dealnews", [page(keyboard)]))
+    lower = deal("dealnews", 250, title="Monitor gamer", age=timedelta(minutes=2))
+    fake = FakeChannel("dealnews", [page(keyboard, lower)])
+    result = run(db, fake, now=T + timedelta(minutes=10))
+    assert [k for k, _, _ in outbox(db)] == ["canal:dealnews:300", "canal:dealnews:250"]
+    assert fake.afters == [None]
+    assert (result.sent, result.duplicates, result.skipped) == (1, 0, 0)
+
+
+def test_unordered_old_posts_and_page_skips_are_not_counted(db: psycopg.Connection) -> None:
+    repo.save_channel_cursor(db, "dealnews", 1, T - timedelta(minutes=10))
+    stale = ChannelPage((deal("dealnews", 400, age=timedelta(hours=7)),), 400, False, skipped=4)
+    result = run(db, FakeChannel("dealnews", [stale]))
+    assert outbox(db) == []
+    assert (result.sent, result.skipped) == (0, 0)  # se repiten en cada lectura del feed
+    assert repo.get_channel_cursor(db, "dealnews") == repo.ChannelCursor(400, T)
+
+
+def test_unordered_duplicate_is_not_recounted_on_reread(db: psycopg.Connection) -> None:
+    repo.save_channel_cursor(db, "tg_cajitatech", 88160, T - timedelta(hours=1))
+    run(db, FakeChannel("tg_cajitatech", [page(deal("tg_cajitatech", 88168, coupon="TVZE10"))]))
+    same = page(deal("dealnews", 500, title="OLED TV", coupon="tvze10"))
+    assert run(db, FakeChannel("dealnews", [same])).duplicates == 1
+    again = run(db, FakeChannel("dealnews", [same]), now=T + timedelta(minutes=10))
+    assert (again.sent, again.duplicates) == (0, 0)
+    assert [k for k, _, _ in outbox(db)] == ["canal:tg_cajitatech:88168"]
+
+
+def test_unordered_feed_without_deals_is_a_format_error(db: psycopg.Connection) -> None:
+    r = run_for(FakeChannel("dealnews", [page(max_id=400, unparsed=39)]))
+    run_channels(db, [r], T, PARAMS, TOPICS, random.Random(1), 1e9)
+    assert r.failed and r.counters.parse_errors == 1
+    cursor = repo.get_channel_cursor(db, "dealnews")
+    assert cursor is not None and cursor.unparsed_streak == 39
+
+
+def test_channel_waits_for_its_budget_interval(db: psycopg.Connection) -> None:
+    def due(now: datetime) -> set[str]:
+        feeds = {"dealnews", "slickdeals_amazon"}
+        return feeds & set(
+            due_channels(db, load_all(), PARAMS.budgets, {}, now, PARAMS.channel_interval)
+        )
+
+    for code in ("dealnews", "slickdeals_amazon"):
+        repo.save_channel_cursor(db, code, 1, T)
+    assert due(T + timedelta(minutes=10)) == {"dealnews"}  # Slickdeals: cada 30 min
+    assert due(T + timedelta(minutes=30)) == {"dealnews", "slickdeals_amazon"}

@@ -2069,6 +2069,18 @@ def recent_channel_posts(conn: psycopg.Connection, since: datetime) -> list[Rece
     return [RecentPost(r[0], r[1], int(r[2]), r[3], r[4]) for r in rows]
 
 
+def channel_post_ids(conn: psycopg.Connection, code: str, post_ids: Sequence[int]) -> set[int]:
+    """Los ids de `post_ids` que ya se guardaron para el canal (feeds sin orden de ids)."""
+    if not post_ids:
+        return set()
+    rows = conn.execute(
+        """SELECT post_id FROM discountz.channel_post
+            WHERE channel = %s AND post_id = ANY(%s)""",
+        (code, list(post_ids)),
+    ).fetchall()
+    return {int(r[0]) for r in rows}
+
+
 def insert_channel_post(
     conn: psycopg.Connection,
     code: str,
