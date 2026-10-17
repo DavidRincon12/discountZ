@@ -319,7 +319,9 @@ class PacedClient:
                 data=data,
                 files=files,
             )
-        except Unavailable:
+        except Unavailable as exc:
+            if exc.code == "too_large":  # la misma página no cabrá al reintentarla
+                raise
             return None
         finally:
             self._last_end = self._monotonic()

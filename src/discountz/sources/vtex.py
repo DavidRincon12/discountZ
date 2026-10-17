@@ -20,7 +20,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from discountz.domain.catalog import CatalogObservation
-from discountz.domain.errors import NotFound, ParseError, SourceError
+from discountz.domain.errors import NotFound, ParseError, SourceError, Unavailable
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money, to_minor
 from discountz.domain.urls import SafeUrl
@@ -436,20 +436,64 @@ class VtexSource:
         params = [("fq", root)]
         if band is not None:
             params.append(("fq", f"P:[{band[0]} TO {band[1]}]"))
-        params += [_AVAILABLE, ("_from", str(start)), ("_to", str(start + CATALOG_PAGE - 1))]
-        resp = ctx.http.request(
-            "GET",
-            f"{self.store.api_base}/catalog_system/pub/products/search",
-            params=params,
-            headers=_HEADERS,
+        params.append(_AVAILABLE)
+        split = _split_band(band or (1, PRICE_MAX)) if page == 0 else []
+        total, bodies = self._range_bodies(
+            ctx, params, start, start + CATALOG_PAGE - 1, enough=CATALOG_CAP if split else None
         )
-        total = _resources_total(resp)
-        if page == 0 and total > CATALOG_CAP:
-            split = _split_band(band or (1, PRICE_MAX))
-            if split:
-                return CatalogPage((), has_more=False, split=[f"{root}|{b}" for b in split])
-        items = parse_vtex_catalog(resp.body)
+        if split and total > CATALOG_CAP:
+            return CatalogPage((), has_more=False, split=[f"{root}|{b}" for b in split])
+        items = [o for body in bodies for o in parse_vtex_catalog(body)]
         return CatalogPage(items, has_more=start + CATALOG_PAGE < min(total, CATALOG_CAP))
+
+    def _range_bodies(
+        self,
+        ctx: SourceContext,
+        params: list[tuple[str, str]],
+        start: int,
+        end: int,
+        *,
+        enough: int | None = None,
+    ) -> tuple[int, list[bytes]]:
+        """Productos `start..end` y el total de la cabecera `resources`.
+
+        Si la respuesta no cabe en el tope de tamaño se pide por mitades: con variantes y
+        vendedores, 50 productos de Moda y accesorios de Éxito pesaron 42,8 MB el 2026-10-17.
+        Con un total mayor que `enough` la partición se va a partir: basta la primera mitad.
+        """
+        try:
+            resp = ctx.http.request(
+                "GET",
+                f"{self.store.api_base}/catalog_system/pub/products/search",
+                params=[*params, ("_from", str(start)), ("_to", str(end))],
+                headers=_HEADERS,
+            )
+        except Unavailable as exc:
+            if exc.code != "too_large" or start == end:
+                raise
+            mid = (start + end) // 2
+            total, first = self._range_bodies(ctx, params, start, mid, enough=enough)
+            if enough is not None and total > enough:
+                return total, first
+            _, second = self._range_bodies(ctx, params, mid + 1, end)
+            return total, first + second
+        return _resources_total(resp), [resp.body]
+
+    def _sku_bodies(self, ctx: SourceContext, ids: Sequence[str]) -> list[bytes]:
+        """Lote por SKU; si la respuesta no cabe en el tope de tamaño, por mitades."""
+        try:
+            resp = ctx.http.request(
+                "GET",
+                f"{self.store.api_base}/catalog_system/pub/products/search",
+                params=_sku_params(ids),
+                headers=_HEADERS,
+            )
+        except Unavailable as exc:
+            if exc.code != "too_large" or len(ids) == 1:
+                raise
+            mid = len(ids) // 2
+            return self._sku_bodies(ctx, ids[:mid]) + self._sku_bodies(ctx, ids[mid:])
+        return [resp.body]
 
     def fetch_changed(self, ctx: SourceContext, since: datetime, page: int) -> CatalogPage:
         raise NotImplementedError
@@ -461,13 +505,8 @@ class VtexSource:
         ids = [i for i in external_ids if _SKU_RE.fullmatch(i)][:MAX_BATCH]
         if not ids:
             return []
-        resp = ctx.http.request(
-            "GET",
-            f"{self.store.api_base}/catalog_system/pub/products/search",
-            params=_sku_params(ids),
-            headers=_HEADERS,
-        )
-        return [o for o in parse_vtex_catalog(resp.body) if o.external_id in ids]
+        bodies = self._sku_bodies(ctx, ids)
+        return [o for body in bodies for o in parse_vtex_catalog(body) if o.external_id in ids]
 
     def fetch_card_facts(
         self, ctx: SourceContext, external_ids: Sequence[str]
@@ -475,14 +514,9 @@ class VtexSource:
         ids = [i for i in external_ids if _SKU_RE.fullmatch(i)][:MAX_BATCH]
         if not ids:
             return {}
-        resp = ctx.http.request(
-            "GET",
-            f"{self.store.api_base}/catalog_system/pub/products/search",
-            params=_sku_params(ids),
-            headers=_HEADERS,
-        )
         out: dict[str, CardFacts] = {}
-        for product in _catalog_products(resp.body):
+        products = [p for body in self._sku_bodies(ctx, ids) for p in _catalog_products(body)]
+        for product in products:
             for item in product.items:
                 if item.itemId not in ids:
                     continue

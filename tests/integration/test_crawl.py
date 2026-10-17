@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import random
 import re
 from collections.abc import Mapping, Sequence
@@ -369,6 +370,31 @@ def test_crawl_three_parse_errors_in_a_row_stop(db: psycopg.Connection) -> None:
     assert repo.get_cursor(db, "exito").page == 4  # la próxima corrida sigue después
     breaker = repo.load_breakers(db)["exito"]
     assert breaker.consecutive_parse >= 3 or breaker.state == "open"
+
+
+def test_crawl_logs_the_code_of_each_source_error(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Sin el código, un rastreo que para en `partial` no dice qué falló (2026-10-17)."""
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(3)]}, errors={("C:/1/", 1)})
+    d, _ = deps(db, src, Clock())
+    with caplog.at_level(logging.INFO, logger="discountz"):
+        run_crawl(d, T, minutes=60)
+    assert "source_error source=exito code=" in caplog.text
+
+
+def test_crawl_logs_why_it_did_not_run(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(4)]})
+    d, transport = deps(db, src, Clock())
+    transport.blocked.add("https://fake/page/C:/1//1")
+    run_crawl(d, T, minutes=60)
+    again, _ = deps(db, src, Clock())
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="discountz"):
+        assert run_crawl(again, T + timedelta(minutes=5), minutes=60).status == "blocked"
+    assert "crawl_done source=exito status=blocked requests=0" in caplog.text
 
 
 def test_crawl_single_parse_error_is_skipped(db: psycopg.Connection) -> None:

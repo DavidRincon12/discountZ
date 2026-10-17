@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import pytest
 
-from discountz.domain.errors import ParseError
+from discountz.domain.errors import ParseError, Unavailable
 from discountz.domain.model import ListingRef, SellerClass
 from discountz.domain.money import Currency, Money
 from discountz.infra.http import FakeHttp, Files, HttpResponse, Method, Params
@@ -285,3 +285,72 @@ def test_catalog_listings_take_cheapest_seller_in_stock() -> None:
     assert cheapest.offer.in_stock
     assert cheapest.offer.price == Money(59_900, Currency.COP)
     assert cheapest.offer.seller_class is SellerClass.MARKETPLACE
+
+
+def _heavy(limit: int, total: int) -> Callable[[dict[str, str]], HttpResponse]:
+    """Catálogo cuyas páginas de más de `limit` productos no caben en el tope de tamaño."""
+
+    def handler(q: dict[str, str]) -> HttpResponse:
+        start, end = int(q["_from"]), int(q["_to"])
+        if end - start + 1 > limit:
+            raise Unavailable("exito", "too_large", 206)
+        body = [product(str(1000 + i), [("1", True, 59900.0, 3)]) for i in range(start, end + 1)]
+        return resp(body, total=total, start=start, end=end)
+
+    return handler
+
+
+def test_catalog_page_too_large_is_read_in_halves() -> None:
+    """Moda y accesorios de Éxito pesó 42,8 MB por página de 50 el 2026-10-17 (tope: 24 MB)."""
+    fake = _Router(_heavy(limit=25, total=120))
+    page = VtexSource(STORES["exito"]).fetch_catalog_page(ctx(fake), "C:/1/", 1)
+    assert [o.external_id for o in page.items] == [str(1000 + i) for i in range(50, 100)]
+    assert page.has_more
+    ranges = [dict(parse_qsl(urlsplit(u).query)) for u in fake.urls]
+    assert [(r["_from"], r["_to"]) for r in ranges] == [("50", "99"), ("50", "74"), ("75", "99")]
+
+
+def test_catalog_page_halves_until_it_fits() -> None:
+    fake = _Router(_heavy(limit=12, total=50))
+    page = VtexSource(STORES["exito"]).fetch_catalog_page(ctx(fake), "C:/1/", 0)
+    assert len(page.items) == 50
+    assert not page.has_more
+
+
+def test_single_product_too_large_is_still_an_error() -> None:
+    fake = _Router(_heavy(limit=0, total=50))
+    with pytest.raises(Unavailable):
+        VtexSource(STORES["exito"]).fetch_catalog_page(ctx(fake), "C:/1/", 0)
+
+
+def test_sku_batch_too_large_is_read_in_halves() -> None:
+    ids = [str(1000 + i) for i in range(50)]
+
+    def handler(q: dict[str, str]) -> HttpResponse:
+        start, end = int(q["_from"]), int(q["_to"])
+        if end - start + 1 > 25:
+            raise Unavailable("exito", "too_large", 206)
+        asked = fake.last_fqs
+        body = [product(f.removeprefix("skuId:"), [("1", True, 59900.0, 3)]) for f in asked]
+        return resp(body, total=len(body), end=len(body) - 1)
+
+    fake = _Router(handler)
+    items = VtexSource(STORES["exito"]).fetch_catalog_items(ctx(fake), ids)
+    assert sorted(o.external_id for o in items) == ids
+    assert len(fake.urls) == 3
+    facts = VtexSource(STORES["exito"]).fetch_card_facts(ctx(fake), ids)
+    assert sorted(facts) == ids
+
+
+def test_too_large_first_page_of_a_partition_to_split_stops_at_the_total() -> None:
+    """Para partir por precio basta el total de la primera mitad que cabe."""
+    fake = _Router(_heavy(limit=12, total=40_000))
+    page = VtexSource(STORES["exito"]).fetch_catalog_page(ctx(fake), "C:/1/", 0)
+    assert page.split
+    ranges = [dict(parse_qsl(urlsplit(u).query)) for u in fake.urls]
+    assert [(r["_from"], r["_to"]) for r in ranges] == [
+        ("0", "49"),
+        ("0", "24"),
+        ("0", "12"),
+        ("0", "6"),
+    ]
