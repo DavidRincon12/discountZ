@@ -584,6 +584,57 @@ def test_cycle_marks_dealnews_feed_then_delivers_its_new_deal(conn: psycopg.Conn
     ]
 
 
+def test_cycle_marks_slickdeals_amazon_then_delivers_its_new_deal(
+    conn: psycopg.Connection,
+) -> None:
+    now = datetime(2026, 10, 13, 23, 30, tzinfo=UTC)
+    conn.execute(
+        "UPDATE discountz.bot_state SET last_maintenance_on = %s, last_summary_on = %s",
+        (now.date(), now.date()),
+    )
+    for i, code in enumerate(load_topics().params, start=10):
+        repo.save_topic(conn, code, code, i)
+    feed = load_fixture("slickdeals", "frontpage")
+    guid = feed.body.index(b">thread-20089260</guid>")
+    start = feed.body.rindex(b"<item>", 0, guid)
+    end = feed.body.index(b"</item>", guid) + len(b"</item>")
+    before = feed.body[:start] + feed.body[end:]  # la portada antes del hilo 20089260
+    buf = io.BytesIO()
+    Image.new("RGB", (200, 200), (10, 120, 200)).save(buf, "JPEG")
+
+    def cycle(body: bytes, at: datetime) -> tuple[FakeHttp, _AnyPhoto]:
+        http = FakeHttp({RSS_URL: HttpResponse(200, feed.url, {}, body, 1)})
+        photos = _AnyPhoto(buf.getvalue())
+        tg = FakeHttp(
+            {
+                **telegram().routes,
+                f"{TG}/sendPhoto": jresp({"ok": True, "result": {"message_id": 2}}),
+            }
+        )
+        run_cycle(replace(deps(conn, {"slickdeals_amazon": http}, tg), photos=photos), at)
+        return tg, photos
+
+    tg, photos = cycle(before, now)
+    assert (tg.uploads, photos.urls) == ([], [])  # primera lectura: solo marca lo que hay
+    assert conn.execute("SELECT count(*) FROM discountz.outbox").fetchone() == (0,)
+    tg, photos = cycle(feed.body, now + timedelta(minutes=31))  # se lee cada 30 min
+    assert len(tg.uploads) == 1 and len(photos.urls) == 1
+    assert photos.urls[0].startswith("https://static.slickdealscdn.com/")
+    data, _ = tg.uploads[0]
+    assert data is not None
+    assert "Visto en Slickdeals · sin verificar" in data["caption"]
+    assert data["message_thread_id"] == str(repo.topic_threads(conn)["tecnologia"])
+    keyboard = json.loads(data["reply_markup"])["inline_keyboard"]
+    assert [(b["text"], b["url"]) for row in keyboard for b in row] == [
+        ("Ver oferta", "https://www.amazon.com/dp/B0GX12H56R"),
+        (
+            "Ver en Slickdeals",
+            "https://slickdeals.net/f/20089260-25w-waylite-magnetic-wireless-iphone-charger-w-"
+            "kickstand-6-6-usb-c-cable-2-colors-8-49-free-shipping-w-prime-or-on-35",
+        ),
+    ]
+
+
 @dataclass
 class _AnyPhoto:
     """Transporte de fotos que responde la misma imagen a cualquier URL y la registra."""
