@@ -22,7 +22,7 @@ _MIN_TOKEN_LEN = 3
 
 @dataclass(frozen=True, slots=True)
 class ChannelPost:
-    channel: str  # código de la fuente (`tg_…`)
+    channel: str  # código de la fuente (`tg_…`, `dealnews`…)
     post_id: int
     published_at: datetime
     title: str
@@ -32,6 +32,7 @@ class ChannelPost:
     hashtags: tuple[str, ...]  # normalizados, sin «#»
     image_url: SafeUrl | None
     link: SafeUrl
+    post_url: SafeUrl | None = None  # la publicación en su fuente; None: `t.me/<canal>/<id>`
 
 
 @dataclass(frozen=True, slots=True)

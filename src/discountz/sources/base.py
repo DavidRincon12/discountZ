@@ -79,6 +79,9 @@ class SourceDescriptor:
     auth: Literal["none", "api_key", "oauth_client", "oauth_refresh"] = "none"
     image_hosts: frozenset[str] = frozenset()  # hosts permitidos para la foto de la tarjeta
     supports_changed: bool = False  # la fuente puede listar «cambiados desde» (fetch_changed)
+    # Canales: los ids crecen con cada publicación y sirven de cursor. Un feed sin ese orden se
+    # relee entero en cada lectura y se saltan los ids ya guardados (app/channels.py).
+    ordered_ids: bool = True
 
 
 class CredentialStore(Protocol):

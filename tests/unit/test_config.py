@@ -52,8 +52,10 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "tg_descuentostech",
         "tg_clubgratis",
         "tg_cajitatech",
+        "dealnews",
     }
     assert p.budgets["tg_clubgratis"].max_per_run == 3  # hasta 3 páginas por lectura
+    assert p.budgets["dealnews"].min_pause_s == 2  # su robots.txt pide `Crawl-delay: 2`
     assert p.budgets["exito"].group == p.budgets["carulla"].group == "grupo_exito"
     assert p.budgets["amazon_us"].max_per_run == 12
     assert p.budgets["amazon_us"].max_per_24h == 400

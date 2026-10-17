@@ -239,7 +239,7 @@ def test_channel_due_every_ten_minutes(db: psycopg.Connection) -> None:
     def due(now: datetime) -> Sequence[str]:
         return due_channels(db, load_all(), PARAMS.budgets, {}, now, PARAMS.channel_interval)
 
-    assert set(due(T)) == {"tg_descuentostech", "tg_clubgratis", "tg_cajitatech"}
+    assert set(due(T)) == {"tg_descuentostech", "tg_clubgratis", "tg_cajitatech", "dealnews"}
     repo.save_channel_cursor(db, "tg_cajitatech", 100, T)
     assert "tg_cajitatech" not in due(T + timedelta(minutes=5))
     assert "tg_cajitatech" in due(T + timedelta(minutes=10))
