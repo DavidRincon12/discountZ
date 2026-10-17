@@ -40,6 +40,7 @@ __all__ = [
     "ListingOutcome",
     "NeedsResolution",
     "NoCredentials",
+    "PostsOnlySource",
     "SearchPage",
     "Source",
     "SourceContext",
@@ -204,7 +205,34 @@ class ChannelPage:
 
 class ChannelSource(Protocol):
     descriptor: SourceDescriptor
-    channel: str  # nombre del canal en `t.me`
 
     def fetch_posts(self, ctx: SourceContext, after_id: int | None) -> ChannelPage: ...
     def detect_block(self, resp: HttpResponse) -> BlockKind | None: ...
+
+
+class PostsOnlySource:
+    """Lo que una fuente de publicaciones (`ChannelSource`) responde del contrato `Source`.
+
+    Una publicación no es un producto que seguir: no hay fichas, búsqueda, confirmación ni
+    leads. Cada fuente agrega su `descriptor`, `fetch_posts` y `detect_block`.
+    """
+
+    def parse_url(self, url: SafeUrl) -> ListingRef | NeedsResolution | None:
+        return None
+
+    def resolve(self, ctx: SourceContext, pending: NeedsResolution) -> ListingRef:
+        raise ParseError("no_resolution")
+
+    def fetch_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        return []
+
+    def search(self, ctx: SourceContext, spec: SearchSpec, page: int) -> SearchPage:
+        return SearchPage((), None)
+
+    def confirm(self, ctx: SourceContext, offer: Offer) -> Offer | None:
+        return None
+
+    def fetch_leads(self, ctx: SourceContext) -> list[Lead]:
+        return []

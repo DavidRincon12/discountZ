@@ -18,18 +18,11 @@ from selectolax.lexbor import LexborHTMLParser, LexborNode
 
 from discountz.domain.community import ChannelPost
 from discountz.domain.errors import ParseError, UnsafeUrl
-from discountz.domain.model import Lead, ListingRef, Offer, SearchSpec, normalize_title
+from discountz.domain.model import normalize_title
 from discountz.domain.money import Currency, Money, parse_price
 from discountz.domain.urls import SafeUrl
 from discountz.infra.http import BlockKind, HttpResponse
-from discountz.sources.base import (
-    ChannelPage,
-    ListingOutcome,
-    NeedsResolution,
-    SearchPage,
-    SourceContext,
-    SourceDescriptor,
-)
+from discountz.sources.base import ChannelPage, PostsOnlySource, SourceContext, SourceDescriptor
 from discountz.sources.blocks import detect_block_common
 from discountz.sources.registry import SOURCES, register
 
@@ -322,7 +315,7 @@ def parse_channel_page(code: str, body: bytes, now: datetime) -> ChannelPage:
     )
 
 
-class TelegramChannelSource:
+class TelegramChannelSource(PostsOnlySource):
     """Un canal público. Solo implementa la lectura de publicaciones (`ChannelSource`)."""
 
     def __init__(self, code: str) -> None:
@@ -343,26 +336,6 @@ class TelegramChannelSource:
         params = {"after": str(after_id)} if after_id is not None else None
         resp = ctx.http.request("GET", f"https://t.me/s/{self.channel}", params=params)
         return parse_channel_page(self.descriptor.code, resp.body, ctx.now)
-
-    def parse_url(self, url: SafeUrl) -> ListingRef | NeedsResolution | None:
-        return None  # una publicación de un canal no es un producto que seguir
-
-    def resolve(self, ctx: SourceContext, pending: NeedsResolution) -> ListingRef:
-        raise ParseError("no_resolution")
-
-    def fetch_listings(
-        self, ctx: SourceContext, refs: Sequence[ListingRef]
-    ) -> list[ListingOutcome]:
-        return []
-
-    def search(self, ctx: SourceContext, spec: SearchSpec, page: int) -> SearchPage:
-        return SearchPage((), None)
-
-    def confirm(self, ctx: SourceContext, offer: Offer) -> Offer | None:
-        return None
-
-    def fetch_leads(self, ctx: SourceContext) -> list[Lead]:
-        return []
 
     def detect_block(self, resp: HttpResponse) -> BlockKind | None:
         return detect_block_common(resp)
