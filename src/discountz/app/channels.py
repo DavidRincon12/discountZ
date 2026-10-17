@@ -151,7 +151,10 @@ def _run_one(
     streak = 0 if found else previous + sum(p.unparsed for p in pages)
     if not ordered:
         first = cursor is None
-        _read_unordered(conn, r.code, pages, now, topics, recent, silent, tally, streak, first)
+        since = None if source.descriptor.refeatures else now - MAX_AGE
+        _read_unordered(
+            conn, r.code, pages, now, topics, recent, silent, tally, streak, first, since
+        )
     elif cursor is None:  # primera lectura: solo se fija el punto de partida
         top = max((p.max_id for p in pages if p.max_id is not None), default=None)
         if top is not None:
@@ -185,19 +188,21 @@ def _read_unordered(
     tally: _Tally,
     streak: int,
     first: bool,
+    since: datetime | None,
 ) -> None:
     """Un feed sin orden de ids trae su ventana entera en cada lectura.
 
-    Lo ya guardado y lo de más de `MAX_AGE` se salta sin contarse, igual que los `skipped` de
-    la página: se repiten en cada lectura. Se envía de la publicación más vieja a la más nueva,
-    para que la primera sea la original si hay duplicados. En la primera lectura (`first`) todo
-    queda marcado sin enviarse; si no trae ninguna oferta legible (feed vacío o formato roto),
-    no fija nada y la siguiente vuelve a ser primera: así no envía de golpe lo de 6 h.
+    Lo ya guardado y lo publicado antes de `since` se salta sin contarse, igual que los
+    `skipped` de la página: se repiten en cada lectura. Sin `since` (DealNews) no hay tope.
+    Se envía de la publicación más vieja a la más nueva, para que la primera sea la original
+    si hay duplicados. En la primera lectura (`first`) todo queda marcado sin enviarse; si no
+    trae ninguna oferta legible (feed vacío o formato roto), no fija nada y la siguiente vuelve
+    a ser primera: así no envía de golpe lo que ya estaba en el feed.
     """
     if first and not any(p.posts for p in pages):
         return
     top = max((p.max_id for p in pages if p.max_id is not None), default=None)
-    fresh = [p for page in pages for p in page.posts if p.published_at >= now - MAX_AGE]
+    fresh = [p for page in pages for p in page.posts if since is None or p.published_at >= since]
     seen = db.channel_post_ids(conn, code, [p.post_id for p in fresh])
     with conn.transaction():
         for post in sorted(fresh, key=lambda p: (p.published_at, p.post_id)):
@@ -207,7 +212,7 @@ def _read_unordered(
             if first:
                 _mark(conn, code, post, now, topics)
             else:
-                _handle(conn, code, post, now, topics, recent, silent, tally)
+                _handle(conn, code, post, now, topics, recent, silent, tally, max_age=None)
         db.save_channel_cursor(conn, code, top or 0, now, unparsed_streak=streak)
 
 
@@ -288,9 +293,11 @@ def _handle(
     recent: list[db.RecentPost],
     silent: bool,
     tally: _Tally,
+    *,
+    max_age: timedelta | None = MAX_AGE,
 ) -> None:
     tally.posts += 1
-    if post.published_at < now - MAX_AGE:
+    if max_age is not None and post.published_at < now - max_age:
         tally.skipped += 1
         return
     dup = find_duplicate(post, recent)
