@@ -199,6 +199,36 @@ watch_interval_min = 30
 search_interval_min = 30
 max_batch = 1
 
+[sources.tg_descuentostech]  # hasta 3 páginas por lectura; ~144 lecturas al día
+group = "tg_descuentostech"
+min_pause_s = 1
+jitter_s = 1
+max_per_run = 3
+max_per_24h = 600
+watch_interval_min = 10
+search_interval_min = 10
+max_batch = 1
+
+[sources.tg_clubgratis]  # hasta 3 páginas por lectura; ~144 lecturas al día
+group = "tg_clubgratis"
+min_pause_s = 1
+jitter_s = 1
+max_per_run = 3
+max_per_24h = 600
+watch_interval_min = 10
+search_interval_min = 10
+max_batch = 1
+
+[sources.tg_cajitatech]  # hasta 3 páginas por lectura; ~144 lecturas al día
+group = "tg_cajitatech"
+min_pause_s = 1
+jitter_s = 1
+max_per_run = 3
+max_per_24h = 600
+watch_interval_min = 10
+search_interval_min = 10
+max_batch = 1
+
 # Canales de ofertas de Telegram (spec de canales §2): cada canal como máximo cada N minutos.
 [channels]
 interval_min = 10

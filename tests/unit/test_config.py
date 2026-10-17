@@ -49,7 +49,11 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "walmart_us",
         "bestbuy_us",
         "slickdeals",
+        "tg_descuentostech",
+        "tg_clubgratis",
+        "tg_cajitatech",
     }
+    assert p.budgets["tg_clubgratis"].max_per_run == 3  # hasta 3 páginas por lectura
     assert p.budgets["exito"].group == p.budgets["carulla"].group == "grupo_exito"
     assert p.budgets["amazon_us"].max_per_run == 12
     assert p.budgets["amazon_us"].max_per_24h == 400

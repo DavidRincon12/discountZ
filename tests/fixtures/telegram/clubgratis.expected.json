@@ -1,0 +1,126 @@
+{
+ "max_id": 59517,
+ "skipped": 5,
+ "deals": [
+  {
+   "post_id": 59498,
+   "price_minor": 790,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Amazon",
+   "title_start": "Dove - Suero"
+  },
+  {
+   "post_id": 59500,
+   "price_minor": 649,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Amazon",
+   "title_start": "MJC Panty"
+  },
+  {
+   "post_id": 59501,
+   "price_minor": 13000,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Amazon",
+   "title_start": "National Tree Company"
+  },
+  {
+   "post_id": 59502,
+   "price_minor": 4081,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Amazon",
+   "title_start": "Armatus - PlayStation 5"
+  },
+  {
+   "post_id": 59503,
+   "price_minor": 2932,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Amazon",
+   "title_start": "Nautica Suéter"
+  },
+  {
+   "post_id": 59505,
+   "price_minor": 19783,
+   "currency": "COP",
+   "coupon": null,
+   "store": "Temu",
+   "title_start": "UGREEN SmartTag"
+  },
+  {
+   "post_id": 59506,
+   "price_minor": 199900,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Apple",
+   "title_start": "Pre‑order iPhone Duo"
+  },
+  {
+   "post_id": 59507,
+   "price_minor": 2499,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Amazon",
+   "title_start": "Juego de 3 sartenes"
+  },
+  {
+   "post_id": 59508,
+   "price_minor": 1299,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Amazon",
+   "title_start": "TanBridge Camisas"
+  },
+  {
+   "post_id": 59509,
+   "price_minor": 275000,
+   "currency": "COP",
+   "coupon": "PREHOT",
+   "store": "Mercado Libre",
+   "title_start": "Audífonos Inalámbricos Con"
+  },
+  {
+   "post_id": 59510,
+   "price_minor": 4499910,
+   "currency": "COP",
+   "coupon": "TVZE10",
+   "store": "Samsung",
+   "title_start": "55\" OLED S95H"
+  },
+  {
+   "post_id": 59513,
+   "price_minor": 499,
+   "currency": "USD",
+   "coupon": "T6YLVQZS",
+   "store": "Amazon",
+   "title_start": "Arcweg traje de baño"
+  },
+  {
+   "post_id": 59514,
+   "price_minor": 995,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Amazon",
+   "title_start": "DOOPAI Cinturón"
+  },
+  {
+   "post_id": 59515,
+   "price_minor": 37772,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Amazon",
+   "title_start": "MSI Placa base"
+  },
+  {
+   "post_id": 59516,
+   "price_minor": 799,
+   "currency": "USD",
+   "coupon": null,
+   "store": "Amazon",
+   "title_start": "DKARDU Filtro"
+  }
+ ]
+}

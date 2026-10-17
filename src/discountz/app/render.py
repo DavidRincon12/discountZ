@@ -39,6 +39,9 @@ SOURCE_NAMES = {
     "walmart_us": "Walmart US",
     "bestbuy_us": "Best Buy US",
     "slickdeals": "Slickdeals",
+    "tg_descuentostech": "DescuentosTech",
+    "tg_clubgratis": "Clubgratis",
+    "tg_cajitatech": "cajitatech",
 }
 
 _HEADERS = {

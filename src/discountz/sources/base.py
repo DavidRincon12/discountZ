@@ -16,6 +16,7 @@ from typing import Literal, Protocol
 from pydantic import SecretStr
 
 from discountz.domain.catalog import CatalogObservation
+from discountz.domain.community import ChannelPost
 from discountz.domain.errors import CredentialUnavailable, ParseError, SourceError
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec
 from discountz.domain.money import Currency
@@ -28,6 +29,8 @@ __all__ = [
     "CardFacts",
     "CatalogPage",
     "CatalogSource",
+    "ChannelPage",
+    "ChannelSource",
     "CrawlSource",
     "CredentialStore",
     "ExtractionPath",
@@ -65,7 +68,7 @@ class Capability(StrEnum):
 @dataclass(frozen=True, slots=True)
 class SourceDescriptor:
     code: str
-    kind: Literal["store", "feed"]
+    kind: Literal["store", "feed", "channel"]
     currency: Currency
     hosts: frozenset[str]  # coincidencia EXACTA tras minúsculas + IDNA
     client: Literal["httpx", "curl"]
@@ -186,3 +189,21 @@ class CatalogSource(Protocol):
 
 class CrawlSource(Source, CatalogSource, Protocol):
     """Fuente que se puede rastrear: ficha y búsqueda de la v1 más el catálogo."""
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelPage:
+    """Una página de un canal: ofertas, id más alto (oferta o no) y si puede haber más."""
+
+    posts: Sequence[ChannelPost]
+    max_id: int | None
+    has_more: bool  # la página trajo el máximo de publicaciones
+    skipped: int  # publicaciones que no son oferta
+
+
+class ChannelSource(Protocol):
+    descriptor: SourceDescriptor
+    channel: str  # nombre del canal en `t.me`
+
+    def fetch_posts(self, ctx: SourceContext, after_id: int | None) -> ChannelPage: ...
+    def detect_block(self, resp: HttpResponse) -> BlockKind | None: ...
