@@ -24,6 +24,7 @@ def _post(
     duplicate_of: str | None = None,
     price: int = 3000,
     currency: str = "USD",
+    baseline: bool = False,
 ) -> bool:
     return dbm.insert_channel_post(
         conn,
@@ -37,6 +38,7 @@ def _post(
         topic="tecnologia",
         duplicate_of=duplicate_of,
         now=seen,
+        baseline=baseline,
     )
 
 
@@ -45,6 +47,8 @@ def test_migration_registers_channel_sources(db: psycopg.Connection) -> None:
         "SELECT code, kind, enabled FROM discountz.source WHERE kind='channel' ORDER BY code"
     ).fetchall()
     assert rows == [
+        ("dealnews", "channel", True),
+        ("slickdeals_amazon", "channel", True),
         ("tg_cajitatech", "channel", True),
         ("tg_clubgratis", "channel", True),
         ("tg_descuentostech", "channel", True),
@@ -90,9 +94,22 @@ def test_channel_post_rejects_bad_values(db: psycopg.Connection, price: int, cur
 
 def test_migration_0003_down_restores_schema_2(db: psycopg.Connection) -> None:
     dbm.save_channel_cursor(db, "tg_clubgratis", 1, T)
-    assert migrate(db, 2) == [3]
+    assert migrate(db, 2) == [4, 3]
     assert current_version(db) == 2
     assert db.execute("SELECT to_regclass('discountz.channel_post')").fetchone() == (None,)
     assert db.execute("SELECT count(*) FROM discountz.source").fetchone() == (9,)
     with pytest.raises(psycopg.errors.CheckViolation):
         db.execute("UPDATE discountz.source SET kind = 'channel' WHERE code = 'exito'")
+
+
+def test_channel_post_ids_only_of_that_channel(db: psycopg.Connection) -> None:
+    _post(db, "dealnews", 22269285)
+    _post(db, "slickdeals_amazon", 20089260)
+    assert dbm.channel_post_ids(db, "dealnews", [22269285, 20089260, 7]) == {22269285}
+    assert dbm.channel_post_ids(db, "dealnews", []) == set()
+
+
+def test_baseline_posts_are_known_but_never_originals(db: psycopg.Connection) -> None:
+    _post(db, "dealnews", 22269285, baseline=True)
+    assert dbm.channel_post_ids(db, "dealnews", [22269285]) == {22269285}
+    assert dbm.recent_channel_posts(db, T - timedelta(hours=24)) == []

@@ -551,3 +551,58 @@ def test_channel_card_fields() -> None:
         "coupon": "T6YLVQZS",
         "badge": "Clubgratis · sin verificar",
     }
+
+
+# ───────────── Ofertas de feeds sin verificar (DealNews y Slickdeals Amazon)
+
+DEALNEWS_URL = (
+    "https://www.dealnews.com/3-in-1-Ice-Depuffing-Wand-for-45-free-shipping/22269285.html?iref=rss"
+)
+DEALNEWS = {
+    "channel": "dealnews",
+    "post_id": 22269285,
+    "title": "3-in-1 Ice Depuffing Wand for $45 + free shipping",
+    "price": Money(4499, Currency.USD),
+    "coupon": "4IQ9VRP5",
+    "hashtags": ("skin", "care"),
+    "link": SafeUrl.parse(DEALNEWS_URL, frozenset({"www.dealnews.com"})),
+    "post_url": SafeUrl.parse(DEALNEWS_URL, frozenset({"www.dealnews.com"})),
+}
+SLICKDEALS = {
+    "channel": "slickdeals_amazon",
+    "post_id": 20089260,
+    "title": "WayLite Magnetic up to 25W Wireless Charger w/ Kickstand $8.50",
+    "price": Money(850, Currency.USD),
+    "coupon": None,
+    "hashtags": (),
+    "link": SafeUrl.parse("https://www.amazon.com/dp/B0GX12H56R", frozenset({"www.amazon.com"})),
+    "post_url": SafeUrl.parse(
+        "https://slickdeals.net/f/20089260-25w-waylite", frozenset({"slickdeals.net"})
+    ),
+}
+
+
+def test_render_dealnews_deal_matches_golden() -> None:
+    msg = render_channel_deal(_channel_post(**DEALNEWS), "belleza")
+    assert msg.html == golden("feed_deal_dealnews.html")
+
+
+def test_dealnews_deal_has_one_button_with_its_link_untouched() -> None:
+    assert render_channel_deal(_channel_post(**DEALNEWS), "belleza").buttons == [
+        [Button("Ver en DealNews", url=DEALNEWS_URL)]
+    ]
+
+
+def test_slickdeals_deal_links_to_amazon_and_to_the_thread() -> None:
+    msg = render_channel_deal(_channel_post(**SLICKDEALS), "tecnologia")
+    assert msg.html.startswith("<b>OFERTA DE SLICKDEALS</b> · #tecnologia · Amazon\n")
+    assert "📣 Visto en Slickdeals · sin verificar" in msg.html
+    assert msg.buttons == [
+        [Button("Ver oferta", url="https://www.amazon.com/dp/B0GX12H56R")],
+        [Button("Ver en Slickdeals", url="https://slickdeals.net/f/20089260-25w-waylite")],
+    ]
+
+
+def test_feed_card_badge_names_the_source() -> None:
+    card = channel_card(_channel_post(**DEALNEWS), "belleza")
+    assert (card["badge"], card["url"]) == ("DealNews · sin verificar", DEALNEWS_URL)

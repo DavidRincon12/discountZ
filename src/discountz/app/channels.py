@@ -4,6 +4,11 @@ Por canal: primero las peticiones (hasta `MAX_PAGES` páginas, sin transacción 
 sin HTTP, una transacción por página que guarda los posts, encola las ofertas nuevas y avanza
 el cursor. Si la transacción falla, el cursor no se mueve y la página se relee en el ciclo
 siguiente; `dedup_key` e `insert_channel_post` impiden reenviar lo que ya salió.
+
+Los feeds cuyos ids no crecen con la publicación (`ordered_ids=False`: DealNews, Slickdeals
+Amazon) se leen enteros en cada lectura, sin `after`: se saltan los ids ya guardados en
+`channel_post`. Su primera lectura, como la de un canal, no envía nada: guarda lo que hay como
+visto (`baseline`).
 """
 
 from __future__ import annotations
@@ -63,7 +68,10 @@ def due_channels(
     now: datetime,
     interval: timedelta,
 ) -> Sequence[str]:
-    """Canales habilitados, con breaker no abierto y sin leer en el último `interval`."""
+    """Canales habilitados, con breaker no abierto y sin leer en el último `interval`.
+
+    Un canal cuyo presupuesto pide más espacio entre lecturas (`watch_interval`) espera eso.
+    """
     due = []
     for code, source in sources.items():
         if source.descriptor.kind != "channel" or code not in budgets:
@@ -72,7 +80,8 @@ def due_channels(
         if breaker is not None and effective_state(breaker, now) == "open":
             continue
         cursor = db.get_channel_cursor(conn, code)
-        if cursor is None or cursor.updated_at + interval <= now:
+        wait = max(interval, budgets[code].watch_interval)
+        if cursor is None or cursor.updated_at + wait <= now:
             due.append(code)
     return due
 
@@ -129,8 +138,10 @@ def _run_one(
     tally: _Tally,
 ) -> None:
     source = cast(ChannelSource, r.source)
+    ordered = source.descriptor.ordered_ids
     cursor = db.get_channel_cursor(conn, r.code)
-    pages, clean = _fetch(r, source, cursor.last_id if cursor else None, now, rnd, deadline)
+    after = cursor.last_id if cursor is not None and ordered else None
+    pages, clean = _fetch(r, source, after, now, rnd, deadline)
     if not pages:
         return
     # Racha de publicaciones con precio y sin oferta: con 10 min entre lecturas casi nunca
@@ -138,7 +149,10 @@ def _run_one(
     previous = cursor.unparsed_streak if cursor else 0
     found = any(p.posts for p in pages)
     streak = 0 if found else previous + sum(p.unparsed for p in pages)
-    if cursor is None:  # primera lectura: solo se fija el punto de partida
+    if not ordered:
+        first = cursor is None
+        _read_unordered(conn, r.code, pages, now, topics, recent, silent, tally, streak, first)
+    elif cursor is None:  # primera lectura: solo se fija el punto de partida
         top = max((p.max_id for p in pages if p.max_id is not None), default=None)
         if top is not None:
             with conn.transaction():
@@ -158,6 +172,63 @@ def _run_one(
         _on_error(r, ParseError("format", loc=r.code), now, rnd)
     elif clean:
         r.breaker = breaker_transition(r.breaker, BreakerEvent.OK, now, rnd)
+
+
+def _read_unordered(
+    conn: psycopg.Connection,
+    code: str,
+    pages: Sequence[ChannelPage],
+    now: datetime,
+    topics: Topics,
+    recent: list[db.RecentPost],
+    silent: bool,
+    tally: _Tally,
+    streak: int,
+    first: bool,
+) -> None:
+    """Un feed sin orden de ids trae su ventana entera en cada lectura.
+
+    Lo ya guardado y lo de más de `MAX_AGE` se salta sin contarse, igual que los `skipped` de
+    la página: se repiten en cada lectura. Se envía de la publicación más vieja a la más nueva,
+    para que la primera sea la original si hay duplicados. En la primera lectura (`first`) todo
+    queda marcado sin enviarse; si no trae ninguna oferta legible (feed vacío o formato roto),
+    no fija nada y la siguiente vuelve a ser primera: así no envía de golpe lo de 6 h.
+    """
+    if first and not any(p.posts for p in pages):
+        return
+    top = max((p.max_id for p in pages if p.max_id is not None), default=None)
+    fresh = [p for page in pages for p in page.posts if p.published_at >= now - MAX_AGE]
+    seen = db.channel_post_ids(conn, code, [p.post_id for p in fresh])
+    with conn.transaction():
+        for post in sorted(fresh, key=lambda p: (p.published_at, p.post_id)):
+            if post.post_id in seen:
+                continue
+            seen.add(post.post_id)
+            if first:
+                _mark(conn, code, post, now, topics)
+            else:
+                _handle(conn, code, post, now, topics, recent, silent, tally)
+        db.save_channel_cursor(conn, code, top or 0, now, unparsed_streak=streak)
+
+
+def _mark(
+    conn: psycopg.Connection, code: str, post: ChannelPost, now: datetime, topics: Topics
+) -> None:
+    """Guarda la publicación como vista sin enviarla (primera lectura de un feed sin orden)."""
+    db.insert_channel_post(
+        conn,
+        code,
+        post.post_id,
+        published_at=post.published_at,
+        title_norm=normalize_title(post.title),
+        price_minor=post.price.minor,
+        currency=post.price.currency.value,
+        coupon=post.coupon,
+        topic=assign_channel_topic(post, topics.channel_rules),
+        duplicate_of=None,
+        now=now,
+        baseline=True,
+    )
 
 
 def _fetch(

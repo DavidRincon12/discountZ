@@ -16,7 +16,9 @@ from discountz.sources.fixtures import FIXTURES_DIR, load_fixture
 from discountz.sources.registry import load_all
 from discountz.sources.slickdeals import (
     RSS_URL,
+    SlickdealsAmazonSource,
     SlickdealsSource,
+    parse_slickdeals_amazon,
     parse_slickdeals_rss,
 )
 
@@ -35,11 +37,20 @@ def rss(*items: str) -> bytes:
     ).encode()
 
 
-def item(title: str, content: str, pub: str = "Tue, 13 Oct 2026 22:00:00 +0000") -> str:
+def item(
+    title: str,
+    content: str,
+    pub: str = "Tue, 13 Oct 2026 22:00:00 +0000",
+    thread: int = 1,
+) -> str:
     return (
-        f"<title><![CDATA[{title}]]></title><link>https://slickdeals.net/f/1</link>"
+        f"<title><![CDATA[{title}]]></title><link>https://slickdeals.net/f/{thread}</link>"
         f"<pubDate>{pub}</pubDate><content:encoded><![CDATA[{content}]]></content:encoded>"
+        f"<guid>thread-{thread}</guid>"
     )
+
+
+AMAZON_LINK = '<a data-product-exitWebsite="amazon.com" data-aps-asin="B0GX12H56R">Amazon</a>'
 
 
 def test_real_feed_extracts_amazon_leads() -> None:
@@ -117,3 +128,76 @@ def test_registered_as_feed() -> None:
     src = load_all()["slickdeals"]
     assert src.descriptor.kind == "feed"
     assert src.descriptor.capabilities == frozenset({Capability.LEADS})
+
+
+def test_real_feed_amazon_deals_become_unverified_posts() -> None:
+    page = parse_slickdeals_amazon(load_fixture("slickdeals", "frontpage").body)
+    assert [str(p.link).rsplit("/", 1)[-1] for p in page.posts] == EXP["amazon_asins"]
+    assert (page.skipped, page.unparsed, page.has_more, page.max_id) == (10, 0, False, 20153970)
+    assert sum(p.coupon is not None for p in page.posts) == 5
+    first = page.posts[0]
+    assert (first.channel, first.post_id, first.store) == ("slickdeals_amazon", 20089260, "Amazon")
+    assert first.title == EXP["first"]["title"]
+    assert first.price == Money(EXP["first"]["price"], Currency.USD)
+    assert first.coupon == "5OE1C9SF"
+    assert str(first.link) == EXP["first"]["target_url"]
+    assert str(first.post_url) == (  # el hilo, sin los `utm_*` del RSS
+        "https://slickdeals.net/f/20089260-25w-waylite-magnetic-wireless-iphone-charger-w-"
+        "kickstand-6-6-usb-c-cable-2-colors-8-49-free-shipping-w-prime-or-on-35"
+    )
+    assert str(first.image_url) == (
+        "https://static.slickdealscdn.com/attachment/8/3/9/2/300x300/21785274.thumb"
+    )
+    assert first.published_at == datetime.fromisoformat(EXP["first"]["published_at"])
+
+
+def test_amazon_exit_without_asin_or_price_is_a_format_signal() -> None:
+    no_asin = '<a data-product-exitWebsite="amazon.com" href="https://slickdeals.net/click">x</a>'
+    body = rss(item("Cosa $5", no_asin, thread=1), item("Sin precio", AMAZON_LINK, thread=2))
+    page = parse_slickdeals_amazon(body)
+    assert (page.posts, page.skipped, page.unparsed, page.max_id) == ((), 2, 2, 2)
+
+
+def test_other_stores_are_skipped_quietly() -> None:
+    link = '<a href="https://www.bestbuy.com/site/6512345.p?skuId=6512345">Best Buy</a>'
+    page = parse_slickdeals_amazon(rss(item("Monitor 27 in $99", link)))
+    assert (page.posts, page.skipped, page.unparsed) == ((), 1, 0)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("<guid>thread-1</guid>", ""),
+        ("<guid>thread-1</guid>", "<guid>https://slickdeals.net/f/1</guid>"),
+        ("Tue, 13 Oct 2026 22:00:00 +0000", "2026-10-13T22:00:00Z"),
+    ],
+)
+def test_amazon_post_without_thread_or_date_is_a_format_signal(old: str, new: str) -> None:
+    page = parse_slickdeals_amazon(rss(item("Cosa $5", AMAZON_LINK).replace(old, new)))
+    assert (page.posts, page.unparsed) == ((), 1)
+
+
+def test_other_store_without_thread_is_skipped_quietly() -> None:
+    link = '<a href="https://www.bestbuy.com/site/6512345.p?skuId=6512345">Best Buy</a>'
+    body = rss(item("Monitor 27 in $99", link).replace("<guid>thread-1</guid>", ""))
+    assert parse_slickdeals_amazon(body).unparsed == 0
+
+
+def test_amazon_channel_rejects_a_feed_without_items() -> None:
+    with pytest.raises(ParseError):
+        parse_slickdeals_amazon(rss())
+
+
+def test_amazon_channel_reads_the_frontpage_feed() -> None:
+    fake = FakeHttp({RSS_URL: load_fixture("slickdeals", "frontpage")})
+    source = SlickdealsAmazonSource()
+    page = source.fetch_posts(SourceContext(fake, NoCredentials(), 1e9, NOW), 20153970)
+    assert len(page.posts) == len(EXP["amazon_asins"])
+    assert [c[1] for c in fake.calls] == [RSS_URL]
+
+
+def test_amazon_channel_registered_without_hosts() -> None:
+    d = load_all()["slickdeals_amazon"].descriptor
+    assert (d.kind, d.ordered_ids, d.client) == ("channel", False, "httpx")
+    assert d.hosts == frozenset()  # los enlaces a slickdeals.net siguen yendo a `slickdeals`
+    assert d.image_hosts == frozenset({"static.slickdealscdn.com"})

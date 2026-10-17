@@ -293,6 +293,20 @@ def test_daily_summary_counts_channel_posts(db: psycopg.Connection) -> None:
         _channel_post(db, i, timedelta(hours=i), None)
     _channel_post(db, 4, timedelta(hours=2), "tg_clubgratis:1")
     _channel_post(db, 5, timedelta(hours=30), None)
+    repo.insert_channel_post(
+        db,
+        "dealnews",
+        22269285,
+        published_at=T,
+        title_norm="wand",
+        price_minor=4499,
+        currency="USD",
+        coupon=None,
+        topic="belleza",
+        duplicate_of=None,
+        now=T,
+        baseline=True,  # marcada en la primera lectura del feed, sin enviarse
+    )
     view = daily_summary(db, T)
     assert view.catalog is not None
     assert (view.catalog.channel_posts, view.catalog.channel_duplicates) == (3, 1)

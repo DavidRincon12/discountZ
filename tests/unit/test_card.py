@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw
 from discountz.domain.model import AlertKind
 from discountz.domain.money import Currency, Money
 from discountz.infra.card import (
+    DEFAULT_COLOR,
     MAX_PHOTO_BYTES,
     STORE_COLORS,
     CardData,
@@ -135,6 +136,15 @@ def test_community_card_has_no_discount_badge() -> None:
     assert img.size == (1080, 1080)
     assert not region_has_color(img, (830, 150, 1020, 340), (250, 204, 21))  # sin «-N %»
     assert region_has_color(img, (40, 940, 1040, 1010), _hex(STORE_COLORS["tg_clubgratis"]))
+
+
+def test_unverified_feeds_have_their_own_color() -> None:
+    feeds = [STORE_COLORS[code] for code in ("dealnews", "slickdeals_amazon")]
+    others = [
+        c for code, c in STORE_COLORS.items() if code not in {"dealnews", "slickdeals_amazon"}
+    ]
+    assert len(set(feeds)) == 2
+    assert not set(feeds) & {*others, DEFAULT_COLOR}
 
 
 def _hex(color: str) -> tuple[int, int, int]:

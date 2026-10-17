@@ -3,7 +3,7 @@
 ## Contexto
 Monitor **personal** de ofertas para David (Colombia). Rastrea tiendas colombianas (COP) y de EE. UU. que envían a casillero (USD), filtra descuentos inflados con un histórico propio y avisa por Telegram. Escala: decenas a pocos cientos de productos, un solo usuario, costo $0. Diseño completo: `docs/superpowers/specs/2026-10-13-discountz-v1-design.md`; decisiones en `docs/decisions/`.
 
-Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×4, Amazon US, Newegg, Walmart, Best Buy) y el RSS de Slickdeals.
+Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×4, Amazon US, Newegg, Walmart, Best Buy), el RSS de Slickdeals y el RSS de Amazon de DealNews.
 
 ## Contenedores
 ```mermaid
@@ -12,6 +12,7 @@ flowchart LR
   sched[[schedule 7,37 * * * *]] --> gha
   gha -->|HTTPS con ritmo y presupuesto| stores[[Tiendas y RSS]]
   gha -->|t.me/s/canal cada 10 min| chan[[Canales públicos de ofertas]]
+  gha -->|RSS cada 10 y 30 min| feeds[[DealNews y Slickdeals<br/>ofertas de Amazon]]
   gha -->|psycopg, modo sesión, verify-full| db[(Supabase Postgres<br/>esquema discountz)]
   gha -->|getUpdates / sendMessage| tg[[Telegram Bot API]]
   david([David]) <-->|comandos y alertas| tg
@@ -69,6 +70,8 @@ Migración `0003_canales` (canales de Telegram, ADR 0005):
 - `channel_post`: ofertas leídas de los canales (7 días), con `duplicate_of` cuando ya llegó la misma oferta por otro canal.
 - `source.kind` admite `channel`.
 
+Migración `0004_feeds_web` (feeds de Amazon, ADR 0006): fuentes `dealnews` y `slickdeals_amazon`, y `channel_post.baseline` para las ofertas que la primera lectura de un feed deja vistas sin enviar.
+
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
 ## Flujos clave
@@ -92,7 +95,7 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
    5. La alerta entra a `outbox` con su tema y su tarjeta; el ciclo la entrega como foto (`sendPhoto`) en ese tema.
 4. **Feed de Slickdeals**: una tarea `feed` baja el RSS una vez para todas las búsquedas `source='slickdeals'` vencidas → cada lead que coincide y apunta a una tienda activa (sin red: `href`, `u2=` o `data-aps-asin`) encola en memoria una lectura de ficha en esa tienda, antes que sus demás tareas → `evaluate(origin="lead")` puede dar `COMMUNITY_DEAL`. Los leads no se guardan, pero todo lead que lleva a una ficha crea un seguimiento automático (`aNN`, 30 días sin alerta, tope por tienda).
 
-5. **Canales de Telegram** (`app/channels.py`, dentro del ciclo): cada canal que toca (10 min) baja hasta 3 páginas `t.me/s/<canal>?after=<cursor>` con `sources/telegram_channels.py` → `domain/community.py` descarta duplicados (mismo cupón, o precio a ±10 % y títulos parecidos, 24 h) y asigna el tema → por página, en una transacción: guarda las publicaciones, encola la tarjeta «sin verificar» en `outbox` y avanza el cursor. La primera lectura solo fija el cursor.
+5. **Canales de Telegram** (`app/channels.py`, dentro del ciclo): cada canal que toca (10 min) baja hasta 3 páginas `t.me/s/<canal>?after=<cursor>` con `sources/telegram_channels.py` → `domain/community.py` descarta duplicados (mismo cupón, o precio a ±10 % y títulos parecidos, 24 h) y asigna el tema → por página, en una transacción: guarda las publicaciones, encola la tarjeta «sin verificar» en `outbox` y avanza el cursor. La primera lectura solo fija el cursor. Los feeds de Amazon (`sources/dealnews.py` cada 10 min y `slickdeals_amazon` cada 30) son canales con `ordered_ids=False`: se releen enteros, se saltan los ids ya guardados y su primera lectura marca lo que hay con `baseline` (ADR 0006).
 
 ## Atributos de calidad
 1. **Corrección de alertas**: ninguna alerta por un error de parseo o un descuento inflado (guardas G1-G14, confirmación independiente, tabla U01-U37).

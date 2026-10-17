@@ -229,6 +229,26 @@ watch_interval_min = 10
 search_interval_min = 10
 max_batch = 1
 
+[sources.dealnews]  # RSS de Amazon: 1 petición por lectura; robots.txt pide 2 s entre peticiones
+group = "dealnews"
+min_pause_s = 2
+jitter_s = 1
+max_per_run = 1
+max_per_24h = 200
+watch_interval_min = 10
+search_interval_min = 10
+max_batch = 1
+
+[sources.slickdeals_amazon]  # el RSS de `slickdeals` como canal: su ritmo, otro presupuesto
+group = "slickdeals_amazon"
+min_pause_s = 0
+jitter_s = 0
+max_per_run = 1
+max_per_24h = 60
+watch_interval_min = 30
+search_interval_min = 30
+max_batch = 1
+
 # Canales de ofertas de Telegram (spec de canales §2): cada canal como máximo cada N minutos.
 [channels]
 interval_min = 10
