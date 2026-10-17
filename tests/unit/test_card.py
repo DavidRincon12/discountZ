@@ -112,3 +112,56 @@ def test_card_matches_golden() -> None:
     golden = Image.open(GOLDEN / "card-c01.png")
     img = png(render_card(C01, None))
     assert distance(average_hash(img), average_hash(golden)) <= 5
+
+
+# ───────────── Variante `community` de los canales de Telegram (spec de canales §5)
+
+COMMUNITY = replace(
+    C01,
+    store_name="Clubgratis",
+    store_color=STORE_COLORS["tg_clubgratis"],
+    price=Money(499, Currency.USD),
+    usual=None,
+    drop_bp=None,
+    min_days=None,
+    kind=AlertKind.COMMUNITY_DEAL,
+    badge="Clubgratis · sin verificar",
+    coupon="T6YLVQZS",
+)
+
+
+def test_community_card_has_no_discount_badge() -> None:
+    img = png(render_card(COMMUNITY, None))
+    assert img.size == (1080, 1080)
+    assert not region_has_color(img, (830, 150, 1020, 340), (250, 204, 21))  # sin «-N %»
+    assert region_has_color(img, (40, 940, 1040, 1010), _hex(STORE_COLORS["tg_clubgratis"]))
+
+
+def _hex(color: str) -> tuple[int, int, int]:
+    raw = color.lstrip("#")
+    return (int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16))
+
+
+def test_community_card_renders_without_usual() -> None:
+    from datetime import UTC, datetime
+
+    from discountz.app.deliver import card_png
+    from discountz.app.render import channel_card
+    from discountz.domain.community import ChannelPost
+    from discountz.domain.urls import SafeUrl
+
+    post = ChannelPost(
+        channel="tg_cajitatech",
+        post_id=88168,
+        published_at=datetime(2026, 10, 17, tzinfo=UTC),
+        title="TV OLED",
+        price=Money(4_499_910, Currency.COP),
+        coupon=None,
+        store=None,
+        hashtags=(),
+        image_url=None,
+        link=SafeUrl.parse("https://t.me/cajitatech/88168", frozenset({"t.me"})),
+    )
+    card = channel_card(post, "tecnologia")
+    assert png(card_png(card, None)).size == (1080, 1080)
+    assert png(card_png(card, validate_photo(photo()))).size == (1080, 1080)

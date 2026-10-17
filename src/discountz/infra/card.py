@@ -46,6 +46,10 @@ STORE_COLORS: Mapping[str, str] = MappingProxyType(
         "walmart_us": "#0071DC",
         "amazon_us": "#FF9900",
         "newegg": "#F7941D",
+        # Canales de Telegram: azules de Telegram, distintos de los colores de las tiendas.
+        "tg_descuentostech": "#229ED9",
+        "tg_clubgratis": "#2B6CB0",
+        "tg_cajitatech": "#0E7490",
     }
 )
 DEFAULT_COLOR = "#334155"
@@ -57,10 +61,12 @@ class CardData:
     store_color: str  # "#RRGGBB"
     topic_title: str  # sin emoji: Inter no los dibuja
     price: Money
-    usual: Money
-    drop_bp: int
-    min_days: int
+    usual: Money | None  # None ⇒ tarjeta `community` (canales): sin «antes» ni %
+    drop_bp: int | None
+    min_days: int | None
     kind: AlertKind
+    badge: str | None = None  # franja «<Canal> · sin verificar»
+    coupon: str | None = None
 
 
 @cache
@@ -145,28 +151,18 @@ def render_card(data: CardData, photo: bytes | None) -> bytes:
     )
 
     _photo_box(canvas, data, photo)
-    _badge(draw, data.drop_bp)
+    if data.drop_bp is not None:
+        _badge(draw, data.drop_bp)
 
     price = format_money(data.price)
     draw.text(
         (56, 848), price, font=_fit_font(draw, price, "Black", 140, 960), fill=GREEN, anchor="ls"
     )
 
-    label_font = _font("SemiBold", 40)
-    draw.text((60, 922), "Antes ", font=label_font, fill=MUTED, anchor="ls")
-    x = 60 + int(draw.textlength("Antes ", font=label_font))
-    before = format_money(data.usual)
-    draw.text((x, 922), before, font=label_font, fill=MUTED, anchor="ls")
-    width = int(draw.textlength(before, font=label_font))
-    draw.line((x - 2, 909, x + width + 2, 909), fill=MUTED, width=4)
-
-    if data.kind is AlertKind.PRICE_ERROR:
-        draw.text(
-            (60, 985), "POSIBLE ERROR DE PRECIO", font=_font("Bold", 34), fill=RED, anchor="ls"
-        )
+    if data.usual is None:
+        _community_lines(draw, data, color)
     else:
-        line = f"Mínimo en {data.min_days} días"
-        draw.text((60, 985), line, font=_font("Regular", 32), fill=SOFT, anchor="ls")
+        _catalog_lines(draw, data, data.usual)
     if data.price.currency is Currency.USD:
         draw.text(
             (60, 1035),
@@ -180,3 +176,36 @@ def render_card(data: CardData, photo: bytes | None) -> bytes:
     out = io.BytesIO()
     canvas.save(out, "PNG", optimize=True)
     return out.getvalue()
+
+
+def _community_lines(
+    draw: ImageDraw.ImageDraw, data: CardData, color: tuple[int, int, int]
+) -> None:
+    """Oferta de un canal: cupón y franja «sin verificar» en lugar del «antes» y el %."""
+    if data.coupon:
+        line = f"Cupón {data.coupon}"
+        font = _fit_font(draw, line, "SemiBold", 40, 960)
+        draw.text((60, 922), line, font=font, fill=SOFT, anchor="ls")
+    if data.badge:
+        font = _fit_font(draw, data.badge, "Bold", 32, 900)
+        width = int(draw.textlength(data.badge, font=font)) + 64
+        draw.rounded_rectangle((40, 950, 40 + width, 1004), radius=27, fill=color)
+        draw.text((40 + width // 2, 977), data.badge, font=font, fill=_ink_on(color), anchor="mm")
+
+
+def _catalog_lines(draw: ImageDraw.ImageDraw, data: CardData, usual: Money) -> None:
+    label_font = _font("SemiBold", 40)
+    draw.text((60, 922), "Antes ", font=label_font, fill=MUTED, anchor="ls")
+    x = 60 + int(draw.textlength("Antes ", font=label_font))
+    before = format_money(usual)
+    draw.text((x, 922), before, font=label_font, fill=MUTED, anchor="ls")
+    width = int(draw.textlength(before, font=label_font))
+    draw.line((x - 2, 909, x + width + 2, 909), fill=MUTED, width=4)
+
+    if data.kind is AlertKind.PRICE_ERROR:
+        draw.text(
+            (60, 985), "POSIBLE ERROR DE PRECIO", font=_font("Bold", 34), fill=RED, anchor="ls"
+        )
+    else:
+        line = f"Mínimo en {data.min_days} días"
+        draw.text((60, 985), line, font=_font("Regular", 32), fill=SOFT, anchor="ls")

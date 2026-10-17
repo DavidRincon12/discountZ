@@ -16,8 +16,10 @@ from discountz.app.render import (
     Button,
     DailyView,
     FlashSeen,
+    channel_card,
     render_alert,
     render_catalog_alert,
+    render_channel_deal,
     render_daily,
     render_health,
     render_list,
@@ -25,8 +27,10 @@ from discountz.app.render import (
     reply_markup,
     visible_length,
 )
+from discountz.domain.community import ChannelPost
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money
+from discountz.domain.urls import SafeUrl
 from discountz.infra.db import CatalogDaily, SearchItem, SourceStatus, StatusSnapshot, WatchItem
 
 GOLDEN = Path(__file__).parent.parent / "golden"
@@ -446,3 +450,82 @@ def test_catalog_drop_has_header_in_text_alerts() -> None:
 
 def test_compose_priority_covers_every_kind() -> None:
     assert set(PRIORITY) == set(AlertKind)
+
+
+# ───────────── Ofertas de canales de Telegram (spec de canales §5)
+
+
+def _channel_post(**kw: object) -> ChannelPost:
+    base: dict[str, object] = {
+        "channel": "tg_clubgratis",
+        "post_id": 59513,
+        "published_at": SEEN,
+        "title": "Arcweg traje de baño para hombre 7 pulgadas",
+        "price": Money(499, Currency.USD),
+        "coupon": "T6YLVQZS",
+        "store": "Amazon",
+        "hashtags": ("banador",),
+        "image_url": None,
+        "link": SafeUrl.parse("https://joylink.io/clubgratis/x", frozenset({"joylink.io"})),
+    }
+    base.update(kw)
+    return ChannelPost(**base)  # type: ignore[arg-type]
+
+
+CHANNEL_COP = {
+    "channel": "tg_cajitatech",
+    "post_id": 88168,
+    "title": '55" OLED S95H 4K Televisor Smart (2026)',
+    "price": Money(4_499_910, Currency.COP),
+    "coupon": None,
+    "store": None,
+    "link": SafeUrl.parse("https://t.me/cajitatech/88168", frozenset({"t.me"})),
+}
+
+
+@pytest.mark.parametrize(
+    ("kw", "topic", "name"),
+    [({}, "deportes", "channel_deal_usd.html"), (CHANNEL_COP, "electro", "channel_deal_cop.html")],
+)
+def test_render_channel_deal_matches_golden(kw: dict[str, object], topic: str, name: str) -> None:
+    assert render_channel_deal(_channel_post(**kw), topic).html == golden(name)
+
+
+def test_render_channel_deal_buttons() -> None:
+    assert render_channel_deal(_channel_post(), "deportes").buttons == [
+        [Button("Ver oferta", url="https://joylink.io/clubgratis/x")],
+        [Button("Ver en el canal", url="https://t.me/Clubgratis/59513")],
+    ]
+    # Sin enlace propio (cae a la publicación): un solo botón.
+    assert render_channel_deal(_channel_post(**CHANNEL_COP), "electro").buttons == [
+        [Button("Ver en el canal", url="https://t.me/cajitatech/88168")]
+    ]
+
+
+def test_render_channel_deal_escapes_title() -> None:
+    msg = render_channel_deal(_channel_post(title="Levi's <b>501</b> & Co"), "moda")
+    assert "<b>Levi&#x27;s &lt;b&gt;501&lt;/b&gt; &amp; Co</b>" in msg.html
+    assert "<b>501</b>" not in msg.html
+    assert visible_length(msg.html) <= 1024
+
+
+def test_render_channel_deal_cuts_long_title() -> None:
+    msg = render_channel_deal(_channel_post(title="x" * 300), "otros")
+    assert "x" * 119 + "…" in msg.html
+    assert "x" * 121 not in msg.html
+
+
+def test_channel_card_fields() -> None:
+    card = channel_card(_channel_post(), "deportes")
+    assert card == {
+        "store": "tg_clubgratis",
+        "topic": "deportes",
+        "title": "Arcweg traje de baño para hombre 7 pulgadas",
+        "url": "https://joylink.io/clubgratis/x",
+        "image_url": None,
+        "price_minor": 499,
+        "currency": "USD",
+        "kind": "community_deal",
+        "coupon": "T6YLVQZS",
+        "badge": "Clubgratis · sin verificar",
+    }

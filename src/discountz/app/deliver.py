@@ -104,10 +104,12 @@ def card_png(card: Mapping[str, Any], photo: bytes | None) -> bytes:
         store_color=STORE_COLORS.get(store, DEFAULT_COLOR),
         topic_title=_topic_titles().get(topic, topic),
         price=Money(int(card["price_minor"]), currency),
-        usual=Money(int(card["usual_minor"]), currency),
-        drop_bp=int(card["drop_bp"]),
-        min_days=int(card["min_days"]),
+        usual=Money(int(card["usual_minor"]), currency) if "usual_minor" in card else None,
+        drop_bp=int(card["drop_bp"]) if "drop_bp" in card else None,
+        min_days=int(card["min_days"]) if "min_days" in card else None,
         kind=AlertKind(str(card["kind"])),
+        badge=str(card["badge"]) if card.get("badge") else None,
+        coupon=str(card["coupon"]) if card.get("coupon") else None,
     )
     return render_card(data, photo)
 
