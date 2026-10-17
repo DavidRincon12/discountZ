@@ -30,6 +30,9 @@ ALLOWED_FIELDS = frozenset(
         "run_id",
         "exit",
         "health",
+        "posts",
+        "duplicates",
+        "skipped",
     }
 )
 _REDACT = (

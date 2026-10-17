@@ -164,6 +164,7 @@ def _cmd_run() -> int:
         settings = load_settings()
         params = load_params()
         canaries = load_canaries()
+        topics = load_topics()
     except ConfigError as exc:
         print(f"run: {exc}", file=sys.stderr)
         return EXIT_CONFIG
@@ -206,6 +207,7 @@ def _cmd_run() -> int:
                     healthchecks=health,
                     credentials=EnvCredentials(settings),
                     photos=pics,
+                    topics=topics,
                 ),
                 now,
             )
