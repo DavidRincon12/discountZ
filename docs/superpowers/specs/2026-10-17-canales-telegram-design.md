@@ -1,7 +1,7 @@
 # discountZ: canales de ofertas de Telegram como fuente (spec de diseño, SP-6)
 
 - Fecha: 2026-10-17
-- Estado: borrador para revisión de David
+- Estado: aprobado por David el 2026-10-17
 - Autor: David Santiago Rincón Bautista
 - Base: spec de la v1 (`2026-10-13-discountz-v1-design.md`, fila SP-6 y ADR 026) y spec del rastreo (`2026-10-14-rastreo-catalogo-design.md`). Donde este spec no dice nada, mandan ellos.
 
