@@ -7,3 +7,7 @@ SET LOCAL search_path = discountz;
 INSERT INTO source (code, kind, currency, enabled, ramp_until) VALUES
   ('dealnews','channel','USD',true,NULL),
   ('slickdeals_amazon','channel','USD',true,NULL);
+
+-- Sin cursor por id, la primera lectura de un feed deja vistas sus ofertas sin enviarlas:
+-- no cuentan en el resumen ni sirven de original para los duplicados.
+ALTER TABLE channel_post ADD COLUMN baseline boolean NOT NULL DEFAULT false;

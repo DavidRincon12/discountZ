@@ -301,12 +301,27 @@ def test_failing_channel_does_not_stop_the_others(
 # ───────────── Feeds sin orden de ids (DealNews y Slickdeals Amazon)
 
 
-def test_unordered_first_read_sends_recent_deals_oldest_first(db: psycopg.Connection) -> None:
-    older = deal("dealnews", 300, title="Teclado mecánico", age=timedelta(minutes=50))
-    fake = FakeChannel("dealnews", [page(deal("dealnews", 100), older)])
+def test_unordered_first_read_marks_deals_without_sending(db: psycopg.Connection) -> None:
+    keyboard = deal("dealnews", 300, title="Teclado mecánico")
+    fake = FakeChannel("dealnews", [page(deal("dealnews", 100), keyboard)])
     result = run(db, fake)
-    assert [k for k, _, _ in outbox(db)] == ["canal:dealnews:300", "canal:dealnews:100"]
+    assert outbox(db) == []
     assert fake.afters == [None]
+    assert repo.get_channel_cursor(db, "dealnews") == repo.ChannelCursor(300, T)
+    assert repo.channel_post_ids(db, "dealnews", [100, 300]) == {100, 300}
+    assert (result.sent, result.duplicates, result.skipped) == (0, 0, 0)
+
+
+def test_unordered_first_read_of_an_empty_feed_sets_no_baseline(db: psycopg.Connection) -> None:
+    run(db, FakeChannel("dealnews", [page()]))
+    assert repo.get_channel_cursor(db, "dealnews") is None
+
+
+def test_unordered_later_read_sends_new_deals_oldest_first(db: psycopg.Connection) -> None:
+    repo.save_channel_cursor(db, "dealnews", 1, T - timedelta(minutes=10))
+    older = deal("dealnews", 300, title="Teclado mecánico", age=timedelta(minutes=50))
+    result = run(db, FakeChannel("dealnews", [page(deal("dealnews", 100), older)]))
+    assert [k for k, _, _ in outbox(db)] == ["canal:dealnews:300", "canal:dealnews:100"]
     assert repo.get_channel_cursor(db, "dealnews") == repo.ChannelCursor(300, T)
     assert result.sent == 2
 
@@ -317,9 +332,18 @@ def test_unordered_reread_sends_only_unseen_ids(db: psycopg.Connection) -> None:
     lower = deal("dealnews", 250, title="Monitor gamer", age=timedelta(minutes=2))
     fake = FakeChannel("dealnews", [page(keyboard, lower)])
     result = run(db, fake, now=T + timedelta(minutes=10))
-    assert [k for k, _, _ in outbox(db)] == ["canal:dealnews:300", "canal:dealnews:250"]
+    assert [k for k, _, _ in outbox(db)] == ["canal:dealnews:250"]
     assert fake.afters == [None]
     assert (result.sent, result.duplicates, result.skipped) == (1, 0, 0)
+
+
+def test_unordered_marked_deal_is_not_an_original_for_duplicates(db: psycopg.Connection) -> None:
+    run(db, FakeChannel("dealnews", [page(deal("dealnews", 500, title="OLED TV", coupon="X1"))]))
+    repo.save_channel_cursor(db, "tg_cajitatech", 88160, T - timedelta(hours=1))
+    telegram = FakeChannel("tg_cajitatech", [page(deal("tg_cajitatech", 88168, coupon="x1"))])
+    result = run(db, telegram, now=T + timedelta(minutes=10))
+    assert (result.sent, result.duplicates) == (1, 0)  # nadie vio la de DealNews
+    assert [k for k, _, _ in outbox(db)] == ["canal:tg_cajitatech:88168"]
 
 
 def test_unordered_old_posts_and_page_skips_are_not_counted(db: psycopg.Connection) -> None:
@@ -333,6 +357,7 @@ def test_unordered_old_posts_and_page_skips_are_not_counted(db: psycopg.Connecti
 
 def test_unordered_duplicate_is_not_recounted_on_reread(db: psycopg.Connection) -> None:
     repo.save_channel_cursor(db, "tg_cajitatech", 88160, T - timedelta(hours=1))
+    repo.save_channel_cursor(db, "dealnews", 1, T - timedelta(minutes=10))
     run(db, FakeChannel("tg_cajitatech", [page(deal("tg_cajitatech", 88168, coupon="TVZE10"))]))
     same = page(deal("dealnews", 500, title="OLED TV", coupon="tvze10"))
     assert run(db, FakeChannel("dealnews", [same])).duplicates == 1

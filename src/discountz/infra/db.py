@@ -1965,7 +1965,7 @@ class CatalogDaily:
     changes_today: int
     alerts_by_topic: Mapping[str, int]
     last_sweep_s_by_source: Mapping[str, int]
-    channel_posts: int = 0  # ofertas de canales de las últimas 24 h, sin las repetidas
+    channel_posts: int = 0  # ofertas de canales de las últimas 24 h, sin repetidas ni marcadas
     channel_duplicates: int = 0
 
 
@@ -1989,7 +1989,7 @@ def catalog_daily_stats(conn: psycopg.Connection, now: datetime) -> CatalogDaily
     channels = _required(
         _one(
             conn,
-            """SELECT count(*) FILTER (WHERE duplicate_of IS NULL),
+            """SELECT count(*) FILTER (WHERE duplicate_of IS NULL AND NOT baseline),
                       count(*) FILTER (WHERE duplicate_of IS NOT NULL)
                  FROM discountz.channel_post WHERE seen_at >= %s""",
             (since,),
@@ -2058,11 +2058,11 @@ def save_channel_cursor(
 
 
 def recent_channel_posts(conn: psycopg.Connection, since: datetime) -> list[RecentPost]:
-    """Publicaciones enviadas desde `since` (los duplicados no cuentan como originales)."""
+    """Publicaciones enviadas desde `since` (ni los duplicados ni las marcadas cuentan)."""
     rows = conn.execute(
         """SELECT channel || ':' || post_id, title_norm, price_minor, currency, coupon
              FROM discountz.channel_post
-            WHERE seen_at >= %s AND duplicate_of IS NULL
+            WHERE seen_at >= %s AND duplicate_of IS NULL AND NOT baseline
             ORDER BY seen_at, channel, post_id""",
         (since,),
     ).fetchall()
@@ -2094,12 +2094,16 @@ def insert_channel_post(
     topic: str,
     duplicate_of: str | None,
     now: datetime,
+    baseline: bool = False,
 ) -> bool:
-    """Registra la publicación; `False` si ya estaba (relectura de una página)."""
+    """Registra la publicación; `False` si ya estaba (relectura de una página).
+
+    `baseline`: vista en la primera lectura de un feed sin orden de ids y nunca enviada.
+    """
     cur = conn.execute(
         """INSERT INTO discountz.channel_post (channel, post_id, published_at, title_norm,
-               price_minor, currency, coupon, topic, duplicate_of, seen_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               price_minor, currency, coupon, topic, duplicate_of, seen_at, baseline)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (channel, post_id) DO NOTHING""",
         (
             code,
@@ -2112,6 +2116,7 @@ def insert_channel_post(
             topic,
             duplicate_of,
             now,
+            baseline,
         ),
     )
     return cur.rowcount == 1

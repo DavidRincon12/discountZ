@@ -44,7 +44,7 @@ def test_up_down_up(empty_db_url: str) -> None:
         assert migrate(conn, "head") == []
 
 
-def test_down_0004_removes_feed_channels_with_their_posts(db: psycopg.Connection) -> None:
+def test_down_0004_removes_feeds_and_the_baseline_flag(db: psycopg.Connection) -> None:
     db.execute(
         """INSERT INTO discountz.channel_cursor (channel, last_id, updated_at)
            VALUES ('dealnews', 22269285, now())"""
@@ -52,11 +52,17 @@ def test_down_0004_removes_feed_channels_with_their_posts(db: psycopg.Connection
     db.execute(
         """INSERT INTO discountz.channel_post (channel, post_id, published_at, title_norm,
                price_minor, currency, topic, seen_at)
-           VALUES ('dealnews', 22269285, now(), 'wand', 4499, 'USD', 'belleza', now())"""
+           VALUES ('dealnews', 22269285, now(), 'wand', 4499, 'USD', 'belleza', now()),
+                  ('tg_cajitatech', 88168, now(), 'oled tv', 4499, 'USD', 'electro', now())"""
     )
+    assert _scalar(db, "SELECT bool_or(baseline) FROM discountz.channel_post") is False
     assert migrate(db, 3) == [4]
-    assert _scalar(db, "SELECT count(*) FROM discountz.channel_post") == 0
+    assert _scalar(db, "SELECT channel FROM discountz.channel_post") == "tg_cajitatech"
     assert _scalar(db, "SELECT count(*) FROM discountz.channel_cursor") == 0
+    flag = """SELECT count(*) FROM information_schema.columns
+               WHERE table_schema = 'discountz' AND table_name = 'channel_post'
+                 AND column_name = 'baseline'"""
+    assert _scalar(db, flag) == 0
 
 
 def test_seed_sources_and_gates(db: psycopg.Connection) -> None:

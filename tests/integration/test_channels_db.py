@@ -24,6 +24,7 @@ def _post(
     duplicate_of: str | None = None,
     price: int = 3000,
     currency: str = "USD",
+    baseline: bool = False,
 ) -> bool:
     return dbm.insert_channel_post(
         conn,
@@ -37,6 +38,7 @@ def _post(
         topic="tecnologia",
         duplicate_of=duplicate_of,
         now=seen,
+        baseline=baseline,
     )
 
 
@@ -105,3 +107,9 @@ def test_channel_post_ids_only_of_that_channel(db: psycopg.Connection) -> None:
     _post(db, "slickdeals_amazon", 20089260)
     assert dbm.channel_post_ids(db, "dealnews", [22269285, 20089260, 7]) == {22269285}
     assert dbm.channel_post_ids(db, "dealnews", []) == set()
+
+
+def test_baseline_posts_are_known_but_never_originals(db: psycopg.Connection) -> None:
+    _post(db, "dealnews", 22269285, baseline=True)
+    assert dbm.channel_post_ids(db, "dealnews", [22269285]) == {22269285}
+    assert dbm.recent_channel_posts(db, T - timedelta(hours=24)) == []
