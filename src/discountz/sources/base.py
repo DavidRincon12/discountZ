@@ -199,6 +199,7 @@ class ChannelPage:
     max_id: int | None
     has_more: bool  # la página trajo el máximo de publicaciones
     skipped: int  # publicaciones que no son oferta
+    unparsed: int = 0  # de ellas, las que parecen tener precio (señal de formato roto)
 
 
 class ChannelSource(Protocol):

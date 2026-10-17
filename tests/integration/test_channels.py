@@ -102,9 +102,11 @@ def run(conn: psycopg.Connection, *fakes: FakeChannel, now: datetime = T) -> Cha
     )
 
 
-def page(*posts: ChannelPost, max_id: int | None = None, more: bool = False) -> ChannelPage:
+def page(
+    *posts: ChannelPost, max_id: int | None = None, more: bool = False, unparsed: int = 0
+) -> ChannelPage:
     top = max_id if max_id is not None else max((p.post_id for p in posts), default=None)
-    return ChannelPage(tuple(posts), top, more, 0)
+    return ChannelPage(tuple(posts), top, more, unparsed, unparsed)
 
 
 def outbox(conn: psycopg.Connection) -> list[tuple[str, str | None, str]]:
@@ -246,3 +248,45 @@ def test_channel_due_every_ten_minutes(db: psycopg.Connection) -> None:
     assert "tg_clubgratis" not in due_channels(
         db, load_all(), budgets, {}, T, PARAMS.channel_interval
     )
+
+
+def test_unparsed_streak_across_reads_is_parse_error(db: psycopg.Connection) -> None:
+    """Formato roto a ritmo normal: una publicación con precio y sin oferta por lectura."""
+    repo.save_channel_cursor(db, "tg_cajitatech", 100, T - timedelta(hours=1))
+    now = T
+    results = []
+    for i in range(1, 6):
+        r = run_for(FakeChannel("tg_cajitatech", [page(max_id=100 + i, unparsed=1)]))
+        run_channels(db, [r], now, PARAMS, TOPICS, random.Random(1), 1e9)
+        results.append((r.failed, r.counters.parse_errors))
+        now += timedelta(minutes=10)
+    assert results == [(False, 0)] * 4 + [(True, 1)]
+    cursor = repo.get_channel_cursor(db, "tg_cajitatech")
+    assert cursor is not None and cursor.last_id == 105
+    # Una oferta que sí se lee reinicia la racha.
+    r = run_for(FakeChannel("tg_cajitatech", [page(deal("tg_cajitatech", 106))]))
+    run_channels(db, [r], now, PARAMS, TOPICS, random.Random(1), 1e9)
+    assert not r.failed
+    cursor = repo.get_channel_cursor(db, "tg_cajitatech")
+    assert cursor is not None and cursor.unparsed_streak == 0
+
+
+def test_failing_channel_does_not_stop_the_others(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.save_channel_cursor(db, "tg_clubgratis", 59500, T - timedelta(hours=1))
+    repo.save_channel_cursor(db, "tg_cajitatech", 100, T - timedelta(hours=1))
+    real = repo.insert_channel_post
+
+    def boom(conn: psycopg.Connection, code: str, *args: object, **kw: object) -> bool:
+        if code == "tg_clubgratis":
+            raise RuntimeError("falla simulada")
+        return real(conn, code, *args, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(repo, "insert_channel_post", boom)
+    club = run_for(FakeChannel("tg_clubgratis", [page(deal("tg_clubgratis", 59501))]))
+    caj = run_for(FakeChannel("tg_cajitatech", [page(deal("tg_cajitatech", 101))]))
+    result = run_channels(db, [club, caj], T, PARAMS, TOPICS, random.Random(1), 1e9)
+    assert club.failed and not caj.failed
+    assert [k for k, _, _ in outbox(db)] == ["canal:tg_cajitatech:101"]
+    assert result.sent == 1

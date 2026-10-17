@@ -29,6 +29,7 @@ from discountz.domain.scheduling import SourceBudget
 from discountz.infra import db
 from discountz.infra.log import event
 from discountz.sources.base import ChannelPage, ChannelSource, NoCredentials, Source, SourceContext
+from discountz.sources.telegram_channels import FORMAT_BROKEN_MIN
 
 log = logging.getLogger(__name__)
 
@@ -129,25 +130,34 @@ def _run_one(
 ) -> None:
     source = cast(ChannelSource, r.source)
     cursor = db.get_channel_cursor(conn, r.code)
-    pages = _fetch(r, source, cursor.last_id if cursor else None, now, rnd, deadline)
+    pages, clean = _fetch(r, source, cursor.last_id if cursor else None, now, rnd, deadline)
     if not pages:
         return
+    # Racha de publicaciones con precio y sin oferta: con 10 min entre lecturas casi nunca
+    # llegan 5 en una página, así que el formato roto se detecta sumando entre lecturas.
+    previous = cursor.unparsed_streak if cursor else 0
+    found = any(p.posts for p in pages)
+    streak = 0 if found else previous + sum(p.unparsed for p in pages)
     if cursor is None:  # primera lectura: solo se fija el punto de partida
         top = max((p.max_id for p in pages if p.max_id is not None), default=None)
         if top is not None:
             with conn.transaction():
-                db.save_channel_cursor(conn, r.code, top, now)
-        return
-    last_id = cursor.last_id
-    for page in pages:
-        with conn.transaction():
-            for post in sorted(page.posts, key=lambda p: p.post_id):
-                if post.post_id <= cursor.last_id:  # defensa: `after` ya debería excluirlo
-                    continue
-                _handle(conn, r.code, post, now, topics, recent, silent, tally)
-            tally.skipped += page.skipped
-            last_id = max(last_id, page.max_id or last_id)
-            db.save_channel_cursor(conn, r.code, last_id, now)
+                db.save_channel_cursor(conn, r.code, top, now, unparsed_streak=streak)
+    else:
+        last_id = cursor.last_id
+        for page in pages:
+            with conn.transaction():
+                for post in sorted(page.posts, key=lambda p: p.post_id):
+                    if post.post_id <= cursor.last_id:  # defensa: `after` ya debería excluirlo
+                        continue
+                    _handle(conn, r.code, post, now, topics, recent, silent, tally)
+                tally.skipped += page.skipped
+                last_id = max(last_id, page.max_id or last_id)
+                db.save_channel_cursor(conn, r.code, last_id, now, unparsed_streak=streak)
+    if streak >= FORMAT_BROKEN_MIN:
+        _on_error(r, ParseError("format", loc=r.code), now, rnd)
+    elif clean:
+        r.breaker = breaker_transition(r.breaker, BreakerEvent.OK, now, rnd)
 
 
 def _fetch(
@@ -157,8 +167,11 @@ def _fetch(
     now: datetime,
     rnd: random.Random,
     deadline: float,
-) -> list[ChannelPage]:
-    """Hasta `MAX_PAGES` páginas; un error corta el canal y conserva lo ya leído."""
+) -> tuple[list[ChannelPage], bool]:
+    """Hasta `MAX_PAGES` páginas y si se leyeron sin error; un error conserva lo ya leído.
+
+    El evento `OK` del breaker lo aplica el llamador: antes tiene que mirar la racha.
+    """
     ctx = SourceContext(r.http, NoCredentials(), deadline, now)
     pages: list[ChannelPage] = []
     while len(pages) < MAX_PAGES:
@@ -169,13 +182,12 @@ def _fetch(
             break
         except (SourceError, ParseError) as exc:
             _on_error(r, exc, now, rnd)
-            break
-        r.breaker = breaker_transition(r.breaker, BreakerEvent.OK, now, rnd)
+            return pages, False
         pages.append(page)
         if not page.has_more or after is None or page.max_id is None:
             break
         after = page.max_id
-    return pages
+    return pages, True
 
 
 def _on_error(

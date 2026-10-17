@@ -68,13 +68,14 @@ def find_duplicate(post: ChannelPost, recent: Sequence[RecentLike]) -> str | Non
     coupon = post.coupon.casefold() if post.coupon else None
     tokens = title_tokens(post.title)
     for r in recent:
-        if coupon and r.coupon and r.coupon.casefold() == coupon:
-            return r.key
+        # Un cupón puede valer para muchos productos: solo cuenta con la misma moneda y precio.
         if r.currency != post.price.currency.value:
             continue
         diff = abs(post.price.minor - r.price_minor) * 100
         if diff > DUPLICATE_PRICE_TOL_PCT * r.price_minor:
             continue
+        if coupon and r.coupon and r.coupon.casefold() == coupon:
+            return r.key
         if _jaccard(tokens, title_tokens(r.title_norm)) >= DUPLICATE_MIN_JACCARD:
             return r.key
     return None

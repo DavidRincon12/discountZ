@@ -2012,6 +2012,7 @@ def catalog_daily_stats(conn: psycopg.Connection, now: datetime) -> CatalogDaily
 class ChannelCursor:
     last_id: int
     updated_at: datetime
+    unparsed_streak: int = 0  # publicaciones con precio y sin oferta desde la última oferta
 
 
 @dataclass(frozen=True, slots=True)
@@ -2026,21 +2027,33 @@ class RecentPost:
 def get_channel_cursor(conn: psycopg.Connection, code: str) -> ChannelCursor | None:
     row = _one(
         conn,
-        "SELECT last_id, updated_at FROM discountz.channel_cursor WHERE channel = %s",
+        """SELECT last_id, updated_at, unparsed_streak
+             FROM discountz.channel_cursor WHERE channel = %s""",
         (code,),
     )
-    return None if row is None else ChannelCursor(int(row[0]), row[1])
+    return None if row is None else ChannelCursor(int(row[0]), row[1], int(row[2]))
 
 
-def save_channel_cursor(conn: psycopg.Connection, code: str, last_id: int, now: datetime) -> None:
-    """Guarda el cursor; `updated_at` marca la última lectura aunque el id no cambie."""
+def save_channel_cursor(
+    conn: psycopg.Connection,
+    code: str,
+    last_id: int,
+    now: datetime,
+    *,
+    unparsed_streak: int | None = None,
+) -> None:
+    """Guarda el cursor; `updated_at` marca la última lectura aunque el id no cambie.
+
+    `unparsed_streak=None` conserva la racha guardada.
+    """
     conn.execute(
-        """INSERT INTO discountz.channel_cursor (channel, last_id, updated_at)
-           VALUES (%s, %s, %s)
+        """INSERT INTO discountz.channel_cursor (channel, last_id, updated_at, unparsed_streak)
+           VALUES (%s, %s, %s, coalesce(%s, 0))
            ON CONFLICT (channel) DO UPDATE SET
                last_id = greatest(channel_cursor.last_id, EXCLUDED.last_id),
-               updated_at = EXCLUDED.updated_at""",
-        (code, last_id, now),
+               updated_at = EXCLUDED.updated_at,
+               unparsed_streak = coalesce(%s, channel_cursor.unparsed_streak)""",
+        (code, last_id, now, unparsed_streak, unparsed_streak),
     )
 
 

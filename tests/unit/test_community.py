@@ -68,8 +68,17 @@ def test_title_tokens_drop_short_words() -> None:
 
 def test_same_coupon_is_duplicate_ignoring_case() -> None:
     post = _post("TV OLED LG 55 pulgadas", coupon="TVZE10")
-    recent = [_recent("Televisor diferente", price=999_999, coupon="tvze10")]
+    recent = [_recent("Televisor diferente", price=3100, coupon="tvze10")]
     assert find_duplicate(post, recent) == "tg_clubgratis:59510"
+
+
+def test_shared_coupon_on_other_product_is_not_duplicate() -> None:
+    # cajitatech 88165 (proyector, USD 39) y 88180 (carro, USD 14) traen el mismo cupón.
+    post = _post("Carro Rodante SUNALLY de 3 niveles", Money(1400, Currency.USD), coupon="VVC3X6BP")
+    recent = [_recent("proyector mini 4k", price=3900, coupon="VVC3X6BP")]
+    assert find_duplicate(post, recent) is None
+    cop = [_recent("carro rodante sunally", price=1400, currency="COP", coupon="VVC3X6BP")]
+    assert find_duplicate(post, cop) is None
 
 
 def test_similar_title_and_price_is_duplicate() -> None:

@@ -321,7 +321,9 @@ def _search(
 ) -> str:
     source = (SOURCES if sources is None else sources).get(cmd.source)
     d = source.descriptor if source is not None else None
-    if d is not None and d.kind == "store" and Capability.SEARCH not in d.capabilities:
+    if d is not None and (
+        d.kind == "channel" or (d.kind == "store" and Capability.SEARCH not in d.capabilities)
+    ):
         name = esc(source_name(cmd.source))
         return f"{name} no admite /buscar; usa /seguir con la URL del producto."
     currency = db.source_currency(conn, cmd.source)

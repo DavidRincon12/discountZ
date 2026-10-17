@@ -13,7 +13,9 @@ INSERT INTO source (code, kind, currency, enabled, ramp_until) VALUES
 CREATE TABLE channel_cursor (
   channel     text PRIMARY KEY REFERENCES source(code) ON DELETE CASCADE,
   last_id     bigint NOT NULL CHECK (last_id >= 0),
-  updated_at  timestamptz NOT NULL
+  updated_at  timestamptz NOT NULL,
+  -- Publicaciones con precio y sin oferta desde la última oferta: formato roto a ritmo normal.
+  unparsed_streak integer NOT NULL DEFAULT 0 CHECK (unparsed_streak >= 0)
 );
 
 -- Ofertas leídas (7 días): deduplicación entre canales y resumen diario.

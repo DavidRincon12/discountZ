@@ -318,6 +318,7 @@ def parse_channel_page(code: str, body: bytes, now: datetime) -> ChannelPage:
         max_id=max(r.post_id for r in raws),
         has_more=len(raws) >= PAGE_SIZE,
         skipped=len(raws) - len(deals),
+        unparsed=0 if deals else priced,
     )
 
 

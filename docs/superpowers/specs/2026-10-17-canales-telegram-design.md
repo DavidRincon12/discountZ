@@ -76,10 +76,12 @@ Reglas por canal, sacadas de las publicaciones reales:
 
 ### 4.1 Duplicados (F3)
 
-Una publicación es duplicado de otra de las últimas 24 h (de cualquier canal) si:
+Una publicación es duplicado de otra de las últimas 24 h (de cualquier canal) si tiene la misma moneda, precio a ±10 % y además:
 
 1. trae el mismo cupón (sin distinguir mayúsculas), o
-2. tiene la misma moneda, precio a ±10 % y una similitud de títulos (Jaccard de tokens de `normalize_title`, sin palabras de 1-2 letras) de 0,5 o más.
+2. una similitud de títulos (Jaccard de tokens de `normalize_title`, sin palabras de 1-2 letras) de 0,5 o más.
+
+El cupón solo no basta: hay cupones que valen para muchos productos (cajitatech 88165 y 88180 comparten `VVC3X6BP`; `OCTOBER40` es de todo eBay). Corregido tras la revisión final, 2026-10-17.
 
 Un duplicado se guarda como leído con `duplicate_of` y no se envía. Gana la primera publicación que llegue.
 
