@@ -24,6 +24,10 @@ FIRST_LINK = (
 FIRST_IMAGE = (
     "https://d.dlnws.com/64599/1791568631-draftworks_img_g4809ur3glqb7flbfao.jpeg?h=250&w=250"
 )
+PRODUCT_LINK = (
+    "https://www.dealnews.com/products/Life-Zoom/80-LED-3-in-1-Red-and-Infrared-Light-Therapy-Panel/"
+    "545745.html?iref=rss"
+)
 
 
 def ctx(http: object) -> SourceContext:
@@ -51,14 +55,17 @@ def item(
     expires: str = "2027-01-15T06:40:12-05:00",
     image: str = "https://d.dlnws.com/1/mouse.jpeg?h=250&w=250",
     link: str | None = None,
+    guid: str | None = None,
     category: str = "Mice/Trackballs",
 ) -> str:
     url = link or f"https://www.dealnews.com/Lenovo-530-Wireless-Mouse/{deal_id}.html?iref=rss"
+    guid = f"https://www.dealnews.com/{deal_id}.html?iref=rss" if guid is None else guid
     price_tag = (
         "" if price is None else f'<dealnews:price currency="{currency}">{price}</dealnews:price>'
     )
     return (
         f"<item><title>{escape(title)}</title><link>{escape(url)}</link>"
+        f"<guid>{escape(guid)}</guid>"
         f"<description><![CDATA[{description}]]></description><pubDate>{pub}</pubDate>"
         f"<dealnews:retailer>Amazon</dealnews:retailer><dealnews:expires>{expires}"
         f"</dealnews:expires><dealnews:dealType>{deal_type}</dealnews:dealType>"
@@ -94,6 +101,19 @@ def test_real_feed_first_deal_keeps_the_dealnews_link_untouched() -> None:
     )
 
 
+def test_product_deal_takes_the_deal_id_from_its_guid() -> None:
+    posts = parse_dealnews_feed(load_fixture("dealnews", "amazon").body, NOW).posts
+    (panel,) = [p for p in posts if str(p.link) == PRODUCT_LINK]
+    assert panel.post_id == 22288673  # su `<link>` lleva el id del producto (545745)
+    assert panel.price == Money(15215, Currency.USD)
+
+
+def test_two_deals_on_the_same_product_keep_their_own_ids() -> None:
+    link = "https://www.dealnews.com/products/Life-Zoom/Panel/545745.html?iref=rss"
+    page = parse_dealnews_feed(feed(item(22288673, link=link), item(22299999, link=link)), NOW)
+    assert [p.post_id for p in page.posts] == [22288673, 22299999]
+
+
 @pytest.mark.parametrize(
     ("description", "coupon"),
     [
@@ -127,7 +147,8 @@ def test_deal_without_price_is_a_format_signal() -> None:
         {"pub": ""},
         {"title": ""},
         {"link": "https://www.dealnews.com.evil.example/x/22291098.html"},
-        {"link": "https://www.dealnews.com/sin-id.html"},
+        {"guid": "https://www.dealnews.com/sin-id.html"},
+        {"guid": ""},
     ],
 )
 def test_items_that_are_not_usable_deals_are_skipped(kwargs: dict[str, str]) -> None:

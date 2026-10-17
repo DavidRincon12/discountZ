@@ -113,8 +113,11 @@ def parse_dealnews_feed(body: bytes, now: datetime) -> ChannelPage:
     ids: list[int] = []
     unparsed = 0
     for item in items:
+        # El id de la oferta va en el `<guid>`: en las de tipo «product» el `<link>` abre la
+        # página del producto y lleva su id, que se repite entre ofertas del mismo producto.
         link = _safe(_text(item.find("link")), HOSTS)
-        m = _ID_RE.search(link.path) if link is not None else None
+        guid = _safe(_text(item.find("guid")), HOSTS)
+        m = _ID_RE.search(guid.path) if guid is not None else None
         if link is None or m is None:
             continue
         ids.append(int(m.group(1)))
