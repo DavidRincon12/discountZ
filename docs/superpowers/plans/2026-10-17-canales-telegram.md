@@ -1,6 +1,6 @@
 # Canales de ofertas de Telegram Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (Native, por defecto de David) to implement this plan task-by-task. Antes de empezar, invoca `desarrollo-senior`, `arquitectura-y-datos` y `calidad-y-seguridad`. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Leer DescuentosTech, Clubgratis y cajitatech desde `t.me/s/<canal>` y reenviar al grupo cada oferta nueva, sin duplicados, como tarjeta «sin verificar» en el tema de su categoría.
 
@@ -21,6 +21,9 @@
 - `outbox`: `purpose="alert"`, prioridad 9 (después de las alertas propias), `dedup_key = "canal:<code>:<post_id>"`, `ttl = ALERT_TTL`, `topic`, `card` con `kind = "community_deal"`.
 - `channel_post` se borra a los 7 días. `SCHEMA_VERSION = 3`.
 - Logs con lista blanca: nunca texto del post, cupones ni URLs con query. Nada de sortear bloqueos (E6).
+- Enlace «Ver oferta»: `SafeUrl.parse` con `LINK_HOSTS` del adaptador (`facebook.com`, `www.facebook.com`, `m.facebook.com`, `pccajita.link`, `joylink.io`, `amzn.to`, `amazon.com`, `www.amazon.com` y los `hosts` de las fuentes registradas). Si el enlace no pasa (otro host, `http`, `tg:`, `javascript:`), se usa `https://t.me/<canal>/<id>`. El programa nunca descarga ese enlace (sin SSRF); solo la foto, con su propia lista blanca.
+- La BD es la última defensa: FKs a `source(code) ON DELETE CASCADE`, `CHECK (price_minor > 0)` y `CHECK (currency IN ('COP','USD'))`.
+- Revisión final (executing-plans): el prompt del revisor lleva «Responde en español. Revisa también autorización por objeto (IDOR), validación en los bordes, secretos y datos personales, N+1 e índices, y migraciones reversibles.»
 - Autoría David, commits `tipo(alcance): …` en español, sin trailers; un commit por tarea, verificación completa en verde antes de cada commit.
 
 ## Review Focus
@@ -37,6 +40,7 @@
 
 **Files:**
 - Create: `docs/decisions/0005-canales-de-telegram-como-fuente.md`
+- Modify: `docs/architecture.md` (fuente `channel`, módulos nuevos y el flujo de los canales)
 - Create: `migrations/0003_canales.up.sql`, `migrations/0003_canales.down.sql`
 - Modify: `src/discountz/infra/db.py` (`SCHEMA_VERSION = 3`; funciones nuevas al final)
 - Test: `tests/integration/test_channels_db.py`
@@ -51,16 +55,17 @@
   - `insert_channel_post(conn, code: str, post_id: int, published_at: datetime, title_norm: str, price_minor: int, currency: str, coupon: str | None, topic: str, duplicate_of: str | None, now: datetime) -> bool` (`ON CONFLICT DO NOTHING`; `False` si ya existía)
   - `delete_old_channel_posts(conn, before: datetime) -> int`
 
-- [ ] **Step 1: Escribir el ADR 0005** con el formato de `0004`: contexto (Amazon bloqueado, canales públicos), decisión (F1-F4 del spec, `t.me/s` sin cuenta), consecuencias («sin verificar», riesgo de cambio de formato).
+- [ ] **Step 1: Escribir el ADR 0005 y actualizar `docs/architecture.md`.** El ADR sigue el formato de `0004`: contexto (Amazon bloqueado, canales públicos); decisión (F1-F4 del spec, `t.me/s` sin cuenta); alternativas (leer con la cuenta de David vía cliente de Telegram: riesgo para su cuenta; Amazon Creators API: exige ventas; Keepa: ~€49/mes; resolver los acortadores: 403 desde la nube); consecuencias («sin verificar», riesgo de cambio de formato); cuándo revisar (hoy ~180 publicaciones/día y ~1.300 filas; revisar si un canal da `PARSE_ERROR` en más de 2 ciclos seguidos, si las tarjetas de canales pasan de 100/día durante una semana o si `t.me/s` empieza a pedir inicio de sesión).
 - [ ] **Step 2: Escribir las pruebas que fallan** en `tests/integration/test_channels_db.py` (`@pytest.mark.integration`, fixture `db` de `tests/integration/conftest.py`):
   - `test_migration_registers_channel_sources`: `SELECT code, kind, enabled FROM discountz.source WHERE kind='channel' ORDER BY code` → `[("tg_cajitatech","channel",True), ("tg_clubgratis","channel",True), ("tg_descuentostech","channel",True)]`.
   - `test_channel_cursor_roundtrip`: `None` sin cursor; tras `save_channel_cursor(db,"tg_clubgratis",59494,T)` y otro save con `59500` en `T+1h` → `ChannelCursor(59500, T+1h)`.
   - `test_insert_channel_post_is_idempotent`: primer insert `True`, segundo igual `False`.
   - `test_recent_posts_skip_duplicates_and_old`: tres posts (uno con `seen_at` hace 25 h, uno con `duplicate_of`), `recent_channel_posts(db, T-24h)` devuelve solo el restante con `key == "tg_cajitatech:88168"`.
   - `test_delete_old_channel_posts`: borra los de antes de `T-7d` y devuelve 1.
+  - `test_channel_post_rejects_bad_values` (parametrizada): `price_minor = 0` y `currency = 'EUR'` → `psycopg.errors.CheckViolation`.
   - `test_migration_0003_down_restores_schema_2`: aplica `down` y la versión vuelve a 2 (patrón de la prueba de `0002`).
 - [ ] **Step 3: Correr y verlas fallar.** Run: `DISCOUNTZ_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres uv run pytest tests/integration/test_channels_db.py -q -m integration` Expected: FAIL (tabla/función inexistente).
-- [ ] **Step 4: Escribir `0003_canales.up.sql`** con el SQL de §6 del spec, más: `ALTER TABLE source` cambia el CHECK de `kind` a `('store','feed','channel')`; `INSERT INTO source (code, kind, currency, enabled, ramp_until)` los tres canales con `'USD', true, NULL`; trigger `set_updated_at` no aplica (el código fija `updated_at`); grants a `discountz_app` como en `0002`. El `down` borra las tablas, los tres `source` (y sus `source_hourly_stat` en cascada) y restaura el CHECK.
+- [ ] **Step 4: Escribir `0003_canales.up.sql`** con el SQL de §6 del spec, más: `ALTER TABLE source` cambia el CHECK de `kind` a `('store','feed','channel')`; `INSERT INTO source (code, kind, currency, enabled, ramp_until)` los tres canales con `'USD', true, NULL`; FKs y CHECKs de Global Constraints; trigger `set_updated_at` no aplica (el código fija `updated_at`); grants a `discountz_app` como en `0002`. El `down` borra las tablas, los tres `source` (y sus `source_hourly_stat` en cascada) y restaura el CHECK.
 - [ ] **Step 5: Implementar las funciones de `db.py`** con las firmas de Interfaces y `SCHEMA_VERSION = 3`.
 - [ ] **Step 6: Correr la prueba y la verificación completa.** Run: `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run lint-imports && uv run pytest -q -m "integration or not integration"` Expected: todo verde (las pruebas que comparan `SCHEMA_VERSION` con la última migración ya pasan con 3).
 - [ ] **Step 7: Commit** `feat(canales): migración 0003 y acceso a datos de los canales`.
@@ -116,6 +121,9 @@
   - `test_clubgratis_currency_inference` (parametrizada): `💰 4.499.910` → COP 4499910; `💰 $19.783` → COP 19783; `💰 275.000 aplicar cupón PREHOT` → COP 275000 y cupón `PREHOT`; `💰 12.74` → USD 1274; `➡️ 6.5` → USD 650; `💰 130 precio incluye envio` → USD 13000; `$1,999.00` → USD 199900; `💰 1299` → USD 129900.
   - `test_non_deals_are_skipped`: «Johan reporta llegada: … 179 dolaritos» y «📦 El Madrugón: hasta 40% de descuento» → no salen; `skipped` los cuenta.
   - `test_image_only_from_telesco`: una foto con `//telegram.org/img/emoji/…` → `image_url is None`.
+  - `test_link_outside_allowlist_falls_back_to_post` (parametrizada): `http://amzn.to/x`, `tg://resolve?domain=x`, `javascript:alert(1)` y `https://evil.example/x` → `link == https://t.me/cajitatech/<id>`; `https://pccajita.link/abc` se conserva.
+  - `test_post_without_time_or_price_is_skipped`: sin `<time datetime>` o con precio 0 → no sale y cuenta en `skipped`.
+  - `test_parser_never_crashes_on_arbitrary_text` (hypothesis, texto unicode arbitrario dentro de una publicación válida): `parse_channel_page` devuelve una `ChannelPage` o lanza `ParseError`, nunca otra excepción.
   - `test_empty_page_with_posts_markup_missing_is_parse_error`: HTML 200 sin ningún `tgme_widget_message` y sin el marcador de canal vacío → `ParseError`; la fixture `cajitatech-empty` (canal sin posts nuevos) → `ChannelPage((), None, False, 0)`.
   - `test_page_with_prices_but_zero_deals_is_parse_error`: 20 posts con `$` en el texto y 0 ofertas → `ParseError("format")`.
   - `test_fetch_posts_url`: con `_Router`/`FakeHttp`, `fetch_posts(ctx, 88160)` pide `https://t.me/s/cajitatech?after=88160`; con `None`, sin query.
@@ -159,9 +167,9 @@
 - Produces: `@dataclass(frozen=True, slots=True) class ChannelsResult: requests: int; sent: int; duplicates: int; skipped: int` y `run_channels(conn, sources: Mapping[str, Source], runs: Mapping[str, SourceRun], now: datetime, params: AppParams, topics: Topics) -> ChannelsResult` en `app/channels.py`. `cycle.py` arma los `SourceRun` de los canales con `_make_run(deps, code, (), inp.breakers, deadline)` solo para los canales habilitados, con breaker no abierto y cuyo cursor tiene `updated_at + channel_interval <= now` (o no existe), y llama a `_close_source` por cada uno al final.
 
 Algoritmo por canal (en este orden):
-1. `page = run.source.fetch_posts(ctx, cursor.last_id if cursor else None)` hasta 3 páginas mientras `page.has_more`; `HardBlock`/`SourceError`/`ParseError` aplican `breaker_transition` con `HARD_BLOCK`/`UNAVAILABLE`/`PARSE_ERROR`, suben el contador y cortan ese canal; una página leída aplica `OK`.
+1. Primero las peticiones, fuera de toda transacción: `page = run.source.fetch_posts(ctx, cursor.last_id if cursor else None)` hasta 3 páginas mientras `page.has_more` (la siguiente con `after = page.max_id`); `HardBlock`/`SourceError`/`ParseError` aplican `breaker_transition` con `HARD_BLOCK`/`UNAVAILABLE`/`PARSE_ERROR`, suben el contador y cortan ese canal; una página leída aplica `OK`.
 2. Sin cursor: `save_channel_cursor(max_id)` y nada más.
-3. Por cada post en orden de `post_id`, en **una transacción por página**: si `published_at < now - 6h` → solo cuenta como leído; si no, `dup = find_duplicate(post, recent)`; `insert_channel_post(..., duplicate_of=dup)`; si no es duplicado y el insert devolvió `True`, `enqueue` con los valores de Global Constraints y se agrega a `recent`. Al final de la transacción, `save_channel_cursor(page.max_id)`.
+3. Después, sin HTTP adentro, por cada post en orden de `post_id`, en **una transacción por página**: si `published_at < now - 6h` → solo cuenta como leído; si no, `dup = find_duplicate(post, recent)`; `insert_channel_post(..., duplicate_of=dup)`; si no es duplicado y el insert devolvió `True`, `enqueue` con los valores de Global Constraints y se agrega a `recent`. Al final de la transacción, `save_channel_cursor(page.max_id)`.
 4. `event(log, "channel_done", source=…, requests=…, posts=…, sent=…, duplicates=…, skipped=…)`.
 
 - [ ] **Step 1: Escribir las pruebas que fallan** en `tests/integration/test_channels.py` con un `FakeChannel` (implementa `ChannelSource` con páginas programadas, una petición por `fetch_posts`, igual que `FakeCatalog` en `test_crawl.py`):
@@ -184,7 +192,7 @@ Algoritmo por canal (en este orden):
 
 **Files:**
 - Modify: `src/discountz/app/maintenance.py` (borra `channel_post` de más de 7 días en el paso de retención), `src/discountz/infra/db.py` (`CatalogDaily.channel_posts: int`, `channel_duplicates: int` de las últimas 24 h), `src/discountz/app/render.py` (`_catalog_line` agrega «Canales: N ofertas (M repetidas)» cuando N > 0)
-- Modify: `README.md` (sección de canales: qué llega, `/fuente off tg_…`), `docs/estado.md`, `docs/architecture.md`, `CLAUDE.md` (1-2 líneas: módulo nuevo y gotcha de `t.me/s`)
+- Modify: `README.md` (sección de canales: qué llega, `/fuente off tg_…`), `docs/estado.md`, `CLAUDE.md` (1-2 líneas: módulo nuevo y gotcha de `t.me/s`)
 - Test: `tests/integration/test_maintenance.py`, `tests/unit/test_render.py`
 
 - [ ] **Step 1: Escribir las pruebas que fallan:** `test_maintenance_deletes_channel_posts_after_7_days` (uno de 8 días se borra, uno de 6 queda); `test_daily_summary_counts_channel_posts` (3 enviados y 1 duplicado en 24 h → la línea dice «Canales: 3 ofertas (1 repetidas)»); sin posts, la línea no aparece.
