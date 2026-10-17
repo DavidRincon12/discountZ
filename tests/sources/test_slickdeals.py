@@ -164,9 +164,28 @@ def test_other_stores_are_skipped_quietly() -> None:
     assert (page.posts, page.skipped, page.unparsed) == ((), 1, 0)
 
 
-def test_amazon_post_without_thread_guid_is_skipped() -> None:
-    body = rss(item("Cosa $5", AMAZON_LINK).replace("<guid>thread-1</guid>", ""))
-    assert parse_slickdeals_amazon(body).posts == ()
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("<guid>thread-1</guid>", ""),
+        ("<guid>thread-1</guid>", "<guid>https://slickdeals.net/f/1</guid>"),
+        ("Tue, 13 Oct 2026 22:00:00 +0000", "2026-10-13T22:00:00Z"),
+    ],
+)
+def test_amazon_post_without_thread_or_date_is_a_format_signal(old: str, new: str) -> None:
+    page = parse_slickdeals_amazon(rss(item("Cosa $5", AMAZON_LINK).replace(old, new)))
+    assert (page.posts, page.unparsed) == ((), 1)
+
+
+def test_other_store_without_thread_is_skipped_quietly() -> None:
+    link = '<a href="https://www.bestbuy.com/site/6512345.p?skuId=6512345">Best Buy</a>'
+    body = rss(item("Monitor 27 in $99", link).replace("<guid>thread-1</guid>", ""))
+    assert parse_slickdeals_amazon(body).unparsed == 0
+
+
+def test_amazon_channel_rejects_a_feed_without_items() -> None:
+    with pytest.raises(ParseError):
+        parse_slickdeals_amazon(rss())
 
 
 def test_amazon_channel_reads_the_frontpage_feed() -> None:

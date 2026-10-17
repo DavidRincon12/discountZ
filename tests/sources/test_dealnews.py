@@ -156,6 +156,31 @@ def test_items_that_are_not_usable_deals_are_skipped(kwargs: dict[str, str]) -> 
     assert (page.posts, page.skipped) == ((), 1)
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"guid": ""},
+        {"guid": "https://www.dealnews.com/sin-id.html"},
+        {"link": "https://www.dealnews.com.evil.example/x/22291098.html"},
+        {"pub": "2026-10-17T07:40:12-04:00"},  # ISO 8601 en vez de RFC 822
+        {"title": ""},
+    ],
+)
+def test_unreadable_items_are_a_format_signal(kwargs: dict[str, str]) -> None:
+    page = parse_dealnews_feed(feed(item(**kwargs)), NOW)  # type: ignore[arg-type]
+    assert (page.posts, page.unparsed) == ((), 1)
+
+
+def test_expired_deal_is_skipped_quietly() -> None:
+    page = parse_dealnews_feed(feed(item(expires="2026-10-17T00:00:00-04:00")), NOW)
+    assert (page.posts, page.skipped, page.unparsed) == ((), 1, 0)
+
+
+def test_feed_without_items_is_a_parse_error() -> None:
+    with pytest.raises(ParseError):
+        parse_dealnews_feed(feed(), NOW)
+
+
 def test_image_only_from_the_dealnews_cdn() -> None:
     (post,) = parse_dealnews_feed(feed(item(image="https://evil.example/x.jpg")), NOW).posts
     assert post.image_url is None

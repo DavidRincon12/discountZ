@@ -164,36 +164,38 @@ def _extras(content: str) -> tuple[str | None, SafeUrl | None]:
 def parse_slickdeals_amazon(body: bytes) -> ChannelPage:
     """Ofertas de la portada que salen a Amazon, como publicaciones «sin verificar».
 
-    Una oferta que sale a Amazon sin ASIN, título o precio legibles cuenta en `unparsed`: si
-    son muchas y no hay ninguna oferta, cambió el formato. La edad la decide el paso de canales.
+    Una oferta que sale a Amazon sin ASIN, hilo, fecha, título o precio legibles cuenta en
+    `unparsed`: si son muchas y no hay ninguna oferta, cambió el formato. Una portada sin
+    ofertas también es un error. La edad la decide el paso de canales.
     """
     items = _rss_items(body)
+    if not items:
+        raise ParseError("no_items", loc=AMAZON_CODE)
     posts: list[ChannelPost] = []
     ids: list[int] = []
     unparsed = 0
     for item in items:
         m = _THREAD_RE.fullmatch(_text(item.find("guid")))
-        published = _published(item)
-        if m is None or published is None:
-            continue
-        ids.append(int(m.group(1)))
+        if m is not None:
+            ids.append(int(m.group(1)))
         content = item.findtext(_CONTENT) or ""
         target = _target(content + (item.findtext("description") or ""))
         if target is None or target.host not in AMAZON_HOSTS:
             if _AMAZON_EXIT_RE.search(content):
                 unparsed += 1
             continue
+        published = _published(item)
         title = _text(item.find("title"))[:TITLE_MAX]
         price = _price(title)
         thread = _safe(_text(item.find("link")), THREAD_HOSTS)
-        if not title or price is None or thread is None:
+        if m is None or published is None or not title or price is None or thread is None:
             unparsed += 1
             continue
         coupon, image = _extras(content)
         posts.append(
             ChannelPost(
                 channel=AMAZON_CODE,
-                post_id=ids[-1],
+                post_id=int(m.group(1)),
                 published_at=published,
                 title=title,
                 price=price,

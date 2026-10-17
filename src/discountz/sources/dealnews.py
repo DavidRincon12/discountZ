@@ -99,8 +99,9 @@ def _image(item: Element) -> SafeUrl | None:
 def parse_dealnews_feed(body: bytes, now: datetime) -> ChannelPage:
     """Ofertas en USD y sin vencer del feed; lanza `ParseError` si no es un RSS legible.
 
-    Una oferta sin precio legible que no es una venta general («sale») cuenta en `unparsed`:
-    si son muchas y no hay ninguna oferta, el formato del feed cambió.
+    Una oferta sin id, enlace, título o fecha legibles, o sin precio legible sin ser una venta
+    general («sale»), cuenta en `unparsed`: si son muchas y no hay ninguna oferta, el formato
+    del feed cambió. Un feed sin ofertas también es un error: el de Amazon nunca está vacío.
     """
     try:
         root = fromstring(body, forbid_dtd=True)
@@ -109,6 +110,8 @@ def parse_dealnews_feed(body: bytes, now: datetime) -> ChannelPage:
     if root.tag != "rss":
         raise ParseError("not_rss", loc=CODE)
     items = list(root.iter("item"))
+    if not items:
+        raise ParseError("no_items", loc=CODE)
     posts: list[ChannelPost] = []
     ids: list[int] = []
     unparsed = 0
@@ -118,12 +121,13 @@ def parse_dealnews_feed(body: bytes, now: datetime) -> ChannelPage:
         link = _safe(_text(item.find("link")), HOSTS)
         guid = _safe(_text(item.find("guid")), HOSTS)
         m = _ID_RE.search(guid.path) if guid is not None else None
-        if link is None or m is None:
-            continue
-        ids.append(int(m.group(1)))
         title = _text(item.find("title"))[:TITLE_MAX]
         published = _published(item)
-        if not title or published is None or _expired(item, now):
+        if link is None or m is None or not title or published is None:
+            unparsed += 1
+            continue
+        ids.append(int(m.group(1)))
+        if _expired(item, now):
             continue
         price = _price(item)
         if price is None:
