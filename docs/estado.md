@@ -2,21 +2,20 @@
 
 ## Estado actual
 - v1 en producción desde el 2026-10-14 (Supabase, `DISCOUNTZ_ACTIVO=true`, cron-job.org cada 5 min).
-- Rastreo de catálogo (spec `docs/superpowers/specs/2026-10-14-rastreo-catalogo-design.md`, plan `docs/superpowers/plans/2026-10-14-rastreo-catalogo.md`, Tasks 1-15) implementado en la rama `claude/discountz-puesta-en-marcha-mlcmm6`:
+- Rastreo de catálogo (spec `docs/superpowers/specs/2026-10-14-rastreo-catalogo-design.md`, plan `docs/superpowers/plans/2026-10-14-rastreo-catalogo.md`, Tasks 1-15) fusionado (PR #6) y en producción desde el 2026-10-17 (migración `0002` aplicada, grupo con 14 temas, `DISCOUNTZ_RASTREO=true`, disparo horario en cron-job.org):
   - Migración `0002_catalogo` (`SCHEMA_VERSION = 2`): `catalog_item`, `catalog_price_change`, `crawl_cursor`, `crawl_lease`, `topic`; `outbox.topic/card`; `watch.origin/expires_at`.
   - `python -m discountz crawl --source <tienda>` y workflow `crawl.yml` (matriz exito, carulla, olimpica, panamericana, bestbuy_us) detrás de `DISCOUNTZ_RASTREO=true`.
   - VTEX ×4 por categoría raíz con bandas de precio; Best Buy por su API oficial (`BESTBUY_API_KEY`); Walmart lista para su API de afiliados (4 secretos).
   - Alertas del catálogo como tarjeta PNG con foto en el tema de su categoría; las de la v1 también van a su tema (Slickdeals a «Comunidad EE. UU.»). Comandos `/temas`, `/seguir` hasta 20 URLs, `/dejar aNN|auto`.
   - Seguimientos automáticos desde Slickdeals (Amazon 300, Newegg 100), mantenimiento y resumen diario del catálogo.
-- Suite: 613 pruebas (unitarias + integración) en verde el 2026-10-17, tras la revisión final de la rama.
+- Best Buy y Walmart fuera por decisión de David (2026-10-17): sin `BESTBUY_API_KEY` y `/fuente off walmart_us`. El código sigue en el repo.
+- Suite: 616 pruebas (unitarias + integración) en verde el 2026-10-17.
 
 ## Último cambio
-- 2026-10-16: Tasks 11-15 del rastreo: entrega con foto y tema, comandos, seguimientos automáticos, mantenimiento, CLI `crawl`, workflow y guía de activación (README §9).
+- 2026-10-17: arreglo del primer rastreo en producción. Olímpica y Panamericana guardaban 0 productos y Éxito se cortaba: el filtro de precio `P:[a TO b]` iba con `+` y el WAF de VTEX respondía 400, y las páginas de 50 productos pesan hasta ~7 MB (tope de 5 MB). Ahora los parámetros van con `%20` y el rastreo acepta cuerpos de hasta 24 MB.
 
 ## Siguiente paso
-- Fusionar el PR del rastreo y correr enseguida *migrate* (`to = head`): hasta entonces el ciclo se salta por versión de esquema.
-- David sigue README §9: grupo con temas, `TELEGRAM_CHAT_ID` del grupo, `/temas`, `BESTBUY_API_KEY` + `/fuente on bestbuy_us`, `DISCOUNTZ_RASTREO=true` y el disparo horario de `crawl.yml`.
-- Con la clave de Best Buy: grabar fixtures reales de la API (catálogo, cambios, ficha) y revisar las reglas de `topics.toml` contra sus categorías reales.
+- Vigilar las primeras vueltas de *crawl* (estado `ok` y `count` > 0 en las cuatro tiendas) y el resumen diario del catálogo.
 - Después: SP-6 (canales comunitarios de Telegram: DescuentosTech, Clubgratis, cajitatech).
 
 ## Decisiones vigentes
@@ -40,6 +39,7 @@
 - Fechas del calendario de eventos 2026-2027 estimadas: David debe confirmarlas (Hot Sale y Cyber Lunes de Colombia, sobre todo).
 - Falta: `setup-bot`, `pg_terminate_backend` tras 3 `skipped_locked`, descarte G10 contra `R_listing`, mensaje agrupado de tormenta y `config/supabase-ca.crt` para `sslmode=verify-full`.
 - Una alerta de un ciclo que murió antes de componer sale con vista reducida (sin línea de histórico).
+- VTEX: el WAF responde 400 «Scripts are not allowed!» si el espacio va como `+` en `fq=P:[a TO b]`; `infra/http` codifica con `%20`. Una página de catálogo de 50 productos pesa hasta ~7 MB en Olímpica (tope del rastreo: `CATALOG_MAX_BODY_BYTES`, 24 MB).
 - VTEX `products/search` con varios `fq=skuId:` devuelve solo 10 productos sin `_from`/`_to` (medido 2026-10-17): los lotes de más de 10 piden el rango. Afectaba también a los seguimientos de la v1.
 - Pendientes menores de la revisión del rastreo: reloj fijo en toda la corrida, `min_seen` sin ventana de 90 d, tope diario por día UTC, orden del barrido VTEX, fotos sin mirar el plazo, C07 sin unir tiendas, desalojo de automáticos por antigüedad, `crawl` sin verificar `SCHEMA_VERSION`, código 3 compartido, borrado del catálogo tras 30 d sin rastreo.
 - `*.vtexassets.com` (fotos VTEX) está bloqueado por el proxy de la sesión en la nube, no desde Actions. Las fixtures de las API de Best Buy y Walmart son sintéticas (`"nota"`).

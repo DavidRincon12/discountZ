@@ -28,7 +28,7 @@ from discountz.domain.scheduling import CrawlBudget
 from discountz.domain.urls import SafeUrl
 from discountz.infra import db as repo
 from discountz.infra.db import CatalogRow
-from discountz.infra.http import BlockKind, Files, HttpResponse, Method, Params
+from discountz.infra.http import MAX_BODY_BYTES, BlockKind, Files, HttpResponse, Method, Params
 from discountz.sources.base import (
     Capability,
     CardFacts,
@@ -87,6 +87,7 @@ class Transport:
     clock: Clock
     blocked: set[str] = field(default_factory=set)
     urls: list[str] = field(default_factory=list)
+    body: bytes = b"{}"
 
     def request(
         self,
@@ -103,7 +104,7 @@ class Transport:
         self.clock.t += self.clock.step
         self.urls.append(url)
         status = 403 if url in self.blocked else 200
-        return HttpResponse(status, url, {}, b"{}", 1)
+        return HttpResponse(status, url, {}, self.body, 1)
 
     def kinds(self) -> list[str]:
         return [re.sub(r"https://fake/([a-z_]+).*", r"\1", u) for u in self.urls]
@@ -289,6 +290,15 @@ def test_crawl_resumes_from_cursor_without_duplicates(db: psycopg.Connection) ->
     assert (cur.sweep_no, cur.partitions, cur.partition_idx, cur.page) == (1, (), 0, 0)
     assert cur.last_sweep_s == 3600
     assert cur.day_requests == 5
+
+
+def test_crawl_accepts_catalog_pages_over_the_cycle_body_cap(db: psycopg.Connection) -> None:
+    """Olímpica pesa ~7 MB por página de 50 (medido el 2026-10-17): el rastreo no la descarta."""
+    src = FakeCatalog({"C:/1/": [page_of(2)]})
+    d, transport = deps(db, src, Clock(step=20))
+    transport.body = b"x" * (MAX_BODY_BYTES + 1)
+    result = run_crawl(d, T, minutes=1)
+    assert (result.status, result.items) == ("ok", 2)
 
 
 def test_crawl_splits_partition_and_keeps_split_in_cursor(db: psycopg.Connection) -> None:

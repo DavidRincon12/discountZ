@@ -29,7 +29,7 @@ from discountz.domain.scheduling import CrawlBudget
 from discountz.domain.segments import Observation, SegmentStatus, gap_h
 from discountz.domain.topics import TopicParams, assign_topic
 from discountz.infra import db
-from discountz.infra.http import HttpClient, PacedClient
+from discountz.infra.http import CATALOG_MAX_BODY_BYTES, HttpClient, PacedClient
 from discountz.infra.log import event
 from discountz.sources.base import (
     CardFacts,
@@ -120,6 +120,7 @@ class _Run:
             deps.source.detect_block,
             source=self.code,
             deadline=end,
+            max_body=CATALOG_MAX_BODY_BYTES,
         )
         self.ctx = SourceContext(self.http, deps.credentials, end, now)
         self.pages = self.items = self.changes = self.alerts = 0

@@ -24,7 +24,7 @@ from discountz.domain.errors import ConfigError, LeaseBusy
 from discountz.infra.credentials import EnvCredentials
 from discountz.infra.db import connect
 from discountz.infra.healthchecks import Healthchecks
-from discountz.infra.http import CurlClient, HttpClient, HttpxClient
+from discountz.infra.http import CATALOG_MAX_BODY_BYTES, CurlClient, HttpClient, HttpxClient
 from discountz.infra.log import configure_logging, event, install_excepthook
 from discountz.infra.migrate import MigrationError, migrate_with_lease
 from discountz.infra.telegram import TelegramClient
@@ -242,7 +242,9 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
         return EXIT_OK
     rnd = random.Random()
     client: HttpxClient | CurlClient = (
-        CurlClient(args.source) if source.descriptor.client == "curl" else HttpxClient(args.source)
+        CurlClient(args.source)
+        if source.descriptor.client == "curl"
+        else HttpxClient(args.source, max_body=CATALOG_MAX_BODY_BYTES)
     )
     try:
         conn = _connect_with_retry(settings, rnd)
