@@ -11,7 +11,7 @@
 - Rama `claude/discountz-puesta-en-marcha-mlcmm6`: SP-6. El ciclo de 5 min lee cada canal como mucho cada 10 min (hasta 3 páginas de `t.me/s/<canal>?after=<id>`), guarda los posts y encola las ofertas nuevas en `outbox` con prioridad 9 y `dedup_key = canal:<código>:<id>`. ADR 0005.
 
 ## Siguiente paso
-- Al fusionar: *Actions → migrate* con `to = head` (sin la `0003` el ciclo se salta con aviso). La primera lectura de cada canal solo fija el cursor; vigilar que en las siguientes lleguen tarjetas a sus temas y que `/estado` no marque los canales como rotos.
+- En curso (diseño aprobado por David el 2026-10-17, sin spec): tarjetas «sin verificar» de Amazon desde DealNews (`/s313/Amazon/?rss=1&sort=time`) y desde los enlaces a Amazon de Slickdeals, como fuentes `channel` `dealnews` y `slickdeals_amazon`. Sin cursor por id (`ordered_ids = False`): se saltan los ids ya guardados y la primera lectura envía lo de las últimas 6 h. «Ver en DealNews» con el enlace intacto (`?iref=rss`, lo piden sus términos); «Ver oferta» y «Ver en Slickdeals»; palabras en inglés en `channel_rules`. Hecho: migración `0004`. Al fusionar: *migrate* con `to = head`.
 - eBay (Browse API): esperar el App ID de David y probarlo antes de diseñar la fuente.
 
 ## Decisiones vigentes
