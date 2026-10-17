@@ -5,15 +5,17 @@
 - Rastreo de catálogo (ADR 0004) en producción desde el 2026-10-17: VTEX ×4 por categoría raíz, grupo con 14 temas, tarjetas PNG, `/temas`, `/seguir` hasta 20 URLs, `/dejar aNN|auto`, seguimientos automáticos desde Slickdeals.
 - Canales de Telegram (ADR 0005, PR #8) en producción desde el 2026-10-17: `tg_descuentostech`, `tg_clubgratis` y `tg_cajitatech`, tarjetas «sin verificar» y línea «Canales» en el resumen diario.
 - Best Buy y Walmart fuera por decisión de David (sin `BESTBUY_API_KEY`, `/fuente off walmart_us`). Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
-- Suite: 767 pruebas (unitarias, integración y e2e) en verde el 2026-10-17.
+- Feeds de Amazon «sin verificar» (ADR 0006, PR #9) en producción desde el 2026-10-17 23:30Z (`dealnews` y `slickdeals_amazon`, esquema 4).
+- Suite: 775 pruebas (unitarias, integración y e2e) en verde el 2026-10-17.
 
 ## Último cambio
-- Rama `claude/discountz-puesta-en-marcha-mlcmm6` (ADR 0006): ofertas de Amazon «sin verificar» desde el RSS de DealNews (`dealnews`, cada 10 min) y la portada de Slickdeals (`slickdeals_amazon`, cada 30 min), como canales con `ordered_ids=False`: se releen enteros y saltan los ids guardados; la primera lectura con ofertas marca con `channel_post.baseline` sin enviar. Migración `0004` (`SCHEMA_VERSION = 4`), botones «Ver en DealNews» y «Ver en Slickdeals», palabras en inglés y reglas de Mascotas, Mercado y Libros en `channel_rules`.
-- Tras la revisión: el id de DealNews sale del `<guid>`, un enlace que `SafeUrl` cambiaría no se usa, y los ítems ilegibles o un feed vacío cuentan como formato roto.
+- Rama `claude/discountz-puesta-en-marcha-mlcmm6`: el rastreo de Éxito, Carulla y Olímpica salía en rojo desde el 2026-10-17 18:45Z. Una página de 50 productos pesaba más que el tope de 24 MB (Moda de Éxito: 42,8 MB), `PacedClient` la bajaba tres veces y el cursor no avanzaba, así que cada corrida fallaba en la misma página hasta abrir el breaker; con él abierto, `crawl` sale con código 3 sin decir nada.
+- Ahora `too_large` no se reintenta, `vtex` pide por mitades la página o el lote que no cabe (en la primera página de una partición que se va a partir basta el total), y el rastreo registra `source_error … code=` y el motivo cuando no corre.
 
 ## Siguiente paso
-- David: fusionar el PR con Squash and merge y correr *Actions → migrate* con `to = head`; hasta entonces el ciclo se salta con aviso. Criterio: tras la primera lectura de cada feed (que solo marca), llegan tarjetas nuevas de Amazon en sus temas.
-- Mirar el volumen de la primera semana (estimado: ~33 al día de DealNews y ~5 por hora de Slickdeals). Si satura: `/fuente off slickdeals_amazon`. Pendiente que David decida si quiere también las ofertas que DealNews vuelve a destacar (ver gotchas).
+- David: fusionar el PR con Squash and merge y dejar el disparo de `crawl` en cron-job.org cada hora (desde las 18:40Z del 2026-10-17 llega cada 5 min). Criterio: tras el fusionado, cuando el breaker pasa a medio abierto (≤ 12 h), las corridas de Éxito, Carulla y Olímpica terminan en verde.
+- DealNews: enviar también las ofertas vigentes que vuelve a destacar con `pubDate` viejo (David dijo que sí el 2026-10-17): PR aparte.
+- Mirar el volumen de la primera semana (estimado: ~33 al día de DealNews y ~5 por hora de Slickdeals). Si satura: `/fuente off slickdeals_amazon`.
 - eBay (Browse API): esperar el App ID de David y probarlo antes de diseñar la fuente.
 
 ## Decisiones vigentes
@@ -32,7 +34,7 @@
 - DealNews responde `x-dn-is-bot-user-agent: Yes` pero sirve normal (`s-maxage=300`); `robots.txt` pide 2 s entre peticiones. Vuelve a destacar ofertas viejas y vigentes con su `pubDate` original (~13 al día): por el tope de 6 h no llegan. Si el breaker de Amazon se cierra, una oferta puede llegar dos veces (lead verificado y feed sin verificar).
 - Fechas del calendario de eventos 2026-2027 estimadas: David debe confirmarlas (Hot Sale y Cyber Lunes de Colombia).
 - Falta: `setup-bot`, `pg_terminate_backend` tras 3 `skipped_locked`, descarte G10 contra `R_listing`, mensaje agrupado de tormenta y `config/supabase-ca.crt` para `verify-full`. Una alerta de un ciclo que murió antes de componer sale con vista reducida. En `/estado`, los códigos de más de 14 letras (`tg_descuentostech`, `slickdeals_amazon`) descuadran la columna.
-- VTEX: el WAF rechaza `+` como espacio (`infra/http` usa `%20`); una página de catálogo pesa hasta ~7 MB; `products/search` con varios `skuId` devuelve 10 sin `_from`/`_to`.
+- VTEX: el WAF rechaza `+` como espacio (`infra/http` usa `%20`); una página de 50 productos pesa hasta ~43 MB (se pide por mitades sobre 24 MB); `products/search` con varios `skuId` devuelve 10 sin `_from`/`_to`.
 - Pendientes menores del rastreo: reloj fijo por corrida, `min_seen` sin ventana de 90 d, tope diario por día UTC, orden del barrido VTEX, fotos sin mirar el plazo, C07 sin unir tiendas, desalojo de automáticos por antigüedad, `crawl` sin verificar `SCHEMA_VERSION`, código 3 compartido, borrado del catálogo tras 30 d sin rastreo. Un producto ya seguido que reaparece en Slickdeals con lectura de hace < 6 h no da `COMMUNITY_DEAL`.
 - Canales y feeds: un cambio de formato (≥ 5 ilegibles y 0 ofertas, una página sin posts o un feed vacío) cuenta como `PARSE_ERROR` (3 seguidos abren el breaker). Las fixtures de `t.me` llevan los usuarios cambiados por «Usuario»: anonimizar al regrabar. En los temas, «board», «monitor», «mouse», «control» y «switch» mandan a Tecnología títulos en inglés como «Cutting Board».
 - ruff 0.17 formatea Markdown: `docs/` está excluido. La imagen `postgres:17` del CI no tiene digest fijado.
