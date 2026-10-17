@@ -9,6 +9,10 @@ cart») no tienen ruta.
 
 En la ficha real ya no hay JSON-LD `Product` (solo `WebPage`), por eso la ruta independiente
 no es `offers.price` como decía el spec.
+
+Modo API (spec del rastreo §4.5): con las credenciales de la API de afiliados (walmart.io), las
+fichas y la búsqueda se leen de `affil/product/v2` con cabeceras firmadas; sin ellas, el HTML de
+la v1 sin cambios. Queda listo para activar cuando Walmart apruebe la cuenta de David.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, ValidationError
 from selectolax.lexbor import LexborHTMLParser
 
-from discountz.domain.errors import NotFound, ParseError, SourceError
+from discountz.domain.errors import CredentialUnavailable, NotFound, ParseError, SourceError
 from discountz.domain.guards import check_currency_text
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money, parse_price, to_minor
@@ -31,8 +35,10 @@ from discountz.domain.urls import SafeUrl
 from discountz.infra.http import BlockKind, HttpResponse
 from discountz.sources.base import (
     Capability,
+    CardFacts,
     ListingFailed,
     ListingFound,
+    ListingGone,
     ListingOutcome,
     NeedsResolution,
     SearchPage,
@@ -52,6 +58,10 @@ _FIRST_PARTY = "Walmart.com"
 _HEADERS = {"Accept-Language": "en-US,en;q=0.9"}
 _REDIRECTS = (301, 302, 303, 307, 308)
 _SOLD_BY = re.compile(r"^Sold (?:and shipped )?by (.+)$")
+API = "https://developer.api.walmart.com/api-proxy/service/affil/product/v2"
+API_BATCH = 20
+_API_IN_STOCK = frozenset({"Available", "Limited Supply", "Last few items"})
+_API_HEADERS = {"Accept": "application/json"}
 
 Number = Decimal | int
 
@@ -257,6 +267,65 @@ def parse_walmart_search(body: bytes, observed_at: datetime) -> list[Offer]:
     return out
 
 
+class _ApiItem(_Model):
+    itemId: int
+    name: str = ""
+    salePrice: Number | None = None
+    msrp: Number | None = None
+    stock: str = ""
+    availableOnline: bool | None = None
+    marketplace: bool | None = None
+    sellerInfo: str | None = None
+    largeImage: str | None = None
+
+
+class _ApiItems(_Model):
+    items: list[_ApiItem] = []
+
+
+def _api_usd(value: Number | None) -> Money | None:
+    if value is None:
+        return None
+    minor = to_minor(Decimal(value), Currency.USD)
+    return Money(minor, Currency.USD) if minor > 0 else None
+
+
+def parse_walmart_api(body: bytes) -> list[_ApiItem]:
+    try:
+        data = json.loads(body, parse_float=Decimal)
+    except (ValueError, RecursionError) as exc:
+        raise ParseError("bad_json") from exc
+    try:
+        return _ApiItems.model_validate(data).items
+    except ValidationError as exc:
+        first = exc.errors(include_input=False, include_url=False)[0]
+        loc = ".".join(str(p) for p in first.get("loc", ()))[:60]
+        raise ParseError("schema", loc=loc or None) from None
+
+
+def _api_offer(item: _ApiItem, observed_at: datetime) -> Offer:
+    ident = str(item.itemId)
+    title = " ".join(item.name.split())
+    price = _api_usd(item.salePrice)
+    in_stock = (
+        price is not None and item.stock in _API_IN_STOCK and item.availableOnline is not False
+    )
+    first_party = not item.marketplace and (item.sellerInfo or _FIRST_PARTY) == _FIRST_PARTY
+    return Offer(
+        ref=ListingRef(CODE, ident),
+        parent_external_id=None,
+        title=title,
+        price=price if in_stock else None,
+        list_price=_api_usd(item.msrp),
+        in_stock=in_stock,
+        seller_class=SellerClass.FIRST_PARTY if first_party else SellerClass.MARKETPLACE,
+        unit_key=pack_unit_key(title) or "un|1",
+        extraction=ExtractionPath.API_JSON,
+        observed_at=observed_at,
+        url_path=f"/ip/{ident}",
+    )
+
+
 class WalmartSource:
     def __init__(self) -> None:
         self.descriptor = SourceDescriptor(
@@ -268,8 +337,45 @@ class WalmartSource:
             capabilities=frozenset({Capability.DETAIL, Capability.SEARCH, Capability.CONFIRM}),
             max_batch=1,
             external_id_re=ITEM_RE,
+            image_hosts=frozenset({"i5.walmartimages.com"}),
         )
         self._bodies: dict[str, bytes] = {}
+
+    def _api(
+        self, ctx: SourceContext, resource: str, params: dict[str, str]
+    ) -> list[_ApiItem] | None:
+        """`None` sin credenciales de la API (se usa el HTML de la v1)."""
+        try:
+            headers = ctx.credentials.signed_headers("walmart", ctx.now)
+            publisher = ctx.credentials.public_id("walmart")
+        except CredentialUnavailable:
+            return None
+        resp = ctx.http.request(
+            "GET",
+            f"{API}/{resource}",
+            params={**params, "publisherId": publisher},
+            headers={**_API_HEADERS, **headers},
+        )
+        return parse_walmart_api(resp.body)
+
+    def _fetch_api(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome] | None:
+        out: list[ListingOutcome] = []
+        for i in range(0, len(refs), API_BATCH):
+            batch = refs[i : i + API_BATCH]
+            try:
+                items = self._api(ctx, "items", {"ids": ",".join(r.external_id for r in batch)})
+            except (SourceError, ParseError) as exc:
+                out.extend(ListingFailed(r, exc) for r in batch)
+                continue
+            if items is None:
+                return None
+            found = {str(it.itemId): it for it in items}
+            for r in batch:
+                item = found.get(r.external_id)
+                out.append(ListingFound(_api_offer(item, ctx.now)) if item else ListingGone(r))
+        return out
 
     def parse_url(self, url: SafeUrl) -> ListingRef | NeedsResolution | None:
         m = _PATH_ITEM.match(url.path)
@@ -300,6 +406,9 @@ class WalmartSource:
     def fetch_listings(
         self, ctx: SourceContext, refs: Sequence[ListingRef]
     ) -> list[ListingOutcome]:
+        api = self._fetch_api(ctx, [r for r in refs if ITEM_RE.fullmatch(r.external_id)])
+        if api is not None:
+            return api
         out: list[ListingOutcome] = []
         for ref in refs:
             try:
@@ -314,16 +423,36 @@ class WalmartSource:
 
     def search(self, ctx: SourceContext, spec: SearchSpec, page: int) -> SearchPage:
         del page  # solo la primera página
+        items = self._api(ctx, "search", {"query": spec.query, "numItems": "25"})
+        if items is not None:
+            return SearchPage([_api_offer(it, ctx.now) for it in items], None)
         resp = ctx.http.request("GET", f"{BASE}/search", params={"q": spec.query}, headers=_HEADERS)
         return SearchPage(parse_walmart_search(resp.body, ctx.now), None)
 
     def confirm(self, ctx: SourceContext, offer: Offer) -> Offer | None:
         item = offer.ref.external_id
+        items = self._api(ctx, "items", {"ids": item}) if ITEM_RE.fullmatch(item) else None
+        if items is not None:
+            match = next((it for it in items if str(it.itemId) == item), None)
+            return _api_offer(match, ctx.now) if match else None
         body = self._bodies.get(item) or self._get(ctx, item)
         return parse_walmart_independent(body, item, ctx.now)
 
     def fetch_leads(self, ctx: SourceContext) -> list[Lead]:
         return []
+
+    def fetch_card_facts(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> dict[str, CardFacts]:
+        """Solo en modo API; sin credenciales la alerta sale sin foto."""
+        ids = [i for i in external_ids if ITEM_RE.fullmatch(i)][:API_BATCH]
+        items = self._api(ctx, "items", {"ids": ",".join(ids)}) if ids else None
+        return {
+            str(it.itemId): CardFacts(
+                " ".join(it.name.split()), f"{BASE}/ip/{it.itemId}", it.largeImage
+            )
+            for it in items or []
+        }
 
     def detect_block(self, resp: HttpResponse) -> BlockKind | None:
         return detect_block_common(resp)

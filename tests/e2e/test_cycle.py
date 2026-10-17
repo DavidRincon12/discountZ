@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import random
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import Any
 
 import psycopg
 import pytest
+from PIL import Image
 from pydantic import SecretStr
 
 from discountz.app import cycle as cycle_module
@@ -20,9 +22,11 @@ from discountz.config import Settings, load_canaries, load_params
 from discountz.domain.money import Currency
 from discountz.domain.scheduling import plan_run
 from discountz.infra import db as repo
+from discountz.infra.db import connect
 from discountz.infra.healthchecks import Healthchecks
 from discountz.infra.http import FakeHttp, HttpClient, HttpResponse
 from discountz.infra.log import configure_logging
+from discountz.infra.migrate import migrate
 from discountz.infra.telegram import TelegramClient
 from discountz.sources.fixtures import load_fixture
 from discountz.sources.registry import load_all
@@ -437,3 +441,53 @@ def test_lead_skipped_when_listing_read_less_than_6h_ago(conn: psycopg.Connectio
     run_cycle(deps(conn, feed_http(amazon, EVO_LEAD), tg), T)
     assert amazon.calls == []
     assert conn.execute("SELECT count(*) FROM discountz.alert").fetchone() == (0,)
+
+
+def test_cycle_delivers_card_photo_with_photo_client(conn: psycopg.Connection) -> None:
+    img = "https://exitocol.vteximg.com.br/arquivos/ids/1/a.jpg"
+    card = {
+        "store": "exito",
+        "topic": "tecnologia",
+        "title": "Celular",
+        "url": "https://www.exito.com/celular/p",
+        "image_url": img,
+        "price_minor": 59_900,
+        "usual_minor": 99_900,
+        "currency": "COP",
+        "drop_bp": 4004,
+        "min_days": 5,
+        "kind": "catalog_drop",
+    }
+    repo.enqueue(
+        conn,
+        "alert",
+        "<b>tarjeta</b>",
+        priority=3,
+        dedup_key="cat:1",
+        now=T,
+        ttl=timedelta(hours=24),
+        topic="tecnologia",
+        card=card,
+    )
+    buf = io.BytesIO()
+    Image.new("RGB", (200, 200), (10, 120, 200)).save(buf, "JPEG")
+    photos = FakeHttp({img: HttpResponse(200, img, {}, buf.getvalue(), 1)})
+    tg = FakeHttp(
+        {
+            **telegram().routes,
+            f"{TG}/sendPhoto": jresp({"ok": True, "result": {"message_id": 2}}),
+        }
+    )
+    run_cycle(replace(deps(conn, {}, tg), photos=photos), T)
+    assert [c[1] for c in photos.calls] == [img]
+    assert len(tg.uploads) == 1
+
+
+def test_cycle_on_previous_schema_skips_with_notice(empty_db_url: str) -> None:  # noqa: F811
+    """Entre el merge y la migración el ciclo corre contra el esquema 1: avisa y no falla."""
+    with connect(empty_db_url) as old:
+        migrate(old, 1)
+        result = run_cycle(deps(old, {}, telegram()), T)
+        assert result.status == "skipped_schema"
+        rows = old.execute("SELECT purpose, body_html FROM discountz.outbox").fetchall()
+        assert len(rows) == 1 and "migración pendiente" in rows[0][1]

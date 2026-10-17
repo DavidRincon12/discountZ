@@ -1,25 +1,32 @@
 # Estado de discountZ
 
 ## Estado actual
-- Plan v1 completo (Tasks 1-26): dominio puro, BD con `0001_init`, lease, HTTP con `PacedClient`, Telegram con comandos y ciclo completo con confirmación, mantenimiento y resumen diario.
-- Fuentes: VTEX ×4 y Amazon US con fixtures reales; Newegg (fichas reales; búsqueda desactivada, `/buscar newegg` se rechaza); Slickdeals como feed (`COMMUNITY_DEAL`, U34/U34b de punta a punta); Walmart (fixtures reales) y Best Buy (fixtures reales) detrás de `/fuente on`.
-- Despliegue: workflows `cycle`, `migrate` y `keepalive`; guía de puesta en marcha en `README.md`. El job de `cycle` se omite hasta que la variable de Actions `DISCOUNTZ_ACTIVO` valga `true`.
-- Suite: 410 pruebas unitarias y 51 de integración (Postgres) en verde el 2026-10-14.
+- v1 en producción desde el 2026-10-14 (Supabase, `DISCOUNTZ_ACTIVO=true`, cron-job.org cada 5 min).
+- Rastreo de catálogo (spec `docs/superpowers/specs/2026-10-14-rastreo-catalogo-design.md`, plan `docs/superpowers/plans/2026-10-14-rastreo-catalogo.md`, Tasks 1-15) implementado en la rama `claude/discountz-puesta-en-marcha-mlcmm6`:
+  - Migración `0002_catalogo` (`SCHEMA_VERSION = 2`): `catalog_item`, `catalog_price_change`, `crawl_cursor`, `crawl_lease`, `topic`; `outbox.topic/card`; `watch.origin/expires_at`.
+  - `python -m discountz crawl --source <tienda>` y workflow `crawl.yml` (matriz exito, carulla, olimpica, panamericana, bestbuy_us) detrás de `DISCOUNTZ_RASTREO=true`.
+  - VTEX ×4 por categoría raíz con bandas de precio; Best Buy por su API oficial (`BESTBUY_API_KEY`); Walmart lista para su API de afiliados (4 secretos).
+  - Alertas del catálogo como tarjeta PNG con foto en el tema de su categoría; las de la v1 también van a su tema (Slickdeals a «Comunidad EE. UU.»). Comandos `/temas`, `/seguir` hasta 20 URLs, `/dejar aNN|auto`.
+  - Seguimientos automáticos desde Slickdeals (Amazon 300, Newegg 100), mantenimiento y resumen diario del catálogo.
+- Suite: 613 pruebas (unitarias + integración) en verde el 2026-10-17, tras la revisión final de la rama.
 
 ## Último cambio
-- Rama `claude/discountz-puesta-en-marcha-mlcmm6`: preparación de la puesta en marcha. `/buscar` rechaza las tiendas sin `Capability.SEARCH` y Newegg la pierde: su búsqueda da CAPTCHA desde la nube y desde la red de David, y su parser solo conoce HTML sintético. `cycle` queda detrás del interruptor `DISCOUNTZ_ACTIVO` para que el cron de respaldo no falle cada 30 min mientras faltan los secretos. README: pasos de `check-config` y de encendido.
+- 2026-10-16: Tasks 11-15 del rastreo: entrega con foto y tema, comandos, seguimientos automáticos, mantenimiento, CLI `crawl`, workflow y guía de activación (README §9).
 
 ## Siguiente paso
-- David hace la puesta en marcha según `README.md`: bot, Supabase, secretos y `production-db`, `check-config`, migración, `DISCOUNTZ_ACTIVO=true`, primer `cycle` manual y cron-job.org.
-- Con el ciclo en marcha: revisar los primeros runs (Amazon con `curl_cffi`, fichas de Newegg y Best Buy desde Actions) y agregar canarios de Newegg.
-- Reactivar la búsqueda de Newegg solo con una fixture real (el spike desde Actions del 2026-10-13 sí leyó precio).
+- Fusionar el PR del rastreo y correr enseguida *migrate* (`to = head`): hasta entonces el ciclo se salta por versión de esquema.
+- David sigue README §9: grupo con temas, `TELEGRAM_CHAT_ID` del grupo, `/temas`, `BESTBUY_API_KEY` + `/fuente on bestbuy_us`, `DISCOUNTZ_RASTREO=true` y el disparo horario de `crawl.yml`.
+- Con la clave de Best Buy: grabar fixtures reales de la API (catálogo, cambios, ficha) y revisar las reglas de `topics.toml` contra sus categorías reales.
 - Después: SP-6 (canales comunitarios de Telegram: DescuentosTech, Clubgratis, cajitatech).
 
 ## Decisiones vigentes
-- Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003).
+- Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo por corridas horarias (ADR 0004).
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero».
 - Si spec y plan difieren, manda spec §0.2 y luego el plan.
 - La confirmación exige ±1 %, stock, misma variante y mismo vendedor; en búsquedas sin vendedor visible (Amazon, Newegg) el vendedor es provisional y la ficha decide.
+- Rastreo: el descuento se mide solo contra precios observados (nunca `ListPrice`); una alerta exige precio «antes» estable 24 h y 2 lecturas, confirmación en la ficha y que otra tienda no haya alertado el mismo EAN en 6 h.
+- Sin temas guardados todo va a *General* sin aviso; con temas, una alerta cuyo tema falta va a *General* y se avisa una vez al día que corra `/temas`.
+- Con la BD en ≥ 450 MB se pausan las búsquedas y el rastreo de Éxito y Carulla (misma marca `discovery_paused`).
 - Slickdeals: un solo task `feed` por ciclo para todas sus búsquedas, sin reserva de confirmación; el lead se lee en el SourceRun de la tienda (se crea si no tenía tareas) y se omite si el listing se leyó hace < 6 h.
 
 ## Pendientes y gotchas
@@ -33,4 +40,8 @@
 - Fechas del calendario de eventos 2026-2027 estimadas: David debe confirmarlas (Hot Sale y Cyber Lunes de Colombia, sobre todo).
 - Falta: `setup-bot`, `pg_terminate_backend` tras 3 `skipped_locked`, descarte G10 contra `R_listing`, mensaje agrupado de tormenta y `config/supabase-ca.crt` para `sslmode=verify-full`.
 - Una alerta de un ciclo que murió antes de componer sale con vista reducida (sin línea de histórico).
+- VTEX `products/search` con varios `fq=skuId:` devuelve solo 10 productos sin `_from`/`_to` (medido 2026-10-17): los lotes de más de 10 piden el rango. Afectaba también a los seguimientos de la v1.
+- Pendientes menores de la revisión del rastreo: reloj fijo en toda la corrida, `min_seen` sin ventana de 90 d, tope diario por día UTC, orden del barrido VTEX, fotos sin mirar el plazo, C07 sin unir tiendas, desalojo de automáticos por antigüedad, `crawl` sin verificar `SCHEMA_VERSION`, código 3 compartido, borrado del catálogo tras 30 d sin rastreo.
+- `*.vtexassets.com` (fotos VTEX) está bloqueado por el proxy de la sesión en la nube, no desde Actions. Las fixtures de las API de Best Buy y Walmart son sintéticas (`"nota"`).
+- Un producto que ya se sigue (manual o automático) y reaparece en Slickdeals con lectura de hace < 6 h no da `COMMUNITY_DEAL` (regla de la v1).
 - ruff 0.17 formatea Markdown: `docs/` está excluido. La imagen `postgres:17` del CI no tiene digest fijado.

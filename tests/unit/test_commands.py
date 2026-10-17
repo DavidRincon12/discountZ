@@ -15,6 +15,7 @@ from discountz.domain.commands import (
     Status,
     Target,
     TokenExpiry,
+    Topics,
     parse_command,
 )
 
@@ -26,15 +27,18 @@ def test_follow_one_url_with_target_and_category() -> None:
     assert cmd == Follow((URL,), "120", "componentes")
 
 
-def test_follow_five_urls_one_per_line() -> None:
-    urls = [f"https://www.exito.com/p{i}/p" for i in range(5)]
-    cmd = parse_command("/seguir\n" + "\n".join(urls))
-    assert cmd == Follow(tuple(urls), None, None)
+def test_follow_accepts_20_urls_rejects_21() -> None:
+    urls = [f"https://www.exito.com/p{i}/p" for i in range(21)]
+    cmd = parse_command("/seguir\n" + "\n".join(urls[:20]))
+    assert cmd == Follow(tuple(urls[:20]), None, None)
+    assert isinstance(parse_command("/seguir\n" + "\n".join(urls)), CommandRejected)
 
 
-def test_follow_six_urls_is_rejected() -> None:
-    urls = " ".join(f"https://www.exito.com/p{i}/p" for i in range(6))
-    assert isinstance(parse_command(f"/seguir {urls}"), CommandRejected)
+def test_temas_and_drop_auto() -> None:
+    assert parse_command("/temas") == Topics()
+    assert isinstance(parse_command("/temas ya"), CommandRejected)
+    assert parse_command("/dejar a12") == Drop("a12")
+    assert parse_command("/dejar auto") == Drop("auto")
 
 
 def test_follow_without_url_is_rejected() -> None:

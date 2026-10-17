@@ -13,14 +13,14 @@ from datetime import date
 
 CATEGORIES = frozenset({"tecnologia", "componentes", "hogar", "ropa", "otros"})
 DEFAULT_CATEGORY = "otros"
-MAX_URLS = 5
+MAX_URLS = 20
 MAX_EXCLUDES = 20
 MUTE_DAYS = range(1, 91)
 
 PRICE_HELP = "Formato de precio no válido. Ejemplos: 250.000 (COP) o 99,99 (USD)."
 _PRICE_SHAPE = re.compile(r"^(?:US)?\$?\d[\d.,]*$")
 _SOURCE_RE = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
-_WATCH_OR_SEARCH = re.compile(r"^[pb]\d{1,9}$")
+_DROP_REF = re.compile(r"^(?:[pab]\d{1,9}|auto)$")
 _WATCH_OR_LISTING = re.compile(r"^(?:p|L)\d{1,12}$")
 _COMMAND_RE = re.compile(r"^/([a-z_]+)(?:@[A-Za-z0-9_]+)?$")
 
@@ -92,6 +92,11 @@ class Help:
 
 
 @dataclass(frozen=True, slots=True)
+class Topics:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
 class CommandRejected:
     reason: str  # texto para David, en español
 
@@ -108,6 +113,7 @@ Command = (
     | TokenExpiry
     | Status
     | Help
+    | Topics
 )
 
 
@@ -204,8 +210,8 @@ def _list(args: list[str]) -> Command | CommandRejected:
 
 
 def _drop(args: list[str]) -> Command | CommandRejected:
-    if len(args) != 1 or not _WATCH_OR_SEARCH.fullmatch(args[0]):
-        return CommandRejected("Uso: /dejar <p12|b3>")
+    if len(args) != 1 or not _DROP_REF.fullmatch(args[0]):
+        return CommandRejected("Uso: /dejar <p12|a12|b3|auto>")
     return Drop(args[0])
 
 
@@ -273,4 +279,5 @@ _PARSERS: dict[str, _Parser] = {
     "token_vence": _token,
     "estado": _no_args(Status()),
     "ayuda": _no_args(Help()),
+    "temas": _no_args(Topics()),
 }

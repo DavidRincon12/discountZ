@@ -13,23 +13,27 @@ import sys
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, cast
 
 import psycopg
 
+from discountz.app.crawl import CrawlDeps, run_crawl
 from discountz.app.cycle import CycleDeps, run_cycle
-from discountz.config import Settings, load_canaries, load_params, load_settings
+from discountz.config import Settings, load_canaries, load_params, load_settings, load_topics
 from discountz.domain.errors import ConfigError, LeaseBusy
+from discountz.infra.credentials import EnvCredentials
 from discountz.infra.db import connect
 from discountz.infra.healthchecks import Healthchecks
 from discountz.infra.http import CurlClient, HttpClient, HttpxClient
 from discountz.infra.log import configure_logging, event, install_excepthook
 from discountz.infra.migrate import MigrationError, migrate_with_lease
 from discountz.infra.telegram import TelegramClient
+from discountz.sources.base import Capability, CrawlSource
 from discountz.sources.fixtures import FIXTURES_DIR, save_fixture
 from discountz.sources.registry import load_all
 
 EXIT_OK, EXIT_BUG, EXIT_CONFIG, EXIT_DB = 0, 1, 2, 3
+EXIT_BLOCKED = 3  # rastreo bloqueado: rojo en Actions, sin reintentos
 _DURATION_RE = re.compile(r"^(\d+)([smh])$")
 _UNITS = {"s": 1, "m": 60, "h": 3600}
 
@@ -57,6 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
     mig = sub.add_parser("migrate", help="Aplica o revierte migraciones de la base de datos.")
     mig.add_argument("--to", type=_target, required=True, help="Versión destino o 'head'.")
     mig.add_argument("--wait-lease", type=parse_duration, default=0, help="Espera máxima.")
+    crawl = sub.add_parser("crawl", help="Rastrea el catálogo de una tienda (spec del rastreo).")
+    crawl.add_argument("--source", required=True, help="Código de la tienda (p. ej. exito).")
+    crawl.add_argument("--minutes", type=int, default=45, help="Minutos máximos de la corrida.")
     sub.add_parser("check-config", help="Valida la configuración y las variables de entorno.")
     rec = sub.add_parser("record-fixture", help="Graba una respuesta real como fixture (local).")
     rec.add_argument("source", help="Código de la fuente (p. ej. exito).")
@@ -167,6 +174,7 @@ def _cmd_run() -> int:
         for code, s in sources.items()
     }
     api = HttpxClient("telegram")
+    pics = HttpxClient("fotos")
     health = Healthchecks(settings.healthchecks_url, api)
     holder = (
         f"gh:{settings.gh_run_id}:{settings.gh_run_attempt or 1}"
@@ -196,6 +204,8 @@ def _cmd_run() -> int:
                     sleep=time.sleep,
                     rnd=rnd,
                     healthchecks=health,
+                    credentials=EnvCredentials(settings),
+                    photos=pics,
                 ),
                 now,
             )
@@ -207,7 +217,69 @@ def _cmd_run() -> int:
         for client in clients.values():
             client.close()
         api.close()
+        pics.close()
     return result.exit_code
+
+
+def _cmd_crawl(args: argparse.Namespace) -> int:
+    configure_logging()
+    install_excepthook()
+    now = datetime.now(UTC)
+    try:
+        settings = load_settings()
+        params = load_params()
+        topics = load_topics()
+    except ConfigError as exc:
+        print(f"crawl: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    source = load_all().get(args.source)
+    budget = params.crawl.get(args.source)
+    if source is None or budget is None or Capability.CATALOG not in source.descriptor.capabilities:
+        print(f"crawl: {args.source} no tiene rastreo de catálogo", file=sys.stderr)
+        return EXIT_CONFIG
+    if args.source == "bestbuy_us" and settings.bestbuy_api_key is None:
+        print(f"crawl: {args.source} sin clave de API; se omite")
+        return EXIT_OK
+    rnd = random.Random()
+    client: HttpxClient | CurlClient = (
+        CurlClient(args.source) if source.descriptor.client == "curl" else HttpxClient(args.source)
+    )
+    try:
+        conn = _connect_with_retry(settings, rnd)
+    except psycopg.OperationalError:
+        event(logging.getLogger("discountz"), "db_unavailable", logging.ERROR)
+        client.close()
+        return EXIT_DB
+    holder = (
+        f"gh:{settings.gh_run_id}:{settings.gh_run_attempt or 1}"
+        if settings.gh_run_id is not None
+        else f"local:{socket.gethostname()[:60]}"
+    )
+    try:
+        with conn:
+            result = run_crawl(
+                CrawlDeps(
+                    conn=conn,
+                    source=cast(CrawlSource, source),  # CATALOG ⇒ implementa CatalogSource
+                    http=client,
+                    credentials=EnvCredentials(settings),
+                    topics=topics,
+                    params=params,
+                    budget=budget,
+                    holder=holder,
+                    monotonic=time.monotonic,
+                    sleep=time.sleep,
+                    rnd=rnd,
+                ),
+                now,
+                args.minutes,
+            )
+    except psycopg.OperationalError:
+        event(logging.getLogger("discountz"), "db_unavailable", logging.ERROR)
+        return EXIT_DB
+    finally:
+        client.close()
+    return EXIT_BLOCKED if result.status == "blocked" else EXIT_OK
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -216,6 +288,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_migrate(args)
     if args.command == "run":
         return _cmd_run()
+    if args.command == "crawl":
+        return _cmd_crawl(args)
     if args.command == "check-config":
         return _cmd_check_config()
     if args.command == "record-fixture":

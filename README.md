@@ -1,6 +1,6 @@
 # discountZ
 
-Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram.
+Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las cuatro tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
 
 Corre en GitHub Actions con una base de datos Supabase Postgres gratuita: costo operativo $0.
 
@@ -93,9 +93,32 @@ El workflow `keepalive` reactiva cada lunes los workflows programados para que G
 
 En Telegram: `/seguir https://www.exito.com/<producto>/p`. El bot responde en el siguiente ciclo (10-40 min). `/ayuda` lista todos los comandos.
 
+### 9. Rastreo del catálogo y grupo con temas
+
+Se hace después de fusionar el PR del rastreo. Las alertas pasan del chat privado a un grupo con un tema por categoría.
+
+1. **Migración `0002`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala. Mientras no corra, el ciclo se salta con aviso (la versión del esquema no coincide).
+2. **Permitir grupos al bot.** En [@BotFather](https://t.me/BotFather): `/setjoingroups`, elige el bot y luego *Enable*. Al terminar el paso 3 puedes volver a ponerlo en *Disable*.
+3. **Crear el grupo.** En Telegram: *Nuevo grupo*, agrega solo a tu bot, ponle nombre (por ejemplo «discountZ») y créalo. En la información del grupo, *Editar → Temas* y actívalos. Luego *Administradores → Agregar administrador*, elige el bot y deja activado **Gestionar temas** (los demás permisos pueden ir apagados).
+4. **Id del grupo.** Abre [Telegram Web](https://web.telegram.org/a/), entra al grupo y copia el número de la barra de direcciones después de `#` (empieza por `-100`). Ese es el nuevo **chat_id**.
+5. **Secretos.** En *Settings → Secrets and variables → Actions*:
+   - Cambia `TELEGRAM_CHAT_ID` por el id del grupo (`-100…`). `TELEGRAM_OWNER_ID` no cambia: solo tú puedes dar comandos, ahora desde el grupo.
+   - Crea `BESTBUY_API_KEY` con tu clave de [developer.bestbuy.com](https://developer.bestbuy.com/) (*Get API Key*, gratis).
+   - Cuando Walmart apruebe tu acceso a la API de afiliados ([walmart.io](https://walmart.io/)): crea `WALMART_CONSUMER_ID`, `WALMART_KEY_VERSION`, `WALMART_PRIVATE_KEY` (el PEM completo) y `WALMART_PUBLISHER_ID`. Van los cuatro o ninguno.
+6. **Temas.** En el grupo escribe `/temas`. En el ciclo siguiente el bot crea los 14 temas y responde en *General* con la lista. Es idempotente: si borras un tema, vuelve a escribir `/temas`.
+7. **Best Buy.** En el grupo: `/fuente on bestbuy_us`.
+8. **Encender el rastreo.** En *Settings → Secrets and variables → Actions → Variables* crea **`DISCOUNTZ_RASTREO`** con valor `true` y lanza *Actions → crawl → Run workflow* una vez.
+9. **Disparo horario.** En cron-job.org crea un segundo trabajo **cada hora**, igual al del paso 7 pero con la URL
+   `POST https://api.github.com/repos/DavidRincon12/discountZ/actions/workflows/crawl.yml/dispatches`
+   (mismo token, cuerpo y cabeceras). El `schedule` del workflow (cada 3 h) es el respaldo.
+
+Las primeras vueltas solo aprenden precios: un producto necesita su precio estable de al menos 24 h antes de que una bajada cuente, así que las tarjetas empiezan a llegar después del primer día. El resumen diario de las 08:00 suma una línea con los productos por tienda, la duración de la última vuelta, los cambios del día y las alertas por tema.
+
 ### Si algo falla
 
 - Sin resumen diario de las 08:00: revisa *Actions → cycle* (workflows desactivados, secreto caducado o Supabase pausado).
+- Una alerta llegó a *General* con el aviso «falta su tema»: escribe `/temas` en el grupo.
+- Un job de *Actions → crawl* en rojo con código 3: la tienda bloqueó el rastreo y su circuit breaker la pausa sola; `/estado` muestra cuándo reintenta.
 - Para rotar un secreto: BotFather `/revoke`, `ALTER ROLE … PASSWORD` o regenerar el check de healthchecks, y actualiza el secreto en GitHub.
 - Logs y artefactos de Actions se guardan 7 días y nunca contienen URLs, títulos, precios ni secretos.
 
@@ -128,3 +151,4 @@ DISCOUNTZ_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgr
 - Arquitectura: `docs/architecture.md`
 - Decisiones: `docs/decisions/`
 - Diseño de la v1: `docs/superpowers/specs/2026-10-13-discountz-v1-design.md`
+- Diseño del rastreo de catálogo: `docs/superpowers/specs/2026-10-14-rastreo-catalogo-design.md`

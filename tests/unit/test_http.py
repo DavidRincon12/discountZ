@@ -187,3 +187,11 @@ def test_httpx_client_enforces_total_time_per_request() -> None:
     with pytest.raises(Unavailable) as exc:
         client.request("GET", URL)
     assert exc.value.code == "deadline"
+
+
+def test_paced_client_passes_files() -> None:
+    fake = FakeHttp({"https://x.test/up": HttpResponse(200, "https://x.test/up", {}, b"ok", 1)})
+    client = paced(fake, Clock())
+    files = {"f": ("n.png", b"P", "image/png")}
+    client.request("POST", "https://x.test/up", data={"a": "1"}, files=files)
+    assert fake.uploads == [({"a": "1"}, {"f": ("n.png", b"P", "image/png")})]

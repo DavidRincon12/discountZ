@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 import psycopg
 
 from discountz.app.render import esc, render_health, render_list, source_name
+from discountz.config import load_topics
 from discountz.domain import commands as c
 from discountz.domain.errors import ParseError, TelegramError, UnsafeUrl
 from discountz.domain.model import ListingRef
@@ -39,12 +40,16 @@ _FOL_CB = re.compile(r"^fol:L(\d{1,12})$")
 
 HELP = (
     "<b>Comandos</b> (respondo en el siguiente ciclo, 10-40 min)\n"
-    "/seguir &lt;url…&gt; [objetivo] [#cat]: hasta 5 URLs\n"
+    "/seguir &lt;url…&gt; [objetivo] [#cat]: hasta 20 URLs, una por línea\n"
     "/buscar &lt;fuente&gt; &lt;consulta&gt; [-excluir] [min:p] [max:p] [#cat]\n"
-    "/lista [#cat|fuente] · /dejar &lt;p12|b3&gt;\n"
+    "/lista [#cat|fuente] · /dejar &lt;p12|a12|b3|auto&gt;\n"
     "/objetivo &lt;p12&gt; &lt;precio|no&gt; · /categoria &lt;p12|L1234&gt; &lt;cat&gt;\n"
     "/silenciar &lt;p12|L1234|todo&gt; &lt;días&gt; · /fuente &lt;on|off&gt; &lt;codigo&gt;\n"
-    "/token_vence AAAA-MM-DD · /estado · /ayuda"
+    "/token_vence AAAA-MM-DD · /temas · /estado · /ayuda"
+)
+TOPICS_FAILED = (
+    "No pude crear los temas. Revisa que el grupo tenga los temas activados y que el bot sea"
+    " administrador con permiso para gestionar temas; luego escribe /temas otra vez."
 )
 _URL_REASONS = {
     "userinfo": "lleva usuario o contraseña",
@@ -79,7 +84,10 @@ def process_inbox(
             offset = max(offset, upd.update_id + 1)
             if not _is_owner(upd, owner_id, chat_id):
                 continue
-            _apply(conn, tg, upd, now, sources)
+            if _is_topics(upd):
+                _topics(conn, tg, upd, chat_id, now)
+            else:
+                _apply(conn, tg, upd, now, sources)
             processed += 1
     with conn.transaction():
         db.advance_offset(conn, offset - 1)  # ajenos al final del lote: un solo UPDATE
@@ -92,6 +100,42 @@ def _is_owner(upd: Update, owner_id: int, chat_id: int) -> bool:
     if upd.callback is not None:
         return upd.callback.from_id == owner_id and upd.callback.chat_id == chat_id
     return False
+
+
+def _is_topics(upd: Update) -> bool:
+    text = upd.message.text if upd.message is not None else None
+    return text is not None and isinstance(c.parse_command(text), c.Topics)
+
+
+def _topics(
+    conn: psycopg.Connection, tg: TelegramApi, upd: Update, chat_id: int, now: datetime
+) -> None:
+    """`/temas`: crea en el momento los temas que falten (HTTP fuera de toda transacción)."""
+    with conn.transaction():
+        if not db.advance_offset(conn, upd.update_id):
+            return
+    try:
+        text = _create_topics(conn, tg, chat_id)
+    except TelegramError as exc:
+        log.error("topics_failed error=%s", type(exc).__name__)
+        text = TOPICS_FAILED
+    with conn.transaction():
+        _reply(conn, upd.update_id, 0, text, _reply_to(upd), now)
+
+
+def _create_topics(conn: psycopg.Connection, tg: TelegramApi, chat_id: int) -> str:
+    existing = db.topic_threads(conn)
+    created = []
+    for code, params in load_topics().params.items():
+        if code in existing:
+            continue
+        thread_id = tg.create_forum_topic(chat_id, params.title)
+        with conn.transaction():  # uno a uno: si Telegram falla a la mitad, lo creado queda
+            db.save_topic(conn, code, params.title, thread_id)
+        created.append(params.title)
+    if not created:
+        return "Todos los temas ya existen."
+    return f"Creé {len(created)} temas: " + ", ".join(esc(t) for t in created) + "."
 
 
 def _apply(
@@ -176,6 +220,10 @@ def _handle_message(
             return [_search(conn, cmd, now, sources)]
         case c.ListCmd(filter=flt):
             return _list(conn, flt)
+        case c.Drop("auto"):
+            n = db.drop_auto_watches(conn)
+            noun = "seguimiento automático" if n == 1 else "seguimientos automáticos"
+            return [f"Listo: quité {n} {noun}."]
         case c.Drop(ref):
             ok = db.drop_ref(conn, ref)
             return [f"Listo: dejé {ref}." if ok else f"No encontré {ref}."]
@@ -203,6 +251,8 @@ def _handle_message(
             return [render_health(db.status_snapshot(conn, now), now).html]
         case c.Help():
             return [HELP]
+        case c.Topics():
+            return []  # lo atiende `_topics` antes de llegar aquí
     return []  # pragma: no cover - `match` exhaustivo
 
 
@@ -325,7 +375,9 @@ def _handle_callback(conn: psycopg.Connection, q: CallbackQuery, now: datetime) 
         return f"L{m.group(1)} silenciado {days} d." if ok else f"No encontré L{m.group(1)}."
     if m := _UNF_CB.fullmatch(data):
         ref = f"p{m.group(1)}"
-        return f"Listo: dejé de seguir {ref}." if db.drop_ref(conn, ref) else f"No encontré {ref}."
+        # El botón va en alertas de seguimientos manuales y automáticos.
+        ok = db.drop_ref(conn, ref) or db.drop_ref(conn, f"a{m.group(1)}")
+        return f"Listo: dejé de seguir {ref}." if ok else f"No encontré {ref}."
     if m := _FOL_CB.fullmatch(data):
         listing_id = int(m.group(1))
         source = db.listing_source(conn, listing_id)

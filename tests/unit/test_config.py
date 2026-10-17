@@ -54,6 +54,8 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
     assert p.budgets["amazon_us"].max_per_run == 12
     assert p.budgets["amazon_us"].max_per_24h == 400
     assert p.budgets["exito"].max_batch == 50
+    assert p.budgets["bestbuy_us"].max_batch == 100  # API: 100 SKU por consulta
+    assert p.budgets["bestbuy_us"].min_pause_s == 1
     assert p.quiet_start == time(23, 0)
     assert p.quiet_end == time(7, 0)
     names = {e.name for e in p.events}
@@ -148,3 +150,21 @@ def test_check_config_fails_with_exit_2(
         monkeypatch.delenv(k, raising=False)
     assert main(["check-config"]) == 2
     assert "database_url" in capsys.readouterr().err
+
+
+def test_crawl_budgets_match_spec() -> None:
+    c = load_params(PARAMS_PATH).crawl
+    assert set(c) == {"exito", "carulla", "olimpica", "panamericana", "bestbuy_us"}
+    assert (c["exito"].min_pause_s, c["exito"].jitter_s, c["exito"].max_per_24h) == (1, 1, 24_000)
+    assert (c["carulla"].min_pause_s, c["carulla"].max_per_24h) == (1, 12_000)
+    assert (c["olimpica"].min_pause_s, c["olimpica"].max_per_24h) == (2, 6_000)
+    assert (c["panamericana"].min_pause_s, c["panamericana"].max_per_24h) == (2, 6_000)
+    assert (c["bestbuy_us"].min_pause_s, c["bestbuy_us"].max_per_24h) == (0.25, 40_000)
+    assert all(b.hot_share_bp == 2500 for b in c.values())
+    assert all(b.max_per_run <= b.max_per_24h for b in c.values())
+
+
+def test_crawl_section_must_name_a_known_source(tmp_path: Path) -> None:
+    path = _bad_toml(tmp_path, "[crawl.exito]", "[crawl.desconocida]")
+    with pytest.raises(ConfigError):
+        load_params(path)

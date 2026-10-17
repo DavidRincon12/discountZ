@@ -1,5 +1,0 @@
-{
-  "note": "El HTML del servidor trae 18 productos sin precio (el precio llega después por GraphQL); el único «$49.99» es la membresía Plus.",
-  "product_cells": 18,
-  "offers": 0
-}

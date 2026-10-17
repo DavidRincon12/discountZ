@@ -1,0 +1,218 @@
+# Temas del grupo de Telegram y asignación de rutas de categoría (spec del rastreo §6). Sin secretos.
+# `category` es la categoría de la v1 que reciben los listings del tema (seguir, silenciar, umbrales).
+# Reglas: gana el prefijo más largo; a igual largo, la de la fuente antes que la comodín "*".
+# Las rutas se normalizan (minúsculas, sin tildes) antes de comparar.
+
+# Categorías de primer nivel que caen en «Otros» a propósito (servicios, donaciones, internas).
+intentional_otros = [
+  "exito:/servicios/", "exito:/instrumentos musicales/",
+  "carulla:/servicios/", "carulla:/escuela de cocina/", "carulla:/instrumentos musicales/",
+  "olimpica:/donaciones/", "olimpica:/otras categorias/",
+  "panamericana:/impuestos iva(no utilizar)/",
+]
+
+[topics.errores]
+title = "🔥 Errores de precio"
+category = "otros"
+
+[topics.tecnologia]
+title = "📱 Tecnología"
+t_bp = 1200
+g_bp = 5000
+category = "tecnologia"
+
+[topics.electro]
+title = "🔌 Electrodomésticos"
+t_bp = 1500
+g_bp = 5000
+category = "hogar"
+
+[topics.hogar]
+title = "🛋️ Hogar y muebles"
+t_bp = 2000
+g_bp = 6000
+category = "hogar"
+
+[topics.moda]
+title = "👕 Moda y calzado"
+t_bp = 3000
+g_bp = 7500
+category = "ropa"
+
+[topics.belleza]
+title = "💄 Belleza y cuidado"
+t_bp = 2500
+g_bp = 7000
+category = "otros"
+
+[topics.mercado]
+title = "🛒 Mercado"
+t_bp = 2500
+g_bp = 7000
+category = "otros"
+
+[topics.deportes]
+title = "⚽ Deportes"
+t_bp = 2000
+g_bp = 6000
+category = "otros"
+
+[topics.bebes]
+title = "🧸 Bebés y juguetes"
+t_bp = 2000
+g_bp = 6000
+category = "otros"
+
+[topics.ferreteria]
+title = "🔧 Ferretería y autos"
+t_bp = 2000
+g_bp = 6000
+category = "otros"
+
+[topics.mascotas]
+title = "🐶 Mascotas"
+t_bp = 2000
+g_bp = 6000
+category = "otros"
+
+[topics.libros]
+title = "📚 Libros y papelería"
+t_bp = 2000
+g_bp = 6000
+category = "otros"
+
+[topics.comunidad_us]
+title = "🇺🇸 Comunidad EE. UU."
+category = "otros"
+
+[topics.otros]
+title = "📦 Otros"
+t_bp = 2000
+g_bp = 6000
+category = "otros"
+
+# ───────────── Comodín: nombres que comparten varias tiendas
+[[rules]]
+prefixes = ["/tecnologia/", "/consolas y videojuegos/", "/electrodomesticos y tecnologia/"]
+topic = "tecnologia"
+
+[[rules]]
+prefixes = ["/electrodomesticos/"]
+topic = "electro"
+
+[[rules]]
+prefixes = [
+  "/hogar/", "/hogar y decoracion/", "/hogar y lenceria/", "/hogar cocina/", "/decoracion/",
+  "/muebles/", "/navidad/", "/celebracion/", "/eventos y temporadas/", "/eventos/", "/fiesta/",
+  "/jardin y aire libre/",
+]
+topic = "hogar"
+
+[[rules]]
+prefixes = ["/moda/", "/moda y accesorios/", "/marroquineria/", "/un mundo de regalos/"]
+topic = "moda"
+
+[[rules]]
+prefixes = [
+  "/cuidado personal/", "/belleza/", "/salud y belleza/", "/bienestar y belleza/", "/medicamentos/",
+  "/suministros medicos/", "/bioseguridad/",
+]
+topic = "belleza"
+
+[[rules]]
+prefixes = [
+  "/mercado/", "/supermercado/", "/vinos y licores/", "/bebidas, snacks y dulces/", "/delicatessen/",
+  "/despensa/", "/lacteos, huevos y refrigerados/", "/aseo del hogar/", "/pollo, carnes y pescado/",
+  "/congelados/", "/frutas y verduras/", "/comidas preparadas/", "/panaderia/", "/dulces y snacks/",
+  "/suministros para empresas/",
+]
+topic = "mercado"
+
+[[rules]]
+prefixes = ["/deportes/", "/deportes y fitness/", "/entrenamiento/", "/movilidad electrica/"]
+topic = "deportes"
+
+[[rules]]
+prefixes = ["/bebes/", "/mundo del bebe/", "/juguetes y juegos/", "/jugueteria/", "/juegos y juguetes/"]
+topic = "bebes"
+
+[[rules]]
+prefixes = ["/herramientas y ferreteria/", "/ferreteria/", "/vehiculos/", "/automotores/"]
+topic = "ferreteria"
+
+[[rules]]
+prefixes = ["/mascotas/", "/mercado/mascotas/"]
+topic = "mascotas"
+
+[[rules]]
+prefixes = [
+  "/libros/", "/papeleria/", "/papeleria y libros/", "/utiles y papeleria/", "/oficina/", "/escolar/",
+  "/arte y manualidades/", "/panamericana editorial/",
+]
+topic = "libros"
+
+# ───────────── Subcategorías que cambian de tema dentro de su tienda
+[[rules]]
+source = "olimpica"
+prefixes = ["/electrodomesticos y tecnologia/electro hogar/"]
+topic = "electro"
+
+[[rules]]
+source = "olimpica"
+prefixes = ["/supermercado/cuidado personal y belleza/"]
+topic = "belleza"
+
+[[rules]]
+source = "panamericana"
+prefixes = ["/hogar/electro/"]
+topic = "electro"
+
+[[rules]]
+source = "panamericana"
+prefixes = ["/hogar/mascotas/"]
+topic = "mascotas"
+
+[[rules]]
+source = "panamericana"
+prefixes = ["/hogar/ferreteria/"]
+topic = "ferreteria"
+
+[[rules]]
+source = "exito"
+prefixes = ["/electrodomesticos/electrodomesticos de cuidado personal/"]
+topic = "belleza"
+
+# Best Buy (API oficial): categorías de primer nivel en inglés. Se revisan con el árbol real.
+[[rules]]
+source = "bestbuy_us"
+prefixes = [
+  "/computers & tablets/", "/cell phones/", "/audio/", "/cameras, camcorders & drones/",
+  "/tv & home theater/", "/video games/", "/wearable technology/",
+  "/smart home, security & wi-fi/", "/car electronics & gps/",
+]
+topic = "tecnologia"
+
+[[rules]]
+source = "bestbuy_us"
+prefixes = ["/appliances/"]
+topic = "electro"
+
+[[rules]]
+source = "bestbuy_us"
+prefixes = ["/home, furniture & office/", "/outdoor living/"]
+topic = "hogar"
+
+[[rules]]
+source = "bestbuy_us"
+prefixes = ["/health, fitness & beauty/"]
+topic = "belleza"
+
+[[rules]]
+source = "bestbuy_us"
+prefixes = ["/toys, games & collectibles/"]
+topic = "bebes"
+
+[[rules]]
+source = "bestbuy_us"
+prefixes = ["/movies & music/", "/office supplies & ink/"]
+topic = "libros"

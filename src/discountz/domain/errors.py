@@ -117,6 +117,10 @@ class TelegramBadRequest(TelegramError):
     """400: p. ej. «can't parse entities» o «query is too old»."""
 
 
+class TelegramThreadNotFound(TelegramBadRequest):
+    """400 «message thread not found»: el tema del grupo no existe (correr `/temas`)."""
+
+
 class TelegramForbidden(TelegramError):
     """403: David bloqueó el bot."""
 

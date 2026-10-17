@@ -14,18 +14,29 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from discountz.domain.commands import CATEGORIES
 from discountz.domain.errors import ConfigError
 from discountz.domain.money import Currency
 from discountz.domain.params import CategoryParams, GlobalParams
-from discountz.domain.scheduling import Event, SourceBudget
+from discountz.domain.scheduling import CrawlBudget, Event, SourceBudget
+from discountz.domain.topics import TOPIC_CODES, TopicParams, TopicRule, normalize_path
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 PARAMS_PATH = CONFIG_DIR / "discountz.toml"
 CANARIES_PATH = CONFIG_DIR / "canaries.toml"
+TOPICS_PATH = CONFIG_DIR / "topics.toml"
 BOGOTA = timezone(timedelta(hours=-5), "COT")
 
 NonNeg = Annotated[int, Field(ge=0)]
@@ -47,6 +58,36 @@ class Settings(BaseSettings):
     gh_run_id: int | None = None
     gh_run_attempt: Annotated[int, Field(ge=1)] | None = None
     trigger: str = "local"
+    # Rastreo de EE. UU. (spec del rastreo §2.1 y §4.5): sin clave, la fuente queda apagada.
+    bestbuy_api_key: SecretStr | None = None
+    walmart_consumer_id: str | None = None
+    walmart_key_version: str | None = None
+    walmart_private_key: SecretStr | None = None
+    walmart_publisher_id: str | None = None
+
+    @field_validator(
+        "bestbuy_api_key",
+        "walmart_consumer_id",
+        "walmart_key_version",
+        "walmart_private_key",
+        "walmart_publisher_id",
+        mode="before",
+    )
+    @classmethod
+    def _blank_is_none(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @model_validator(mode="after")
+    def _walmart_all_or_none(self) -> Settings:
+        given = (
+            self.walmart_consumer_id,
+            self.walmart_key_version,
+            self.walmart_private_key,
+            self.walmart_publisher_id,
+        )
+        if any(v is not None for v in given) and not all(v is not None for v in given):
+            raise PydanticCustomError("walmart_incomplete", "faltan credenciales de Walmart")
+        return self
 
 
 def _describe(exc: ValidationError, prefix: str) -> str:
@@ -124,7 +165,8 @@ class _Source(_Strict):
     max_per_24h: Pos
     watch_interval_min: Pos
     search_interval_min: Pos
-    max_batch: Annotated[int, Field(ge=1, le=50)]
+    max_batch: Annotated[int, Field(ge=1, le=100)]
+    max_auto_watches: NonNeg = 0
 
 
 class _Event(_Strict):
@@ -141,12 +183,21 @@ class _Event(_Strict):
         return v
 
 
+class _Crawl(_Strict):
+    min_pause_s: Annotated[float, Field(ge=0)]
+    jitter_s: Annotated[float, Field(ge=0)]
+    max_per_run: Pos
+    max_per_24h: Pos
+    hot_share_bp: Annotated[int, Field(ge=0, le=10_000)] = 2500
+
+
 class _Params(_Strict):
     quiet_hours: _Quiet
     pricing: _Pricing
     categories: dict[str, _Category]
     sources: dict[str, _Source]
     events: list[_Event] = Field(default_factory=list)
+    crawl: dict[str, _Crawl] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +208,7 @@ class AppParams:
     events: Sequence[Event]
     quiet_start: time
     quiet_end: time
+    crawl: Mapping[str, CrawlBudget] = MappingProxyType({})
 
 
 def _days(n: int) -> timedelta:
@@ -184,6 +236,8 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
     for name, cat in raw.categories.items():
         if cat.t_floor_bp > cat.t_good_bp or cat.d_floor_bp > cat.d_low_bp:
             raise ConfigError(f"{path.name}:categories.{name}: piso mayor que el umbral")
+    if set(raw.crawl) - set(raw.sources):
+        raise ConfigError(f"{path.name}:crawl: fuente desconocida")
     for e in raw.events:
         unknown = set(e.sources) - set(raw.sources)
         if unknown:
@@ -241,6 +295,7 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
             watch_interval=timedelta(minutes=s.watch_interval_min),
             search_interval=timedelta(minutes=s.search_interval_min),
             max_batch=s.max_batch,
+            max_auto_watches=s.max_auto_watches,
         )
         for code, s in raw.sources.items()
     }
@@ -260,6 +315,14 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
         events=tuple(events),
         quiet_start=raw.quiet_hours.start,
         quiet_end=raw.quiet_hours.end,
+        crawl=MappingProxyType(
+            {
+                code: CrawlBudget(
+                    c.min_pause_s, c.jitter_s, c.max_per_run, c.max_per_24h, c.hot_share_bp
+                )
+                for code, c in raw.crawl.items()
+            }
+        ),
     )
 
 
@@ -304,3 +367,68 @@ def load_canaries(path: Path = CANARIES_PATH) -> Mapping[str, list[Canary]]:
                 Canary(source, c.external_id, c.title, c.min_minor, c.max_minor)
             )
     return MappingProxyType(out)
+
+
+# ───────────── Temas (config/topics.toml)
+
+
+class _Topic(_Strict):
+    title: Annotated[str, Field(min_length=1, max_length=60)]
+    t_bp: Bp | None = None
+    g_bp: Bp | None = None
+    category: str
+
+
+class _Rule(_Strict):
+    source: Annotated[str, Field(pattern=r"^(\*|[a-z][a-z0-9_]{1,31})$")] = "*"
+    prefixes: Annotated[list[Annotated[str, Field(min_length=2)]], Field(min_length=1)]
+    topic: str
+
+
+class _Topics(_Strict):
+    topics: dict[str, _Topic]
+    intentional_otros: list[str] = Field(default_factory=list)
+    rules: list[_Rule]
+
+
+@dataclass(frozen=True, slots=True)
+class Topics:
+    params: Mapping[str, TopicParams]  # en el orden de TOPIC_CODES
+    rules: tuple[TopicRule, ...]
+    intentional_otros: frozenset[str]  # «fuente:/ruta/» normalizada
+
+
+def load_topics(path: Path = TOPICS_PATH) -> Topics:
+    try:
+        raw = _Topics.model_validate(_read_toml(path))
+    except ValidationError as exc:
+        raise ConfigError(_describe(exc, f"{path.name}:")) from None
+    if set(raw.topics) != set(TOPIC_CODES):
+        raise ConfigError(f"{path.name}: los temas deben ser {', '.join(TOPIC_CODES)}")
+    for code, t in raw.topics.items():
+        if t.category not in CATEGORIES:
+            raise ConfigError(f"{path.name}:topics.{code}: categoría desconocida")
+        if (t.t_bp is None) != (t.g_bp is None):
+            raise ConfigError(f"{path.name}:topics.{code}: t_bp y g_bp van juntos")
+    rules: list[TopicRule] = []
+    for i, r in enumerate(raw.rules):
+        if r.topic not in raw.topics:
+            raise ConfigError(f"{path.name}:rules.{i}: tema desconocido")
+        rules.extend(TopicRule(r.source, normalize_path(p), r.topic) for p in r.prefixes)
+    otros = set()
+    for item in raw.intentional_otros:
+        source, sep, route = item.partition(":")
+        if not sep:
+            raise ConfigError(f"{path.name}:intentional_otros: formato «fuente:/ruta/»")
+        otros.add(f"{source}:{normalize_path(route)}")
+    params = {
+        code: TopicParams(
+            code,
+            raw.topics[code].title,
+            raw.topics[code].t_bp,
+            raw.topics[code].g_bp,
+            raw.topics[code].category,
+        )
+        for code in TOPIC_CODES
+    }
+    return Topics(MappingProxyType(params), tuple(rules), frozenset(otros))

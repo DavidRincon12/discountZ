@@ -41,6 +41,7 @@ BROWSER_HEADERS: Mapping[str, str] = {
 Method = Literal["GET", "POST"]
 # Una secuencia de pares permite repetir claves (VTEX: `fq=skuId:A&fq=skuId:B`).
 Params = Mapping[str, str] | Sequence[tuple[str, str]]
+Files = Mapping[str, tuple[str, bytes, str]]  # campo → (nombre, contenido, tipo MIME)
 
 
 class BlockKind(StrEnum):
@@ -75,6 +76,8 @@ class HttpClient(Protocol):
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> HttpResponse: ...
 
 
@@ -115,6 +118,8 @@ class HttpxClient:
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> HttpResponse:
         start = self._monotonic()
         deadline = start + TIMEOUT_S
@@ -124,6 +129,8 @@ class HttpxClient:
                 url,
                 params=_pairs(params) if params else None,
                 json=dict(json) if json is not None else None,
+                data=dict(data) if data is not None else None,
+                files=dict(files) if files is not None else None,
                 headers=dict(headers) if headers else None,
                 cookies=dict(cookies) if cookies else None,
             ) as resp:
@@ -168,13 +175,18 @@ class CurlClient:
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> HttpResponse:
+        if files is not None:
+            raise ValueError("CurlClient no sube archivos")
         try:
             resp: Any = self._session.request(
                 method,
                 url,
                 params=_pairs(params) if params else None,
                 json=dict(json) if json is not None else None,
+                data=dict(data) if data is not None else None,
                 headers=dict(headers) if headers else None,
                 cookies=dict(cookies) if cookies else None,
                 allow_redirects=False,
@@ -243,13 +255,15 @@ class PacedClient:
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> HttpResponse:
         if self.blocked is not None:
             raise HardBlock(self._source, f"stopped_{self.blocked.value}")
         attempts = 1 if method == "POST" else 1 + MAX_RETRIES
         last_status: int | None = None
         for attempt in range(1, attempts + 1):
-            resp = self._attempt(method, url, params, json, headers, cookies)
+            resp = self._attempt(method, url, params, json, headers, cookies, data, files)
             if resp is None:
                 last_status = None
             else:
@@ -282,6 +296,8 @@ class PacedClient:
         json: Mapping[str, object] | None,
         headers: Mapping[str, str] | None,
         cookies: Mapping[str, str] | None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> HttpResponse | None:
         if self.used >= self._budget.max_per_run:
             raise BudgetExhausted(self._source, "budget")
@@ -289,7 +305,14 @@ class PacedClient:
         self.used += 1
         try:
             return self._inner.request(
-                method, url, params=params, json=json, headers=headers, cookies=cookies
+                method,
+                url,
+                params=params,
+                json=json,
+                headers=headers,
+                cookies=cookies,
+                data=data,
+                files=files,
             )
         except Unavailable:
             return None
@@ -327,6 +350,7 @@ class FakeHttp:
 
     routes: Mapping[str, HttpResponse | Sequence[HttpResponse]]
     calls: list[tuple[str, str, Mapping[str, object] | None]] = field(default_factory=list)
+    uploads: list[tuple[Mapping[str, str] | None, Files | None]] = field(default_factory=list)
     _cursor: dict[str, int] = field(default_factory=dict)
 
     def request(
@@ -338,9 +362,13 @@ class FakeHttp:
         json: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> HttpResponse:
         full = _full_url(url, params)
         self.calls.append((method, full, json))
+        if data is not None or files is not None:
+            self.uploads.append((data, files))
         route = self.routes.get(full)
         if route is None:
             raise AssertionError(f"URL sin fixture: {method} {full}")

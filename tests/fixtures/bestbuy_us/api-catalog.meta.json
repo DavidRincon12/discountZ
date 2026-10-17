@@ -1,0 +1,6 @@
+{
+  "status": 200,
+  "url": "https://api.bestbuy.com/v1/products",
+  "recorded_at": "2026-10-16",
+  "nota": "Sintética, armada desde la documentación de la API de Best Buy (developer.bestbuy.com) hasta grabar la real con la clave de David."
+}

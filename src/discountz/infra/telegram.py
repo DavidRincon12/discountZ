@@ -20,8 +20,9 @@ from discountz.domain.errors import (
     TelegramError,
     TelegramForbidden,
     TelegramRetryAfter,
+    TelegramThreadNotFound,
 )
-from discountz.infra.http import HttpClient
+from discountz.infra.http import Files, HttpClient
 
 API_BASE = "https://api.telegram.org"
 ALLOWED_UPDATES = ("message", "callback_query")
@@ -60,6 +61,7 @@ class TelegramApi(Protocol):
 
     def get_updates(self, offset: int, timeout_s: int = 0) -> list[Update]: ...
     def answer_callback(self, callback_id: str, text: str | None = None) -> None: ...
+    def create_forum_topic(self, chat_id: int, name: str) -> int: ...
 
 
 # ───────────── Validación en el borde (pydantic ignora los campos que no usamos)
@@ -154,9 +156,12 @@ class TelegramClient:
         silent: bool,
         reply_to_message_id: int | None = None,
         parse_mode: str | None = "HTML",
+        thread_id: int | None = None,
     ) -> int:
         """Envía y devuelve el `message_id`. `parse_mode=None` manda texto plano."""
         payload: dict[str, object] = {"chat_id": chat_id, "text": html}
+        if thread_id is not None:
+            payload["message_thread_id"] = thread_id
         if parse_mode is not None:
             payload["parse_mode"] = parse_mode
         payload["link_preview_options"] = _NO_PREVIEW
@@ -173,6 +178,43 @@ class TelegramClient:
         if not isinstance(message_id, int):
             raise TelegramError("bad_response")
         return message_id
+
+    def send_photo(
+        self,
+        chat_id: int,
+        png: bytes,
+        caption_html: str,
+        reply_markup: Mapping[str, Any] | None,
+        *,
+        silent: bool,
+        thread_id: int | None,
+    ) -> int:
+        """Sube la tarjeta como `multipart/form-data` y devuelve el `message_id`."""
+        data = {
+            "chat_id": str(chat_id),
+            "caption": caption_html,
+            "parse_mode": "HTML",
+            "disable_notification": "true" if silent else "false",
+        }
+        if thread_id is not None:
+            data["message_thread_id"] = str(thread_id)
+        if reply_markup is not None:
+            data["reply_markup"] = json.dumps(dict(reply_markup), ensure_ascii=False)
+        result = self._post(
+            "sendPhoto", data=data, files={"photo": ("alerta.png", png, "image/png")}
+        )
+        message_id = result.get("message_id") if isinstance(result, dict) else None
+        if not isinstance(message_id, int):
+            raise TelegramError("bad_response")
+        return message_id
+
+    def create_forum_topic(self, chat_id: int, name: str) -> int:
+        """Crea un tema del supergrupo y devuelve su `message_thread_id`."""
+        result = self._call("createForumTopic", {"chat_id": chat_id, "name": name})
+        thread_id = result.get("message_thread_id") if isinstance(result, dict) else None
+        if not isinstance(thread_id, int):
+            raise TelegramError("bad_response")
+        return thread_id
 
     def edit_message(
         self, chat_id: int, message_id: int, html: str, reply_markup: Mapping[str, Any] | None
@@ -195,9 +237,19 @@ class TelegramClient:
         self._call("answerCallbackQuery", payload)
 
     def _call(self, method: str, payload: Mapping[str, object]) -> object:
+        return self._post(method, json_body=payload)
+
+    def _post(
+        self,
+        method: str,
+        *,
+        json_body: Mapping[str, object] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
+    ) -> object:
         url = f"{API_BASE}/bot{self._token.get_secret_value()}/{method}"
         try:
-            resp = self._http.request("POST", url, json=payload)
+            resp = self._http.request("POST", url, json=json_body, data=data, files=files)
         except SourceError as exc:
             raise TelegramError(exc.code) from None  # sin la URL: lleva el token
         try:
@@ -219,6 +271,9 @@ def _error(status: int, body: Mapping[str, object]) -> TelegramError:
         retry = params.get("retry_after") if isinstance(params, dict) else None
         return TelegramRetryAfter(retry if isinstance(retry, int) else 1)
     if code == 400:
+        description = body.get("description")
+        if isinstance(description, str) and "message thread not found" in description.lower():
+            return TelegramThreadNotFound("thread_not_found")
         return TelegramBadRequest("bad_request")
     if code == 403:
         return TelegramForbidden("forbidden")

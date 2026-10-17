@@ -37,6 +37,31 @@ class SourceBudget:
     watch_interval: timedelta
     search_interval: timedelta
     max_batch: int
+    max_auto_watches: int = 0  # tope de seguimientos automáticos (spec del rastreo §4.4)
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlBudget:
+    """Presupuesto del rastreo de catálogo de una fuente (spec del rastreo §2.3)."""
+
+    min_pause_s: float
+    jitter_s: float
+    max_per_run: int
+    max_per_24h: int
+    hot_share_bp: int = 2500  # parte de la corrida para la capa caliente
+
+    def paced(self, group: str, max_per_run: int) -> SourceBudget:
+        """El `SourceBudget` que usa `PacedClient` para esta corrida."""
+        return SourceBudget(
+            group=group,
+            min_pause_s=self.min_pause_s,
+            jitter_s=self.jitter_s,
+            max_per_run=max_per_run,
+            max_per_24h=self.max_per_24h,
+            watch_interval=timedelta(hours=6),
+            search_interval=timedelta(hours=12),
+            max_batch=1,
+        )
 
 
 @dataclass(frozen=True, slots=True)

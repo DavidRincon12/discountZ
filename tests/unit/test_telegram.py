@@ -13,6 +13,7 @@ from discountz.domain.errors import (
     TelegramError,
     TelegramForbidden,
     TelegramRetryAfter,
+    TelegramThreadNotFound,
     Unavailable,
 )
 from discountz.infra.http import FakeHttp, HttpResponse
@@ -166,3 +167,57 @@ def test_non_json_body_is_telegram_error() -> None:
 def test_repr_hides_token() -> None:
     tg, _ = client({})
     assert TOKEN not in repr(tg)
+
+
+PNG = b"\x89PNG\r\n\x1a\nfalso"
+
+
+def test_send_photo_multipart() -> None:
+    tg, http = client({f"{API}/sendPhoto": resp({"ok": True, "result": {"message_id": 77}})})
+    markup = {"inline_keyboard": [[{"text": "Seguir", "callback_data": "fol:L1"}]]}
+    mid = tg.send_photo(1, PNG, "<b>hola</b>", markup, silent=True, thread_id=5)
+    assert mid == 77
+    method, _, body = http.calls[0]
+    assert (method, body) == ("POST", None)
+    data, files = http.uploads[0]
+    assert files == {"photo": ("alerta.png", PNG, "image/png")}
+    assert data is not None
+    assert data["chat_id"] == "1"
+    assert data["caption"] == "<b>hola</b>"
+    assert data["parse_mode"] == "HTML"
+    assert data["message_thread_id"] == "5"
+    assert data["disable_notification"] == "true"
+    assert json.loads(data["reply_markup"]) == markup
+
+
+def test_send_photo_without_thread_or_markup() -> None:
+    tg, http = client({f"{API}/sendPhoto": resp({"ok": True, "result": {"message_id": 1}})})
+    tg.send_photo(1, PNG, "x", None, silent=False, thread_id=None)
+    data, _ = http.uploads[0]
+    assert data is not None
+    assert "message_thread_id" not in data
+    assert "reply_markup" not in data
+
+
+def test_send_message_with_thread() -> None:
+    tg, http = client({f"{API}/sendMessage": resp({"ok": True, "result": {"message_id": 3}})})
+    tg.send_message(1, "hola", None, silent=False, thread_id=9)
+    assert http.calls[0][2]["message_thread_id"] == 9  # type: ignore[index]
+    tg.send_message(1, "hola", None, silent=False)
+    assert "message_thread_id" not in http.calls[1][2]  # type: ignore[operator]
+
+
+def test_create_forum_topic_returns_thread_id() -> None:
+    result = {"message_thread_id": 321, "name": "📱 Tecnología", "icon_color": 7322096}
+    tg, http = client({f"{API}/createForumTopic": resp({"ok": True, "result": result})})
+    assert tg.create_forum_topic(-100, "📱 Tecnología") == 321
+    assert http.calls[0][2] == {"chat_id": -100, "name": "📱 Tecnología"}
+
+
+def test_thread_not_found_error() -> None:
+    body = {"ok": False, "error_code": 400, "description": "Bad Request: message thread not found"}
+    tg, _ = client({f"{API}/sendMessage": resp(body, 400)})
+    with pytest.raises(TelegramThreadNotFound) as info:
+        tg.send_message(1, "x", None, silent=False, thread_id=4)
+    assert isinstance(info.value, TelegramBadRequest)
+    assert "thread" in str(info.value)

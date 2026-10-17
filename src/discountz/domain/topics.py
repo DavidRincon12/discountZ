@@ -1,0 +1,79 @@
+"""Temas del grupo de Telegram y asignación de rutas de categoría (spec del rastreo §6).
+
+Puro: las reglas vienen de `config/topics.toml` y se aplican por prefijo de ruta normalizada.
+"""
+
+from __future__ import annotations
+
+import unicodedata
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from types import MappingProxyType
+
+TOPIC_CODES: tuple[str, ...] = (
+    "errores",
+    "tecnologia",
+    "electro",
+    "hogar",
+    "moda",
+    "belleza",
+    "mercado",
+    "deportes",
+    "bebes",
+    "ferreteria",
+    "mascotas",
+    "libros",
+    "comunidad_us",
+    "otros",
+)
+DEFAULT_TOPIC = "otros"
+ANY_SOURCE = "*"
+
+# Categorías de la v1 (seguimientos y búsquedas) → tema donde caen sus alertas (spec §5.1).
+CATEGORY_TOPIC: Mapping[str, str] = MappingProxyType(
+    {
+        "tecnologia": "tecnologia",
+        "componentes": "tecnologia",
+        "hogar": "hogar",
+        "ropa": "moda",
+        "otros": "otros",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TopicParams:
+    code: str
+    title: str
+    t_bp: int | None  # umbral de bajada normal; None = el tema no recibe CATALOG_DROP
+    g_bp: int | None  # umbral de posible error de precio
+    category: str  # categoría de la v1 que reciben los listings de este tema
+
+
+@dataclass(frozen=True, slots=True)
+class TopicRule:
+    source: str  # código de fuente o "*"
+    prefix: str  # ruta normalizada con `normalize_path`
+    topic: str
+
+
+def normalize_path(path: str) -> str:
+    """Minúsculas, sin tildes, espacios simples y con `/` al inicio y al final."""
+    decomposed = unicodedata.normalize("NFKD", path.strip().lower())
+    plain = "".join(c for c in decomposed if not unicodedata.combining(c))
+    parts = [" ".join(p.split()) for p in plain.split("/")]
+    inner = "/".join(p for p in parts if p)
+    return f"/{inner}/" if inner else "/"
+
+
+def assign_topic(rules: Sequence[TopicRule], source: str, category_path: str) -> str:
+    """Gana el prefijo más largo; a igual largo, la regla de la fuente antes que la comodín."""
+    path = normalize_path(category_path)
+    best: tuple[int, int, str] | None = None
+    for r in rules:
+        if r.source not in (source, ANY_SOURCE) or not path.startswith(r.prefix):
+            continue
+        key = (len(r.prefix), 1 if r.source == source else 0, r.topic)
+        if best is None or key[:2] > best[:2]:
+            best = key
+    return best[2] if best is not None else DEFAULT_TOPIC

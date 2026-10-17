@@ -7,7 +7,7 @@ Pensado para que Mercado Libre (OAuth), eBay, Reddit y las APIs tipo Algolia ent
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -15,6 +15,7 @@ from typing import Literal, Protocol
 
 from pydantic import SecretStr
 
+from discountz.domain.catalog import CatalogObservation
 from discountz.domain.errors import CredentialUnavailable, ParseError, SourceError
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec
 from discountz.domain.money import Currency
@@ -24,6 +25,10 @@ from discountz.infra.http import BlockKind, HttpClient, HttpResponse
 __all__ = [
     "BlockKind",
     "Capability",
+    "CardFacts",
+    "CatalogPage",
+    "CatalogSource",
+    "CrawlSource",
     "CredentialStore",
     "ExtractionPath",
     "ListingFailed",
@@ -54,6 +59,7 @@ class Capability(StrEnum):
     CONFIRM = "confirm"
     LEADS = "leads"
     RESOLVE = "resolve"
+    CATALOG = "catalog"
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,16 +73,26 @@ class SourceDescriptor:
     max_batch: int  # refs por petición en fetch_listings
     external_id_re: re.Pattern[str]
     auth: Literal["none", "api_key", "oauth_client", "oauth_refresh"] = "none"
+    image_hosts: frozenset[str] = frozenset()  # hosts permitidos para la foto de la tarjeta
+    supports_changed: bool = False  # la fuente puede listar «cambiados desde» (fetch_changed)
 
 
 class CredentialStore(Protocol):
     def bearer(self, provider: str) -> SecretStr: ...
+    def signed_headers(self, provider: str, now: datetime) -> Mapping[str, str]: ...
+    def public_id(self, provider: str) -> str: ...  # identificador no secreto (publisherId)
 
 
 class NoCredentials:
-    """v1: ninguna fuente usa credenciales."""
+    """Sin credenciales: toda fuente que las pida queda no disponible."""
 
     def bearer(self, provider: str) -> SecretStr:
+        raise CredentialUnavailable(provider, "no_credentials")
+
+    def signed_headers(self, provider: str, now: datetime) -> Mapping[str, str]:
+        raise CredentialUnavailable(provider, "no_credentials")
+
+    def public_id(self, provider: str) -> str:
         raise CredentialUnavailable(provider, "no_credentials")
 
 
@@ -131,3 +147,42 @@ class Source(Protocol):
     def confirm(self, ctx: SourceContext, offer: Offer) -> Offer | None: ...
     def fetch_leads(self, ctx: SourceContext) -> list[Lead]: ...
     def detect_block(self, resp: HttpResponse) -> BlockKind | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogPage:
+    """Una página del recorrido. `split` no vacío ⇒ la partición se reemplaza por esas."""
+
+    items: Sequence[CatalogObservation]
+    has_more: bool
+    split: Sequence[str] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CardFacts:
+    title: str
+    url: str
+    image_url: str | None
+
+
+class CatalogSource(Protocol):
+    descriptor: SourceDescriptor
+
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]: ...
+    def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage: ...
+    def fetch_changed(self, ctx: SourceContext, since: datetime, page: int) -> CatalogPage: ...
+    def fetch_catalog_items(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> Sequence[CatalogObservation]: ...
+    def fetch_card_facts(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> dict[str, CardFacts]: ...
+    def fetch_catalog_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        """Confirmación del rastreo: la ficha con la misma regla de vendedor del recorrido."""
+        ...
+
+
+class CrawlSource(Source, CatalogSource, Protocol):
+    """Fuente que se puede rastrear: ficha y búsqueda de la v1 más el catálogo."""

@@ -10,6 +10,7 @@ Mini-spikes del 2026-10-13 (desde la sesión de desarrollo):
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from discountz.domain.catalog import CatalogObservation
 from discountz.domain.errors import NotFound, ParseError, SourceError
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money, to_minor
@@ -25,6 +27,8 @@ from discountz.domain.urls import SafeUrl
 from discountz.infra.http import BlockKind, HttpResponse
 from discountz.sources.base import (
     Capability,
+    CardFacts,
+    CatalogPage,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -39,6 +43,14 @@ from discountz.sources.blocks import detect_block_common
 from discountz.sources.registry import register
 
 MAX_BATCH = 50
+DEFAULT_PAGE = 10  # productos que devuelve products/search sin `_from`/`_to`
+CATALOG_PAGE = 50
+CATALOG_CAP = 2_500  # VTEX no pagina más allá de _from=2500
+PRICE_MAX = 999_999_999  # techo de la primera banda de precio (COP)
+_ROOT_RE = re.compile(r"^C:(?:/\d{1,12})+/$")
+_BAND_RE = re.compile(r"^P:\[(\d{1,12}) TO (\d{1,12})\]$")
+_EAN_RE = re.compile(r"^\d{6,14}$")
+_AVAILABLE = ("fq", "isAvailablePerSalesChannel_1:1")
 SEARCH_PER_PRODUCT = 3
 _SKU_RE = re.compile(r"^\d{1,12}$")
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -83,6 +95,27 @@ class _Product(_Model):
     items: list[_Item]
 
 
+class _Image(_Model):
+    imageUrl: str
+
+
+class _CatalogItem(_Item):
+    ean: str | None = None
+    images: list[_Image] = []
+
+
+class _CatalogProduct(_Model):
+    productId: str
+    productName: str
+    linkText: str
+    categories: list[str] = []
+    items: list[_CatalogItem]
+
+
+class _CategoryNode(_Model):
+    id: int
+
+
 class _SimItem(_Model):
     id: str
     sellingPrice: Number | None = None
@@ -99,14 +132,20 @@ class VtexStore:
     code: str
     host: str
     api_base: str
+    account: str  # cuenta VTEX: subdominio de las imágenes
 
 
 STORES: dict[str, VtexStore] = {
-    "exito": VtexStore("exito", "www.exito.com", "https://www.exito.com/io/api"),
-    "carulla": VtexStore("carulla", "www.carulla.com", "https://www.carulla.com/io/api"),
-    "olimpica": VtexStore("olimpica", "www.olimpica.com", "https://www.olimpica.com/api"),
+    "exito": VtexStore("exito", "www.exito.com", "https://www.exito.com/io/api", "exitocol"),
+    "carulla": VtexStore("carulla", "www.carulla.com", "https://www.carulla.com/io/api", "carulla"),
+    "olimpica": VtexStore(
+        "olimpica", "www.olimpica.com", "https://www.olimpica.com/api", "olimpica"
+    ),
     "panamericana": VtexStore(
-        "panamericana", "www.panamericana.com.co", "https://www.panamericana.com.co/api"
+        "panamericana",
+        "www.panamericana.com.co",
+        "https://www.panamericana.com.co/api",
+        "panamericana",
     ),
 }
 
@@ -137,20 +176,37 @@ def _unit_key(item: _Item, title: str) -> str:
     return pack if key == "un|1" and pack else key
 
 
-def _seller(item: _Item) -> _Seller | None:
+def _seller(item: _Item, *, cheapest: bool = False) -> _Seller | None:
+    """El vendedor por defecto; con `cheapest`, el más barato con stock (regla del rastreo)."""
+    if cheapest:
+        stocked = [
+            (price.minor, s.sellerId != "1", s)
+            for s in item.sellers
+            if s.commertialOffer.AvailableQuantity > 0
+            and (price := _money(s.commertialOffer.Price)) is not None
+        ]
+        if stocked:
+            return min(stocked, key=lambda t: (t[0], t[1]))[2]
     default = [s for s in item.sellers if s.sellerDefault] or item.sellers
     return default[0] if default else None
 
 
-def _offer(product: _Product, item: _Item, store: VtexStore, observed_at: datetime) -> Offer | None:
-    seller = _seller(item)
+def _offer(
+    product: _Product,
+    item: _Item,
+    store: VtexStore,
+    observed_at: datetime,
+    *,
+    cheapest: bool = False,
+) -> Offer | None:
+    seller = _seller(item, cheapest=cheapest)
     if seller is None or not _SKU_RE.fullmatch(item.itemId):
         return None
     co = seller.commertialOffer
     price = _money(co.Price)
     list_price = _money(max(Decimal(co.ListPrice), Decimal(co.PriceWithoutDiscount)))
     title = " ".join((item.nameComplete or product.productName).split())
-    first_party = seller.sellerId == "1" and seller.sellerDefault
+    first_party = seller.sellerId == "1" and (seller.sellerDefault or cheapest)
     return Offer(
         ref=ListingRef(store.code, item.itemId),
         parent_external_id=product.productId if _SKU_RE.fullmatch(product.productId) else None,
@@ -167,7 +223,12 @@ def _offer(product: _Product, item: _Item, store: VtexStore, observed_at: dateti
 
 
 def parse_vtex_products(
-    body: bytes, store: VtexStore, observed_at: datetime, *, max_per_product: int | None = None
+    body: bytes,
+    store: VtexStore,
+    observed_at: datetime,
+    *,
+    max_per_product: int | None = None,
+    cheapest: bool = False,
 ) -> list[Offer]:
     """Un `Offer` por ítem (SKU). En búsquedas, `max_per_product` limita los ítems en stock."""
     data = _load(body)
@@ -181,7 +242,7 @@ def parse_vtex_products(
             raise _parse_error(exc) from None
         kept = 0
         for item in product.items:
-            offer = _offer(product, item, store, observed_at)
+            offer = _offer(product, item, store, observed_at, cheapest=cheapest)
             if offer is None:
                 continue
             if max_per_product is not None:
@@ -228,10 +289,19 @@ class VtexSource:
             hosts=frozenset({store.host}),
             client="httpx",
             capabilities=frozenset(
-                {Capability.DETAIL, Capability.SEARCH, Capability.CONFIRM, Capability.RESOLVE}
+                {
+                    Capability.DETAIL,
+                    Capability.SEARCH,
+                    Capability.CONFIRM,
+                    Capability.RESOLVE,
+                    Capability.CATALOG,
+                }
             ),
             max_batch=MAX_BATCH,
             external_id_re=_SKU_RE,
+            image_hosts=frozenset(
+                {f"{store.account}.vteximg.com.br", f"{store.account}.vtexassets.com"}
+            ),
         )
         # sku → vendedor por defecto visto en este proceso (la simulación lo necesita).
         self._sellers: dict[str, str] = {}
@@ -272,20 +342,30 @@ class VtexSource:
     def fetch_listings(
         self, ctx: SourceContext, refs: Sequence[ListingRef]
     ) -> list[ListingOutcome]:
+        return self._fetch_offers(ctx, refs, cheapest=False)
+
+    def fetch_catalog_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        """Confirmación del rastreo: la ficha con la misma regla de vendedor del recorrido."""
+        return self._fetch_offers(ctx, refs, cheapest=True)
+
+    def _fetch_offers(
+        self, ctx: SourceContext, refs: Sequence[ListingRef], *, cheapest: bool
+    ) -> list[ListingOutcome]:
         out: list[ListingOutcome] = []
         for i in range(0, len(refs), MAX_BATCH):
             batch = refs[i : i + MAX_BATCH]
-            params = [("fq", f"skuId:{r.external_id}") for r in batch]
             try:
                 resp = ctx.http.request(
                     "GET",
                     f"{self.store.api_base}/catalog_system/pub/products/search",
-                    params=params,
+                    params=_sku_params([r.external_id for r in batch]),
                     headers=_HEADERS,
                 )
                 found = {
                     o.ref.external_id: o
-                    for o in parse_vtex_products(resp.body, self.store, ctx.now)
+                    for o in parse_vtex_products(resp.body, self.store, ctx.now, cheapest=cheapest)
                 }
                 self._remember(resp.body)
             except (SourceError, ParseError) as exc:
@@ -336,8 +416,166 @@ class VtexSource:
     def fetch_leads(self, ctx: SourceContext) -> list[Lead]:
         return []
 
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]:
+        """Una partición por categoría raíz: juntas cubren todo el surtido disponible."""
+        resp = ctx.http.request(
+            "GET", f"{self.store.api_base}/catalog_system/pub/category/tree/1", headers=_HEADERS
+        )
+        data = _load(resp.body)
+        if not isinstance(data, list):
+            raise ParseError("not_a_list")
+        try:
+            nodes = [_CategoryNode.model_validate(raw) for raw in data]
+        except ValidationError as exc:
+            raise _parse_error(exc) from None
+        return [f"C:/{n.id}/" for n in nodes]
+
+    def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
+        root, band = _parse_partition(partition)
+        start = page * CATALOG_PAGE
+        params = [("fq", root)]
+        if band is not None:
+            params.append(("fq", f"P:[{band[0]} TO {band[1]}]"))
+        params += [_AVAILABLE, ("_from", str(start)), ("_to", str(start + CATALOG_PAGE - 1))]
+        resp = ctx.http.request(
+            "GET",
+            f"{self.store.api_base}/catalog_system/pub/products/search",
+            params=params,
+            headers=_HEADERS,
+        )
+        total = _resources_total(resp)
+        if page == 0 and total > CATALOG_CAP:
+            split = _split_band(band or (1, PRICE_MAX))
+            if split:
+                return CatalogPage((), has_more=False, split=[f"{root}|{b}" for b in split])
+        items = parse_vtex_catalog(resp.body)
+        return CatalogPage(items, has_more=start + CATALOG_PAGE < min(total, CATALOG_CAP))
+
+    def fetch_changed(self, ctx: SourceContext, since: datetime, page: int) -> CatalogPage:
+        raise NotImplementedError
+
+    def fetch_catalog_items(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> list[CatalogObservation]:
+        """Relectura por lote (capa caliente) con la misma regla del recorrido."""
+        ids = [i for i in external_ids if _SKU_RE.fullmatch(i)][:MAX_BATCH]
+        if not ids:
+            return []
+        resp = ctx.http.request(
+            "GET",
+            f"{self.store.api_base}/catalog_system/pub/products/search",
+            params=_sku_params(ids),
+            headers=_HEADERS,
+        )
+        return [o for o in parse_vtex_catalog(resp.body) if o.external_id in ids]
+
+    def fetch_card_facts(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> dict[str, CardFacts]:
+        ids = [i for i in external_ids if _SKU_RE.fullmatch(i)][:MAX_BATCH]
+        if not ids:
+            return {}
+        resp = ctx.http.request(
+            "GET",
+            f"{self.store.api_base}/catalog_system/pub/products/search",
+            params=_sku_params(ids),
+            headers=_HEADERS,
+        )
+        out: dict[str, CardFacts] = {}
+        for product in _catalog_products(resp.body):
+            for item in product.items:
+                if item.itemId not in ids:
+                    continue
+                title = " ".join((item.nameComplete or product.productName).split())
+                image = item.images[0].imageUrl if item.images else None
+                url = f"https://{self.store.host}/{product.linkText}/p"
+                out[item.itemId] = CardFacts(title, url, image)
+        return out
+
     def detect_block(self, resp: HttpResponse) -> BlockKind | None:
         return detect_block_common(resp)
+
+
+def _parse_partition(partition: str) -> tuple[str, tuple[int, int] | None]:
+    root, _, band = partition.partition("|")
+    if not _ROOT_RE.fullmatch(root):
+        raise ParseError("bad_partition")
+    if not band:
+        return root, None
+    m = _BAND_RE.fullmatch(band)
+    if m is None or int(m.group(1)) > int(m.group(2)):
+        raise ParseError("bad_partition")
+    return root, (int(m.group(1)), int(m.group(2)))
+
+
+def _split_band(band: tuple[int, int]) -> list[str]:
+    """Parte la banda en el punto medio geométrico; una banda de un solo precio no se parte."""
+    lo, hi = band
+    if lo >= hi:
+        return []
+    mid = min(max(math.isqrt(max(lo, 1) * hi), lo), hi - 1)
+    return [f"P:[{lo} TO {mid}]", f"P:[{mid + 1} TO {hi}]"]
+
+
+def _sku_params(ids: Sequence[str]) -> list[tuple[str, str]]:
+    """Un `fq=skuId:` por SKU. Sin rango, VTEX devuelve solo 10 productos (medido en Éxito el
+    2026-10-17): los lotes mayores piden `_from`/`_to`; los de hasta 10 quedan como en la v1."""
+    params = [("fq", f"skuId:{i}") for i in ids]
+    if len(ids) > DEFAULT_PAGE:
+        params += [("_from", "0"), ("_to", str(len(ids) - 1))]
+    return params
+
+
+def _resources_total(resp: HttpResponse) -> int:
+    """Total de la cabecera `resources`; sin ella no se sabe si hay más páginas."""
+    raw = next((v for k, v in resp.headers.items() if k.lower() == "resources"), None)
+    if raw is None:
+        raise ParseError("no_resources")
+    _, _, total = raw.rpartition("/")
+    if not total.isdigit():
+        raise ParseError("bad_resources")
+    return int(total)
+
+
+def _catalog_products(body: bytes) -> list[_CatalogProduct]:
+    data = _load(body)
+    if not isinstance(data, list):
+        raise ParseError("not_a_list")
+    try:
+        return [_CatalogProduct.model_validate(raw) for raw in data]
+    except ValidationError as exc:
+        raise _parse_error(exc) from None
+
+
+def parse_vtex_catalog(body: bytes) -> list[CatalogObservation]:
+    """Una observación por SKU con algún vendedor en stock: gana el más barato."""
+    out: list[CatalogObservation] = []
+    for product in _catalog_products(body):
+        path = max(product.categories, key=len, default="/")
+        for item in product.items:
+            if not _SKU_RE.fullmatch(item.itemId):
+                continue
+            offers = [
+                (price, s)
+                for s in item.sellers
+                if s.commertialOffer.AvailableQuantity > 0
+                and (price := _money(s.commertialOffer.Price)) is not None
+            ]
+            if not offers:
+                continue
+            price, seller = min(offers, key=lambda o: (o[0].minor, o[1].sellerId != "1"))
+            ean = item.ean if item.ean and _EAN_RE.fullmatch(item.ean) else None
+            first_party = seller.sellerId == "1"
+            out.append(
+                CatalogObservation(
+                    item.itemId,
+                    price,
+                    path,
+                    ean,
+                    SellerClass.FIRST_PARTY if first_party else SellerClass.MARKETPLACE,
+                )
+            )
+    return out
 
 
 def _default_sellers(body: bytes) -> dict[str, str]:

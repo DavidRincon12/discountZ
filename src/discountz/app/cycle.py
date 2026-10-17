@@ -10,7 +10,7 @@ import logging
 import random
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -19,7 +19,7 @@ import psycopg
 from discountz.app.collect import SYSTEM_TTL, Collector, SourceRun
 from discountz.app.compose import compose_alerts
 from discountz.app.confirm import confirm_candidates
-from discountz.app.deliver import deliver
+from discountz.app.deliver import deliver, make_photo_fetcher
 from discountz.app.inbox import process_inbox
 from discountz.app.maintenance import (
     maintenance_due,
@@ -37,7 +37,7 @@ from discountz.infra.healthchecks import Healthchecks
 from discountz.infra.http import HttpClient, PacedClient
 from discountz.infra.log import event
 from discountz.infra.telegram import TelegramClient
-from discountz.sources.base import Source
+from discountz.sources.base import CredentialStore, NoCredentials, Source
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +71,8 @@ class CycleDeps:
     sleep: Callable[[float], None]
     rnd: random.Random
     healthchecks: Healthchecks
+    credentials: CredentialStore = field(default_factory=NoCredentials)
+    photos: HttpClient | None = None  # transporte para las fotos de las tarjetas
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +193,7 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
         CYCLE,
         stores=stores,
         spawn=lambda code: _spawn_run(deps, inp, code, now, deadline),
+        credentials=deps.credentials,
     )
     runs = _source_runs(deps, plan, inp.breakers, deadline)
     collector.run(runs)
@@ -212,6 +215,7 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
         sleep=deps.sleep,
         monotonic=deps.monotonic,
         deadline=deadline + 120,  # la entrega puede usar el margen hasta el plazo duro
+        photos=make_photo_fetcher(deps.photos, deps.sources) if deps.photos else None,
     )
     status: CycleStatus = "partial" if any(r.failed for r in runs) else "ok"
     counters = db.RunCounters(

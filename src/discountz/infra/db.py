@@ -12,9 +12,10 @@ from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 import psycopg
-from psycopg import errors
+from psycopg import errors, sql
 from psycopg.types.json import Jsonb
 
+from discountz.domain.catalog import CatalogState
 from discountz.domain.evaluate import AlertRecord, ListingState
 from discountz.domain.health import BreakerState, HourStat
 from discountz.domain.model import AlertKind, ListingRef, Maturity, Offer, SearchSpec, SellerClass
@@ -29,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -463,6 +464,8 @@ class OutboxRow:
     silent: bool
     reply_to_message_id: int | None
     attempts: int
+    topic: str | None = None
+    card: dict[str, Any] | None = None
 
 
 def enqueue(
@@ -477,27 +480,50 @@ def enqueue(
     reply_markup: Mapping[str, Any] | None = None,
     silent: bool = False,
     reply_to_message_id: int | None = None,
+    topic: str | None = None,
+    card: Mapping[str, Any] | None = None,
 ) -> int:
-    """Encola un mensaje; si el `dedup_key` ya existe devuelve el id existente."""
-    row = _one(
-        conn,
-        """INSERT INTO discountz.outbox (purpose, dedup_key, priority, body_html, reply_markup,
-               silent, reply_to_message_id, not_before, expires_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-           ON CONFLICT (dedup_key) DO NOTHING
-           RETURNING id""",
-        (
-            purpose,
-            dedup_key,
-            priority,
-            body_html,
-            None if reply_markup is None else Jsonb(dict(reply_markup)),
-            silent,
-            reply_to_message_id,
-            now,
-            now + ttl,
-        ),
+    """Encola un mensaje; si el `dedup_key` ya existe devuelve el id existente.
+
+    `topic` y `card` (migración 0002) solo se nombran si vienen: el aviso de migración
+    pendiente se encola contra el esquema anterior.
+    """
+    cols = [
+        "purpose",
+        "dedup_key",
+        "priority",
+        "body_html",
+        "reply_markup",
+        "silent",
+        "reply_to_message_id",
+        "not_before",
+        "expires_at",
+    ]
+    values: list[object] = [
+        purpose,
+        dedup_key,
+        priority,
+        body_html,
+        None if reply_markup is None else Jsonb(dict(reply_markup)),
+        silent,
+        reply_to_message_id,
+        now,
+        now + ttl,
+    ]
+    if topic is not None:
+        cols.append("topic")
+        values.append(topic)
+    if card is not None:
+        cols.append("card")
+        values.append(Jsonb(dict(card)))
+    query = sql.SQL(
+        "INSERT INTO discountz.outbox ({}) VALUES ({}) ON CONFLICT (dedup_key) DO NOTHING"
+        " RETURNING id"
+    ).format(
+        sql.SQL(", ").join(map(sql.Identifier, cols)),
+        sql.SQL(", ").join(sql.Placeholder() * len(cols)),
     )
+    row = conn.execute(query, values).fetchone()
     if row is None:
         row = _one(conn, "SELECT id FROM discountz.outbox WHERE dedup_key = %s", (dedup_key,))
     return int(_required(row)[0])
@@ -519,7 +545,7 @@ def claim_outbox(conn: psycopg.Connection, limit: int, now: datetime) -> list[Ou
                         LIMIT %(limit)s FOR UPDATE SKIP LOCKED) ready
                 WHERE o.id = ready.id
             RETURNING o.id, o.purpose, o.dedup_key, o.priority, o.body_html, o.reply_markup,
-                      o.silent, o.reply_to_message_id, o.attempts""",
+                      o.silent, o.reply_to_message_id, o.attempts, o.topic, o.card""",
             {"now": now, "limit": limit},
         ).fetchall()
     out = [OutboxRow(*row) for row in rows]
@@ -575,6 +601,19 @@ def load_breakers(conn: psycopg.Connection) -> dict[str, BreakerState]:
              FROM discountz.source WHERE enabled"""
     ).fetchall()
     return {r[0]: BreakerState(r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]) for r in rows}
+
+
+def load_breaker_for_update(conn: psycopg.Connection, source: str) -> BreakerState | None:
+    """Breaker de una fuente bloqueando su fila (dentro de una transacción) para no pisar al
+    otro proceso que lo escribe."""
+    r = _one(
+        conn,
+        """SELECT breaker, breaker_open_until, breaker_trips, consecutive_unavailable,
+                  consecutive_parse_failures, quarantine_cycles, last_trip_at, last_trip_kind
+             FROM discountz.source WHERE code = %s FOR UPDATE""",
+        (source,),
+    )
+    return None if r is None else BreakerState(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7])
 
 
 def save_breaker(conn: psycopg.Connection, source: str, b: BreakerState) -> None:
@@ -696,7 +735,18 @@ def create_watch(
         "SELECT id FROM discountz.watch WHERE source = %s AND pending_ref = %s",
         (source, pending_ref),
     )
-    return WatchCreated(int(_required(existing)[0]), False)
+    wid = int(_required(existing)[0])
+    _make_manual(conn, wid)
+    return WatchCreated(wid, False)
+
+
+def _make_manual(conn: psycopg.Connection, watch_id: int) -> None:
+    """Seguir a mano un producto que ya se seguía solo lo vuelve manual y sin vencimiento."""
+    conn.execute(
+        """UPDATE discountz.watch SET origin = 'manual', expires_at = NULL
+            WHERE id = %s AND origin = 'auto'""",
+        (watch_id,),
+    )
 
 
 def create_watch_on_listing(
@@ -719,7 +769,84 @@ def create_watch_on_listing(
     if row is not None:
         return WatchCreated(int(row[0]), True)
     existing = _one(conn, "SELECT id FROM discountz.watch WHERE listing_id = %s", (listing_id,))
-    return WatchCreated(int(_required(existing)[0]), False)
+    wid = int(_required(existing)[0])
+    _make_manual(conn, wid)
+    return WatchCreated(wid, False)
+
+
+def create_auto_watch(
+    conn: psycopg.Connection,
+    source: str,
+    ref: ListingRef,
+    now: datetime,
+    ttl: timedelta,
+    *,
+    cap: int,
+) -> int | None:
+    """Seguimiento automático (spec del rastreo §4.4); `None` si ya hay uno o el tope es 0.
+
+    Con el tope lleno se quita el automático más viejo de la fuente: quedan los más nuevos.
+    """
+    if cap <= 0:
+        return None
+    pending = f"id:{ref.external_id}"
+    taken = _one(
+        conn,
+        """SELECT 1 FROM discountz.watch w
+             LEFT JOIN discountz.listing l ON l.id = w.listing_id
+            WHERE w.source = %s
+              AND (w.pending_ref = %s OR l.external_id = %s)""",
+        (source, pending, ref.external_id),
+    )
+    if taken is not None:
+        return None
+    conn.execute(
+        """DELETE FROM discountz.watch WHERE id IN (
+               SELECT id FROM discountz.watch
+                WHERE source = %s AND origin = 'auto'
+                ORDER BY created_at DESC, id DESC OFFSET %s)""",
+        (source, cap - 1),
+    )
+    found = _one(
+        conn,
+        "SELECT id FROM discountz.listing WHERE source = %s AND external_id = %s",
+        (source, ref.external_id),
+    )
+    row = _one(
+        conn,
+        """INSERT INTO discountz.watch (source, listing_id, pending_ref, status, origin,
+               expires_at, next_check_at, created_at)
+           VALUES (%s, %s, %s, %s, 'auto', %s, %s, %s)
+           RETURNING id""",
+        (
+            source,
+            None if found is None else found[0],
+            pending if found is None else None,
+            "pending" if found is None else "active",
+            now + ttl,
+            now,
+            now,
+        ),
+    )
+    return int(_required(row)[0])
+
+
+def extend_auto_watch(conn: psycopg.Connection, listing_id: int, until: datetime) -> None:
+    """Una alerta del producto alarga su seguimiento automático (también si sigue pendiente)."""
+    conn.execute(
+        """UPDATE discountz.watch w SET expires_at = greatest(w.expires_at, %s)
+             FROM discountz.listing l
+            WHERE l.id = %s AND w.origin = 'auto' AND w.source = l.source
+              AND (w.listing_id = l.id OR w.pending_ref = 'id:' || l.external_id)""",
+        (until, listing_id),
+    )
+
+
+def expire_auto_watches(conn: psycopg.Connection, now: datetime) -> int:
+    """Quita los automáticos vencidos; el listing y su histórico se conservan."""
+    return conn.execute(
+        "DELETE FROM discountz.watch WHERE origin = 'auto' AND expires_at < %s", (now,)
+    ).rowcount
 
 
 def activate_watch(conn: psycopg.Connection, watch_id: int, listing_id: int) -> None:
@@ -756,12 +883,23 @@ def create_search(
 
 
 def drop_ref(conn: psycopg.Connection, ref: str) -> bool:
-    """Borra el `watch` (pN) o la `search` (bN). El listing y su histórico se conservan."""
-    table = {"p": "watch", "b": "search"}.get(ref[:1])
-    if table is None or not ref[1:].isdigit():
+    """Borra el `watch` manual (pN), el automático (aN) o la `search` (bN).
+
+    El listing y su histórico se conservan.
+    """
+    sql = {
+        "p": "DELETE FROM discountz.watch WHERE id = %s AND origin = 'manual'",
+        "a": "DELETE FROM discountz.watch WHERE id = %s AND origin = 'auto'",
+        "b": "DELETE FROM discountz.search WHERE id = %s",
+    }.get(ref[:1])
+    if sql is None or not ref[1:].isdigit():
         return False
-    cur = conn.execute(f"DELETE FROM discountz.{table} WHERE id = %s", (int(ref[1:]),))
-    return cur.rowcount == 1
+    return conn.execute(sql, (int(ref[1:]),)).rowcount == 1
+
+
+def drop_auto_watches(conn: psycopg.Connection) -> int:
+    """`/dejar auto`: quita todos los seguimientos automáticos; devuelve cuántos."""
+    return conn.execute("DELETE FROM discountz.watch WHERE origin = 'auto'").rowcount
 
 
 # ───────────── Telegram: offset y comandos
@@ -887,6 +1025,7 @@ class WatchItem:
     price: Money | None
     target: Money | None
     pending: bool
+    auto: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -902,14 +1041,14 @@ def list_watches(conn: psycopg.Connection) -> list[WatchItem]:
     rows = conn.execute(
         """SELECT w.id, w.source, coalesce(l.title, w.pending_ref),
                   coalesce(l.category, w.requested_category), l.last_price_minor,
-                  w.target_price_minor, w.listing_id IS NULL, s.currency
+                  w.target_price_minor, w.listing_id IS NULL, s.currency, w.origin = 'auto'
              FROM discountz.watch w
              JOIN discountz.source s ON s.code = w.source
              LEFT JOIN discountz.listing l ON l.id = w.listing_id
             ORDER BY w.id"""
     ).fetchall()
     out = []
-    for wid, source, title, category, price, target, pending, currency in rows:
+    for wid, source, title, category, price, target, pending, currency, auto in rows:
         cur = Currency(currency.strip())
         out.append(
             WatchItem(
@@ -920,6 +1059,7 @@ def list_watches(conn: psycopg.Connection) -> list[WatchItem]:
                 None if price is None else Money(int(price), cur),
                 None if target is None else Money(int(target), cur),
                 bool(pending),
+                bool(auto),
             )
         )
     return out
@@ -1569,3 +1709,284 @@ def load_plan_input(
 
 def is_unique_violation(exc: BaseException) -> bool:
     return isinstance(exc, errors.UniqueViolation)
+
+
+# ───────────── Catálogo (spec del rastreo §7.1)
+
+_CAT_COLS = (
+    "price_minor, usual_minor, min_seen_minor, first_seen_at, stable_since, reads_at_price,"
+    " last_changed_at, last_alert_at, last_alert_minor"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogRow:
+    external_id: str
+    ean: str | None
+    topic: str
+    currency: str
+    state: CatalogState
+    price_changed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlCursor:
+    source: str
+    sweep_no: int
+    partition_idx: int
+    page: int
+    sweep_started_at: datetime | None
+    last_sweep_s: int | None
+    last_run_at: datetime | None
+    changed_since: datetime | None
+    partitions: tuple[str, ...] = ()  # particiones de la vuelta en curso (con las ya partidas)
+    day: date | None = None  # día UTC de `day_requests`
+    day_requests: int = 0  # peticiones del rastreo en ese día (tope de 24 h)
+
+
+def load_catalog_states(
+    conn: psycopg.Connection, source: str, external_ids: Sequence[str]
+) -> dict[str, CatalogState]:
+    rows = conn.execute(
+        f"""SELECT external_id, {_CAT_COLS} FROM discountz.catalog_item
+             WHERE source = %s AND external_id = ANY(%s)""",
+        (source, list(external_ids)),
+    ).fetchall()
+    return {r[0]: CatalogState(*r[1:]) for r in rows}
+
+
+def save_catalog_page(
+    conn: psycopg.Connection, source: str, rows: Sequence[CatalogRow], now: datetime
+) -> None:
+    """Guarda una página en lote y registra los cambios de precio (una transacción)."""
+    if not rows:
+        return
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany(
+            f"""INSERT INTO discountz.catalog_item (source, external_id, ean, topic, currency,
+                    {_CAT_COLS}, last_seen_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source, external_id) DO UPDATE SET
+                    ean = coalesce(EXCLUDED.ean, catalog_item.ean), topic = EXCLUDED.topic,
+                    price_minor = EXCLUDED.price_minor, usual_minor = EXCLUDED.usual_minor,
+                    min_seen_minor = EXCLUDED.min_seen_minor,
+                    stable_since = EXCLUDED.stable_since,
+                    reads_at_price = EXCLUDED.reads_at_price,
+                    last_changed_at = EXCLUDED.last_changed_at,
+                    last_seen_at = greatest(catalog_item.last_seen_at, EXCLUDED.last_seen_at)""",
+            [
+                (
+                    source,
+                    r.external_id,
+                    r.ean,
+                    r.topic,
+                    r.currency,
+                    r.state.price_minor,
+                    r.state.usual_minor,
+                    r.state.min_seen_minor,
+                    r.state.first_seen_at,
+                    r.state.stable_since,
+                    r.state.reads_at_price,
+                    r.state.last_changed_at,
+                    r.state.last_alert_at,
+                    r.state.last_alert_minor,
+                    now,
+                )
+                for r in rows
+            ],
+        )
+        changed = [(r.external_id, r.state.price_minor) for r in rows if r.price_changed]
+        if changed:
+            cur.executemany(
+                """INSERT INTO discountz.catalog_price_change (item_id, at, price_minor)
+                   SELECT id, %s, %s FROM discountz.catalog_item
+                    WHERE source = %s AND external_id = %s
+                   ON CONFLICT DO NOTHING""",
+                [(now, price, source, ext) for ext, price in changed],
+            )
+
+
+def hot_catalog_ids(
+    conn: psycopg.Connection, source: str, since: datetime, limit: int
+) -> list[str]:
+    rows = conn.execute(
+        """SELECT external_id FROM discountz.catalog_item
+            WHERE source = %s AND last_changed_at >= %s
+            ORDER BY last_changed_at DESC LIMIT %s""",
+        (source, since, limit),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def get_cursor(conn: psycopg.Connection, source: str) -> CrawlCursor:
+    row = _one(
+        conn,
+        """SELECT source, sweep_no, partition_idx, page, sweep_started_at, last_sweep_s,
+                  last_run_at, changed_since, partitions, day_start, day_requests
+             FROM discountz.crawl_cursor WHERE source = %s""",
+        (source,),
+    )
+    if row is None:
+        return CrawlCursor(source, 0, 0, 0, None, None, None, None)
+    return CrawlCursor(
+        row[0],
+        int(row[1]),
+        int(row[2]),
+        int(row[3]),
+        row[4],
+        row[5],
+        row[6],
+        row[7],
+        partitions=tuple(str(p) for p in row[8]),
+        day=row[9],
+        day_requests=int(row[10]),
+    )
+
+
+def save_cursor(conn: psycopg.Connection, c: CrawlCursor) -> None:
+    conn.execute(
+        """INSERT INTO discountz.crawl_cursor (source, sweep_no, partition_idx, page,
+               sweep_started_at, last_sweep_s, last_run_at, changed_since, partitions,
+               day_start, day_requests)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+           ON CONFLICT (source) DO UPDATE SET sweep_no = EXCLUDED.sweep_no,
+               partition_idx = EXCLUDED.partition_idx, page = EXCLUDED.page,
+               sweep_started_at = EXCLUDED.sweep_started_at,
+               last_sweep_s = EXCLUDED.last_sweep_s, last_run_at = EXCLUDED.last_run_at,
+               changed_since = EXCLUDED.changed_since, partitions = EXCLUDED.partitions,
+               day_start = EXCLUDED.day_start, day_requests = EXCLUDED.day_requests""",
+        (
+            c.source,
+            c.sweep_no,
+            c.partition_idx,
+            c.page,
+            c.sweep_started_at,
+            c.last_sweep_s,
+            c.last_run_at,
+            c.changed_since,
+            Jsonb(list(c.partitions)),
+            c.day,
+            c.day_requests,
+        ),
+    )
+
+
+def acquire_crawl_lease(
+    conn: psycopg.Connection, source: str, holder: str, now: datetime, ttl: timedelta
+) -> bool:
+    row = _one(
+        conn,
+        """INSERT INTO discountz.crawl_lease (source, holder, expires_at) VALUES (%s, %s, %s)
+           ON CONFLICT (source) DO UPDATE SET holder = EXCLUDED.holder,
+               expires_at = EXCLUDED.expires_at
+            WHERE crawl_lease.expires_at < %s OR crawl_lease.holder = EXCLUDED.holder
+           RETURNING holder""",
+        (source, holder, now + ttl, now),
+    )
+    return row is not None
+
+
+def release_crawl_lease(conn: psycopg.Connection, source: str, holder: str) -> None:
+    conn.execute(
+        "DELETE FROM discountz.crawl_lease WHERE source = %s AND holder = %s", (source, holder)
+    )
+
+
+def recent_alert_for_ean(
+    conn: psycopg.Connection,
+    ean: str,
+    currency: str,
+    price_minor: int,
+    since: datetime,
+    *,
+    exclude_source: str,
+) -> bool:
+    """¿Otra tienda alertó el mismo EAN a ±1 % desde `since`? (duplicados, spec §3.2)."""
+    row = _one(
+        conn,
+        """SELECT 1 FROM discountz.catalog_item
+            WHERE ean = %s AND currency = %s AND source <> %s AND last_alert_at >= %s
+              AND abs(last_alert_minor - %s) * 100 <= last_alert_minor
+            LIMIT 1""",
+        (ean, currency, exclude_source, since, price_minor),
+    )
+    return row is not None
+
+
+def mark_catalog_alert(
+    conn: psycopg.Connection, source: str, external_id: str, price_minor: int, now: datetime
+) -> None:
+    conn.execute(
+        """UPDATE discountz.catalog_item SET last_alert_at = %s, last_alert_minor = %s
+            WHERE source = %s AND external_id = %s""",
+        (now, price_minor, source, external_id),
+    )
+
+
+def topic_threads(conn: psycopg.Connection) -> dict[str, int]:
+    rows = conn.execute(
+        "SELECT code, thread_id FROM discountz.topic WHERE thread_id IS NOT NULL"
+    ).fetchall()
+    return {r[0]: int(r[1]) for r in rows}
+
+
+def forget_topic_thread(conn: psycopg.Connection, code: str) -> None:
+    conn.execute("UPDATE discountz.topic SET thread_id = NULL WHERE code = %s", (code,))
+
+
+def save_topic(conn: psycopg.Connection, code: str, title: str, thread_id: int | None) -> None:
+    conn.execute(
+        """INSERT INTO discountz.topic (code, title, thread_id) VALUES (%s, %s, %s)
+           ON CONFLICT (code) DO UPDATE
+              SET title = EXCLUDED.title, thread_id = EXCLUDED.thread_id""",
+        (code, title, thread_id),
+    )
+
+
+# ───────────── Catálogo: retención y resumen diario (spec del rastreo §7.2 y §8)
+
+
+def delete_old_catalog_changes(conn: psycopg.Connection, cutoff: datetime) -> int:
+    return conn.execute(
+        "DELETE FROM discountz.catalog_price_change WHERE at < %s", (cutoff,)
+    ).rowcount
+
+
+def delete_unseen_catalog_items(conn: psycopg.Connection, cutoff: datetime) -> int:
+    """Productos que el rastreo dejó de ver (sin stock o retirados); sus cambios caen en cascada."""
+    return conn.execute(
+        "DELETE FROM discountz.catalog_item WHERE last_seen_at < %s", (cutoff,)
+    ).rowcount
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogDaily:
+    items_by_source: Mapping[str, int]
+    changes_today: int
+    alerts_by_topic: Mapping[str, int]
+    last_sweep_s_by_source: Mapping[str, int]
+
+
+def catalog_daily_stats(conn: psycopg.Connection, now: datetime) -> CatalogDaily:
+    since = now - timedelta(hours=24)
+    items = conn.execute(
+        "SELECT source, count(*) FROM discountz.catalog_item GROUP BY source"
+    ).fetchall()
+    changes = _one(
+        conn, "SELECT count(*) FROM discountz.catalog_price_change WHERE at >= %s", (since,)
+    )
+    alerts = conn.execute(
+        """SELECT topic, count(*) FROM discountz.outbox
+            WHERE purpose IN ('alert', 'digest') AND topic IS NOT NULL AND created_at >= %s
+            GROUP BY topic""",
+        (since,),
+    ).fetchall()
+    sweeps = conn.execute(
+        "SELECT source, last_sweep_s FROM discountz.crawl_cursor WHERE last_sweep_s IS NOT NULL"
+    ).fetchall()
+    return CatalogDaily(
+        items_by_source={r[0]: int(r[1]) for r in items},
+        changes_today=int(_required(changes)[0]),
+        alerts_by_topic={r[0]: int(r[1]) for r in alerts},
+        last_sweep_s_by_source={r[0]: int(r[1]) for r in sweeps},
+    )

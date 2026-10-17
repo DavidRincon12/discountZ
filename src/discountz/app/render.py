@@ -15,7 +15,7 @@ from typing import Any
 
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money, format_money
-from discountz.infra.db import SearchItem, StatusSnapshot, WatchItem
+from discountz.infra.db import CatalogDaily, SearchItem, StatusSnapshot, WatchItem
 
 MAX_VISIBLE = 4096
 MAX_TITLE = 120
@@ -45,6 +45,7 @@ _HEADERS = {
     AlertKind.PRICE_ERROR: "POSIBLE ERROR DE PRECIO: verifica antes de pagar",
     AlertKind.TARGET_REACHED: "PRECIO OBJETIVO ALCANZADO",
     AlertKind.GOOD_DEAL: "BUENA OFERTA",
+    AlertKind.CATALOG_DROP: "BAJÓ DE PRECIO",
     AlertKind.COMMUNITY_DEAL: (
         "OFERTA DE LA COMUNIDAD (Slickdeals), sin histórico propio suficiente"
     ),
@@ -127,6 +128,7 @@ class DailyView:
     db_bytes: int
     by_trigger: Mapping[str, int] = field(default_factory=dict)  # trigger_kind → ciclos
     warnings: Sequence[str] = ()
+    catalog: CatalogDaily | None = None
 
 
 _TRIGGERS = (
@@ -245,6 +247,43 @@ def render_alert(a: AlertView) -> RenderedMessage:
     return RenderedMessage("\n".join(lines), _alert_buttons(a))
 
 
+CAPTION_MAX = 1024  # límite de `caption` en sendPhoto
+CAPTION_TITLE = 200
+
+
+def render_catalog_alert(
+    card: Mapping[str, Any], listing_id: int, topic_title: str
+) -> RenderedMessage:
+    """Pie de foto de una alerta del catálogo (spec del rastreo §5.3); cabe en 1.024."""
+    kind = AlertKind(str(card["kind"]))
+    currency = Currency(str(card["currency"]))
+    price = Money(int(card["price_minor"]), currency)
+    usual = Money(int(card["usual_minor"]), currency)
+    store = str(card["store"])
+    lines = [
+        f"<b>{_HEADERS[kind]}</b> · #{card['topic']} · {esc(source_name(store))}",
+        f"<b>{esc(truncate(str(card['title']), CAPTION_TITLE))}</b>",
+        "",
+        f"<b>{format_money(price)}</b>  antes <s>{format_money(usual)}</s>"
+        f" (-{pct(int(card['drop_bp']))})",
+    ]
+    if kind is AlertKind.PRICE_ERROR:
+        lines.append("<i>La tienda puede anular el pedido.</i>")
+    else:
+        lines.append(f"Mínimo en {int(card['min_days'])} días")
+    if currency is Currency.USD:
+        lines.append(CASILLERO)
+    lines.append(f"<i>{esc(topic_title)} · L{listing_id}</i>")
+    buttons = [
+        [Button(f"Abrir en {source_name(store)}", url=str(card["url"]))],
+        [
+            Button(f"Silenciar {MUTE_BUTTON_DAYS} d", callback_data=f"mute:L{listing_id}:30"),
+            Button("Seguir", callback_data=f"fol:L{listing_id}"),
+        ],
+    ]
+    return RenderedMessage("\n".join(lines), buttons)
+
+
 def _alert_buttons(a: AlertView) -> list[list[Button]]:
     second = (
         Button("Dejar de seguir", callback_data=f"unf:p{a.watch_id}")
@@ -310,7 +349,8 @@ def render_list(
 
 
 def _watch_line(w: WatchItem) -> str:
-    parts = [f"p{w.id}", esc(truncate(w.title, LIST_TITLE)), esc(source_name(w.source))]
+    ref = f"{'a' if w.auto else 'p'}{w.id}"
+    parts = [ref, esc(truncate(w.title, LIST_TITLE)), esc(source_name(w.source))]
     if w.pending:
         parts.append("pendiente de primera lectura")
     else:
@@ -379,4 +419,28 @@ def render_daily(v: DailyView) -> RenderedMessage:
         parts.append(esc(", ".join(v.source_notes)))
     parts.append(f"BD {_mb(v.db_bytes)} MB de {DB_LIMIT_MB}")
     parts.extend(esc(w) for w in v.warnings)
-    return RenderedMessage(" · ".join(parts), [], silent=True)
+    text = " · ".join(parts)
+    if v.catalog is not None and v.catalog.items_by_source:
+        text += "\n" + _catalog_line(v.catalog)
+    return RenderedMessage(text, [], silent=True)
+
+
+def _thousands(n: int) -> str:
+    return f"{n:,}".replace(",", ".")
+
+
+def _catalog_line(c: CatalogDaily) -> str:
+    """Productos activos y última vuelta por tienda, cambios del día y alertas por tema."""
+    stores = []
+    for code in sorted(c.items_by_source, key=source_name):
+        part = f"{esc(source_name(code))} {_thousands(c.items_by_source[code])}"
+        sweep = c.last_sweep_s_by_source.get(code)
+        if sweep is not None:
+            hours, minutes = divmod(sweep // 60, 60)
+            part += f" (vuelta {hours} h {minutes} min)"
+        stores.append(part)
+    line = f"Catálogo: {', '.join(stores)} · {_thousands(c.changes_today)} cambios hoy"
+    if c.alerts_by_topic:
+        topics = ", ".join(f"{esc(t)} {n}" for t, n in sorted(c.alerts_by_topic.items()))
+        line += f" · alertas por tema: {topics}"
+    return line
