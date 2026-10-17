@@ -45,6 +45,8 @@ def test_migration_registers_channel_sources(db: psycopg.Connection) -> None:
         "SELECT code, kind, enabled FROM discountz.source WHERE kind='channel' ORDER BY code"
     ).fetchall()
     assert rows == [
+        ("dealnews", "channel", True),
+        ("slickdeals_amazon", "channel", True),
         ("tg_cajitatech", "channel", True),
         ("tg_clubgratis", "channel", True),
         ("tg_descuentostech", "channel", True),
@@ -90,7 +92,7 @@ def test_channel_post_rejects_bad_values(db: psycopg.Connection, price: int, cur
 
 def test_migration_0003_down_restores_schema_2(db: psycopg.Connection) -> None:
     dbm.save_channel_cursor(db, "tg_clubgratis", 1, T)
-    assert migrate(db, 2) == [3]
+    assert migrate(db, 2) == [4, 3]
     assert current_version(db) == 2
     assert db.execute("SELECT to_regclass('discountz.channel_post')").fetchone() == (None,)
     assert db.execute("SELECT count(*) FROM discountz.source").fetchone() == (9,)
