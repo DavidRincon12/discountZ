@@ -367,11 +367,22 @@ def test_unordered_duplicate_is_not_recounted_on_reread(db: psycopg.Connection) 
 
 
 def test_unordered_feed_without_deals_is_a_format_error(db: psycopg.Connection) -> None:
+    repo.save_channel_cursor(db, "dealnews", 1, T - timedelta(minutes=10))
     r = run_for(FakeChannel("dealnews", [page(max_id=400, unparsed=39)]))
     run_channels(db, [r], T, PARAMS, TOPICS, random.Random(1), 1e9)
     assert r.failed and r.counters.parse_errors == 1
     cursor = repo.get_channel_cursor(db, "dealnews")
     assert cursor is not None and cursor.unparsed_streak == 39
+
+
+def test_unordered_first_read_without_deals_sets_no_baseline(db: psycopg.Connection) -> None:
+    """Con el formato roto en la primera lectura, la siguiente sana sigue siendo la primera."""
+    r = run_for(FakeChannel("dealnews", [page(max_id=400, unparsed=39)]))
+    run_channels(db, [r], T, PARAMS, TOPICS, random.Random(1), 1e9)
+    assert r.failed and repo.get_channel_cursor(db, "dealnews") is None
+    run(db, FakeChannel("dealnews", [page(deal("dealnews", 400))]), now=T + timedelta(hours=1))
+    assert outbox(db) == []
+    assert repo.channel_post_ids(db, "dealnews", [400]) == {400}
 
 
 def test_channel_waits_for_its_budget_interval(db: psycopg.Connection) -> None:

@@ -191,11 +191,12 @@ def _read_unordered(
     Lo ya guardado y lo de más de `MAX_AGE` se salta sin contarse, igual que los `skipped` de
     la página: se repiten en cada lectura. Se envía de la publicación más vieja a la más nueva,
     para que la primera sea la original si hay duplicados. En la primera lectura (`first`) todo
-    queda marcado sin enviarse; un feed sin ids no fija nada y la siguiente vuelve a ser primera.
+    queda marcado sin enviarse; si no trae ninguna oferta legible (feed vacío o formato roto),
+    no fija nada y la siguiente vuelve a ser primera: así no envía de golpe lo de 6 h.
     """
-    top = max((p.max_id for p in pages if p.max_id is not None), default=None)
-    if first and top is None:
+    if first and not any(p.posts for p in pages):
         return
+    top = max((p.max_id for p in pages if p.max_id is not None), default=None)
     fresh = [p for page in pages for p in page.posts if p.published_at >= now - MAX_AGE]
     seen = db.channel_post_ids(conn, code, [p.post_id for p in fresh])
     with conn.transaction():
