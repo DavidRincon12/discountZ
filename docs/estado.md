@@ -5,7 +5,7 @@
 - Rastreo de catálogo (ADR 0004, PR #6 y #7) en producción desde el 2026-10-17: migración `0002`, grupo con 14 temas, `DISCOUNTZ_RASTREO=true`, disparo horario. VTEX ×4 por categoría raíz; tarjetas PNG en el tema de su categoría; `/temas`, `/seguir` hasta 20 URLs, `/dejar aNN|auto`; seguimientos automáticos desde Slickdeals.
 - Best Buy y Walmart fuera por decisión de David (2026-10-17): sin `BESTBUY_API_KEY` y `/fuente off walmart_us`. El código sigue en el repo.
 - SP-6 canales de Telegram (spec `docs/superpowers/specs/2026-10-17-canales-telegram-design.md`, plan `docs/superpowers/plans/2026-10-17-canales-telegram.md`, Tasks 1-6 hechas en Native): migración `0003_canales` (`SCHEMA_VERSION = 3`, `channel_cursor`, `channel_post`), adaptador `tg_descuentostech`, `tg_clubgratis` y `tg_cajitatech` (`kind = "channel"`), duplicados entre canales en 24 h, tema por hashtags y palabras del título, tarjeta «sin verificar» y línea «Canales» en el resumen diario.
-- Suite: 680 pruebas (unitarias + integración) en verde el 2026-10-17.
+- Suite: 684 pruebas (unitarias + integración) en verde el 2026-10-17.
 
 ## Último cambio
 - Rama `claude/discountz-puesta-en-marcha-mlcmm6`: SP-6. El ciclo de 5 min lee cada canal como mucho cada 10 min (hasta 3 páginas de `t.me/s/<canal>?after=<id>`), guarda los posts y encola las ofertas nuevas en `outbox` con prioridad 9 y `dedup_key = canal:<código>:<id>`. ADR 0005.
