@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
 from discountz.config import load_topics
+from discountz.domain.community import ChannelPost, assign_channel_topic
+from discountz.domain.money import Currency, Money
 from discountz.domain.topics import (
     CATEGORY_TOPIC,
     TOPIC_CODES,
@@ -14,6 +17,7 @@ from discountz.domain.topics import (
     assign_topic,
     normalize_path,
 )
+from discountz.domain.urls import SafeUrl
 from discountz.sources.fixtures import load_fixture
 
 STORES = ("exito", "carulla", "olimpica", "panamericana")
@@ -112,3 +116,48 @@ def test_bestbuy_appliances_go_to_electro() -> None:
     rules = load_topics().rules
     assert assign_topic(rules, "bestbuy_us", "/Appliances/Washers & Dryers/") == "electro"
     assert assign_topic(rules, "bestbuy_us", "/Computers & Tablets/Laptops/") == "tecnologia"
+
+
+def _feed_post(title: str, hashtags: tuple[str, ...]) -> ChannelPost:
+    return ChannelPost(
+        channel="dealnews",
+        post_id=1,
+        published_at=datetime(2026, 10, 17, 18, 0, tzinfo=UTC),
+        title=title,
+        price=Money(999, Currency.USD),
+        coupon=None,
+        store="Amazon",
+        hashtags=hashtags,
+        image_url=None,
+        link=SafeUrl.parse("https://www.dealnews.com/x/1.html", frozenset({"www.dealnews.com"})),
+    )
+
+
+# Títulos y categorías reales de los feeds de DealNews y Slickdeals del 2026-10-17.
+FEED_TOPICS = [
+    ("3-in-1 Ice Depuffing Wand for $45 + free shipping", ("skin", "care"), "belleza"),
+    ('Elongated 3.5" Raised Toilet Seat with Soft Close Lid', ("household", "items"), "hogar"),
+    ("Klke Open-Ear Bone Conduction Headphones for $19", ("headphones",), "tecnologia"),
+    ("Arm & Hammer 8-oz. Pure Baking Soda 2-Pack for $4", ("groceries",), "mercado"),
+    ('18" x 18" Heated Cat & Dog Bed for $24 + free shipping', ("pets",), "mascotas"),
+    ("Glomax 16-oz. Ceramic Coating Car Wax Spray for $9", ("automotive",), "ferreteria"),
+    ("Marmot Men's 700 Fill Stockholm Down Jacket (M only)", ("coats",), "moda"),
+    ("MAJOR FITNESS Drone R1 Indoor Rowing Machine", ("exercise", "equipment"), "deportes"),
+    ("Seventh Generation Laundry Detergent 2-Pack", ("laundry", "supplies"), "mercado"),
+    ("Backfire M8 Dual-Motor Electric Scooter for $703", ("bicycling",), "deportes"),
+    ("8BitDo Retro 87-Key Mechanical Keyboard w/ Bluetooth & USB-C $51", (), "tecnologia"),
+    ("217-Pc LEGO Botanicals: Botanical Collection: Happy Plants $18.40", (), "bebes"),
+    ("18-Oz Aveeno Skin Relief Moisturizing Lotion (Fragrance-Free) $5.25", (), "belleza"),
+    ("4-pk 80-ct Lysol Disinfecting Wipes (Mango/Linen/2x Lemon) $8.75", (), "mercado"),
+    ('Olympia Tools 36" x 24" Foldable Push Cart Dolly $67.80', (), "ferreteria"),
+    ("Billconch Biometric Handgun Safe for $36 + free shipping", (), "otros"),
+    ("Smart Watch Band Care Kit for $9", ("accessories",), "otros"),  # palabras ambiguas
+]
+
+
+@pytest.mark.parametrize(("title", "hashtags", "topic"), FEED_TOPICS)
+def test_channel_rules_route_english_feed_deals(
+    title: str, hashtags: tuple[str, ...], topic: str
+) -> None:
+    rules = load_topics().channel_rules
+    assert assign_channel_topic(_feed_post(title, hashtags), rules) == topic

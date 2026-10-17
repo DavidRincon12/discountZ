@@ -220,39 +220,77 @@ topic = "libros"
 # Tema de las ofertas de los canales de Telegram (spec de canales §4.2). Se comparan con los
 # hashtags y las palabras del título (normalizados); gana la regla con más palabras y, a igual
 # número, la que va primero. Sin coincidencias van a «Otros».
+# Las palabras en inglés son para los feeds de Amazon (títulos y categorías de DealNews y
+# Slickdeals). Se dejan fuera las ambiguas: care, smart, watch, accessories, outdoor, o «pc»,
+# que en Slickdeals es «piezas» (217-Pc).
 [[channel_rules]]
 topic = "tecnologia"
 words = ["audifonos", "iphone", "celular", "tablet", "laptop", "monitor", "teclado", "raton",
   "mouse", "control", "videojuego", "consola", "smartwatch", "reloj inteligente", "proyector",
-  "cargador", "accesoriostecnologia", "board", "ssd", "ps5", "xbox", "switch"]
+  "cargador", "accesoriostecnologia", "board", "ssd", "ps5", "xbox", "switch",
+  "headphones", "headphone", "earbuds", "earphones", "airpods", "speaker", "speakers", "keyboard",
+  "keyboards", "mice", "laptops", "tablets", "monitors", "phone", "phones", "smartphone", "ipad",
+  "macbook", "charger", "chargers", "usb", "bluetooth", "wifi", "router", "drone", "drones",
+  "camera", "cameras", "webcam", "printer", "gaming", "nintendo", "playstation", "psu", "gpu",
+  "ssds", "hdmi"]
 
 [[channel_rules]]
 topic = "electro"
-words = ["televisor", "tv", "freidora", "aspiradora", "licuadora", "cafetera"]
+words = ["televisor", "tv", "freidora", "aspiradora", "licuadora", "cafetera",
+  "tvs", "television", "vacuum", "vacuums", "fryer", "blender", "microwave", "refrigerator",
+  "fridge", "appliance", "appliances", "heater", "humidifier", "dehumidifier"]
 
 [[channel_rules]]
 topic = "hogar"
 words = ["cocina", "sartenes", "ollas", "cuchillos", "almohadilla", "decoracion", "navidad",
-  "termo", "botella"]
+  "termo", "botella",
+  "kitchen", "cookware", "knife", "knives", "bedding", "pillow", "pillows", "mattress",
+  "furniture", "chair", "decor", "rug", "curtains", "towels", "lighting", "lamp", "lamps",
+  "lights", "household", "garden", "lawn", "patio", "landscape", "halloween", "christmas"]
 
 [[channel_rules]]
 topic = "moda"
 words = ["calzado", "zapatilla", "ropa", "camisa", "sueter", "boxer", "ropahombre", "reloj",
-  "mochila"]
+  "mochila",
+  "shoes", "sneakers", "boots", "sandals", "clothing", "apparel", "shirt", "shirts", "hoodie",
+  "jacket", "jackets", "coat", "coats", "pants", "jeans", "socks", "wallet", "backpack", "purse",
+  "handbag", "sunglasses", "jewelry", "luggage"]
 
 [[channel_rules]]
 topic = "belleza"
 words = ["maquillaje", "cuidadofacial", "cuidadocorporal", "cortapelo", "cuidadodelcabello",
-  "perfume"]
+  "perfume",
+  "skin", "skincare", "makeup", "beauty", "cosmetics", "hair", "shampoo", "lotion",
+  "moisturizer", "sunscreen", "fragrance", "fragrances", "cologne", "razor", "shaver",
+  "toothbrush"]
 
 [[channel_rules]]
 topic = "deportes"
-words = ["deportes", "gimnasio", "senderismo", "baloncesto", "bañador"]
+words = ["deportes", "gimnasio", "senderismo", "baloncesto", "bañador",
+  "sports", "fitness", "exercise", "yoga", "treadmill", "dumbbells", "bike", "bikes", "bicycle",
+  "bicycling", "cycling", "scooter", "camping", "hiking", "fishing", "golf", "basketball",
+  "soccer"]
 
 [[channel_rules]]
 topic = "bebes"
-words = ["juguete", "ninos", "bebe"]
+words = ["juguete", "ninos", "bebe",
+  "toy", "toys", "lego", "kids", "baby", "toddler", "diapers", "stroller"]
 
 [[channel_rules]]
 topic = "ferreteria"
-words = ["herramienta", "destornillador", "sierra", "accesorioscarro", "taladro"]
+words = ["herramienta", "destornillador", "sierra", "accesorioscarro", "taladro",
+  "tool", "tools", "drill", "saw", "screwdriver", "wrench", "automotive", "car", "tire"]
+
+# Después de las demás: «pet wipes» y «dog food» van a Mascotas; «baby wipes», a Bebés.
+[[channel_rules]]
+topic = "mascotas"
+words = ["pets", "pet", "dog", "dogs", "cat", "cats", "puppy", "kitten"]
+
+[[channel_rules]]
+topic = "mercado"
+words = ["groceries", "grocery", "snacks", "candy", "chocolate", "chocolates", "laundry",
+  "detergent", "cleaning", "wipes"]
+
+[[channel_rules]]
+topic = "libros"
+words = ["books", "book"]
