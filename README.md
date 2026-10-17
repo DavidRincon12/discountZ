@@ -114,10 +114,20 @@ Se hace después de fusionar el PR del rastreo. Las alertas pasan del chat priva
 
 Las primeras vueltas solo aprenden precios: un producto necesita su precio estable de al menos 24 h antes de que una bajada cuente, así que las tarjetas empiezan a llegar después del primer día. El resumen diario de las 08:00 suma una línea con los productos por tienda, la duración de la última vuelta, los cambios del día y las alertas por tema.
 
+### 10. Canales de ofertas de Telegram
+
+El ciclo de 5 minutos lee también los canales públicos [DescuentosTech](https://t.me/s/DescuentosTech), [Clubgratis](https://t.me/s/Clubgratis) y [cajitatech](https://t.me/s/cajitatech), cada uno como mucho cada 10 minutos y sin usar tu cuenta de Telegram.
+
+1. **Migración `0003`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head`.
+2. **Nada más.** La primera lectura de cada canal solo marca el punto de partida: no reenvía ofertas viejas. Desde la siguiente, cada oferta nueva llega como tarjeta con foto al tema de su categoría, con la etiqueta «📣 Visto en <canal> · sin verificar» y los botones «Ver oferta» y «Ver en el canal».
+
+Los precios de los canales no se comparan con el histórico propio: por eso dicen «sin verificar». Si la misma oferta sale en dos canales en menos de 24 h (mismo cupón, o título parecido con precio a ±10 %), llega una sola vez. Para apagar un canal: `/fuente off tg_descuentostech` (o `tg_clubgratis`, `tg_cajitatech`). El resumen diario suma la línea «Canales: N ofertas (M repetidas)».
+
 ### Si algo falla
 
 - Sin resumen diario de las 08:00: revisa *Actions → cycle* (workflows desactivados, secreto caducado o Supabase pausado).
 - Una alerta llegó a *General* con el aviso «falta su tema»: escribe `/temas` en el grupo.
+- Un canal aparece como roto en `/estado`: Telegram cambió el HTML de `t.me/s` y su circuit breaker lo pausa solo; las demás fuentes siguen.
 - Un job de *Actions → crawl* en rojo con código 3: la tienda bloqueó el rastreo y su circuit breaker la pausa sola; `/estado` muestra cuándo reintenta.
 - Para rotar un secreto: BotFather `/revoke`, `ALTER ROLE … PASSWORD` o regenerar el check de healthchecks, y actualiza el secreto en GitHub.
 - Logs y artefactos de Actions se guardan 7 días y nunca contienen URLs, títulos, precios ni secretos.

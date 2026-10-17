@@ -394,6 +394,28 @@ def test_daily_summary_catalog_lines() -> None:
     assert "\nCatálogo: Carulla 126.000, Éxito 305.000 (vuelta 5 h 12 min)" in html
     assert "1.234 cambios hoy" in html
     assert "alertas por tema: hogar 1, tecnologia 3" in html
+    assert "Canales" not in html  # sin ofertas de canales no hay línea
+
+
+def test_daily_summary_channel_line_without_catalog() -> None:
+    view = DailyView(
+        cycles=92,
+        last_cycle_at=None,
+        alerts=6,
+        source_notes=(),
+        db_bytes=41 * 1024 * 1024,
+        catalog=CatalogDaily(
+            items_by_source={},
+            changes_today=0,
+            alerts_by_topic={},
+            last_sweep_s_by_source={},
+            channel_posts=1_200,
+            channel_duplicates=35,
+        ),
+    )
+    html = render_daily(view).html
+    assert html.endswith("\nCanales: 1.200 ofertas (35 repetidas)")
+    assert "Catálogo" not in html
 
 
 CARD_C01 = {

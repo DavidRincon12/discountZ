@@ -1965,6 +1965,8 @@ class CatalogDaily:
     changes_today: int
     alerts_by_topic: Mapping[str, int]
     last_sweep_s_by_source: Mapping[str, int]
+    channel_posts: int = 0  # ofertas de canales de las últimas 24 h, sin las repetidas
+    channel_duplicates: int = 0
 
 
 def catalog_daily_stats(conn: psycopg.Connection, now: datetime) -> CatalogDaily:
@@ -1984,11 +1986,22 @@ def catalog_daily_stats(conn: psycopg.Connection, now: datetime) -> CatalogDaily
     sweeps = conn.execute(
         "SELECT source, last_sweep_s FROM discountz.crawl_cursor WHERE last_sweep_s IS NOT NULL"
     ).fetchall()
+    channels = _required(
+        _one(
+            conn,
+            """SELECT count(*) FILTER (WHERE duplicate_of IS NULL),
+                      count(*) FILTER (WHERE duplicate_of IS NOT NULL)
+                 FROM discountz.channel_post WHERE seen_at >= %s""",
+            (since,),
+        )
+    )
     return CatalogDaily(
         items_by_source={r[0]: int(r[1]) for r in items},
         changes_today=int(_required(changes)[0]),
         alerts_by_topic={r[0]: int(r[1]) for r in alerts},
         last_sweep_s_by_source={r[0]: int(r[1]) for r in sweeps},
+        channel_posts=int(channels[0]),
+        channel_duplicates=int(channels[1]),
     )
 
 

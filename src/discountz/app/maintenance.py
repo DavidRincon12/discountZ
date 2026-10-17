@@ -24,6 +24,7 @@ GLITCH_RECLASS = timedelta(days=7)
 CATALOG_CHANGES_KEEP = timedelta(days=90)  # spec del rastreo §7.2
 CATALOG_CHANGES_KEEP_TIGHT = timedelta(days=45)  # con la BD en ≥ 400 MB
 CATALOG_UNSEEN = timedelta(days=30)
+CHANNEL_POSTS_KEEP = timedelta(days=7)  # ventana de duplicados (24 h) más margen para el resumen
 MAINTENANCE_AT = time(3, 0)
 SUMMARY_AT = time(8, 0)
 TOKEN_WARN_DAYS = 14
@@ -77,6 +78,7 @@ def run_maintenance(
         retention += db.expire_auto_watches(conn, now)
     retention += db.delete_old_catalog_changes(conn, now - CATALOG_CHANGES_KEEP)
     retention += db.delete_unseen_catalog_items(conn, now - CATALOG_UNSEEN)
+    retention += db.delete_old_channel_posts(conn, now - CHANNEL_POSTS_KEEP)
     size = db.db_size(conn) if db_bytes is None else db_bytes
     week = local(now).strftime("%G-W%V")
     listings_pruned = segments_pruned = 0

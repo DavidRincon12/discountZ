@@ -473,6 +473,12 @@ def render_daily(v: DailyView) -> RenderedMessage:
     text = " · ".join(parts)
     if v.catalog is not None and v.catalog.items_by_source:
         text += "\n" + _catalog_line(v.catalog)
+    if v.catalog is not None and v.catalog.channel_posts:
+        c = v.catalog
+        text += (
+            f"\nCanales: {_thousands(c.channel_posts)} ofertas"
+            f" ({_thousands(c.channel_duplicates)} repetidas)"
+        )
     return RenderedMessage(text, [], silent=True)
 
 
