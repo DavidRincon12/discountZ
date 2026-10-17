@@ -123,11 +123,20 @@ El ciclo de 5 minutos lee también los canales públicos [DescuentosTech](https:
 
 Los precios de los canales no se comparan con el histórico propio: por eso dicen «sin verificar». Si la misma oferta sale en dos canales en menos de 24 h (mismo cupón, o título parecido con precio a ±10 %), llega una sola vez. Para apagar un canal: `/fuente off tg_descuentostech` (o `tg_clubgratis`, `tg_cajitatech`). El resumen diario suma la línea «Canales: N ofertas (M repetidas)».
 
+### 11. Ofertas de Amazon de DealNews y Slickdeals
+
+Amazon bloquea las lecturas desde Actions, así que sus ofertas llegan por otro camino, también «sin verificar»: el ciclo lee el [feed de Amazon de DealNews](https://www.dealnews.com/s313/Amazon/) como mucho cada 10 minutos y la portada de Slickdeals cada 30, de la que solo toma lo que lleva a amazon.com.
+
+1. **Migración `0004`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head`. Mientras no corra, el ciclo se salta con aviso.
+2. **Nada más.** La primera lectura de cada feed solo marca lo que hay. Desde la siguiente, cada oferta nueva llega como tarjeta con foto al tema de su categoría, con «📣 Visto en DealNews · sin verificar» (o en Slickdeals) y el cupón cuando lo pide. La de DealNews trae un solo botón, «Ver en DealNews», con su enlace sin cambios, como piden sus términos; la de Slickdeals trae «Ver oferta» (Amazon) y «Ver en Slickdeals» (el hilo).
+
+Las ofertas repetidas con los canales llegan una sola vez y suman en la línea «Canales» del resumen diario. Para apagar un feed: `/fuente off dealnews` o `/fuente off slickdeals_amazon`.
+
 ### Si algo falla
 
 - Sin resumen diario de las 08:00: revisa *Actions → cycle* (workflows desactivados, secreto caducado o Supabase pausado).
 - Una alerta llegó a *General* con el aviso «falta su tema»: escribe `/temas` en el grupo.
-- Un canal aparece como roto en `/estado`: Telegram cambió el HTML de `t.me/s` y su circuit breaker lo pausa solo; las demás fuentes siguen.
+- Un canal o un feed aparece como roto en `/estado`: cambió el HTML de `t.me/s` o el RSS de DealNews o Slickdeals, y su circuit breaker lo pausa solo; las demás fuentes siguen.
 - Un job de *Actions → crawl* en rojo con código 3: la tienda bloqueó el rastreo y su circuit breaker la pausa sola; `/estado` muestra cuándo reintenta.
 - Para rotar un secreto: BotFather `/revoke`, `ALTER ROLE … PASSWORD` o regenerar el check de healthchecks, y actualiza el secreto en GitHub.
 - Logs y artefactos de Actions se guardan 7 días y nunca contienen URLs, títulos, precios ni secretos.

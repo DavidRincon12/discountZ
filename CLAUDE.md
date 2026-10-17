@@ -40,6 +40,7 @@ Estado actual, siguiente paso y pendientes en `docs/estado.md`: léelo al empeza
 - Producción: el job de `cycle` solo corre con la variable de Actions `DISCOUNTZ_ACTIVO=true`. `/buscar` exige `Capability.SEARCH` (Newegg no la tiene).
 - Rastreo: el `ListPrice` de VTEX viene inflado (nunca usarlo); su WAF rechaza `+` como espacio en la query (`infra/http` usa `%20`) y las páginas de catálogo pesan hasta ~7 MB; `*.vtexassets.com` está bloqueado por el proxy de la sesión en la nube (no desde Actions). El job `crawl` solo corre con `DISCOUNTZ_RASTREO=true`.
 - Canales de Telegram (`sources/telegram_channels.py`, `app/channels.py`, migración `0003`): se leen de `t.me/s/<canal>?after=<id>` sin cuenta (20 posts por página); las ofertas salen «sin verificar» directo a `outbox` (sin `alert` ni histórico), y el enlace «Ver oferta» solo pasa con `LINK_HOSTS` y nunca se descarga.
+- Feeds de Amazon «sin verificar» (`sources/dealnews.py`, `slickdeals_amazon` en `sources/slickdeals.py`, migración `0004`, ADR 0006): canales con `ordered_ids=False` que se releen enteros; la primera lectura marca con `channel_post.baseline` sin enviar. El enlace de DealNews (`?iref=rss`) no se toca: lo exigen sus términos.
 - Fixtures marcadas con `"nota"` en su `.meta.json` son sintéticas (la búsqueda de Newegg, que da CAPTCHA en todas las redes probadas, y las de las API de Best Buy y Walmart hasta grabarlas con las claves de David). `record-fixture` no sigue redirecciones: grabar la URL final.
 
 ## Reglas de David (prevalecen sobre las skills, incluida superpowers)
