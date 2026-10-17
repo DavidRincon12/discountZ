@@ -10,6 +10,7 @@ import pytest
 from discountz.domain.errors import BudgetExhausted, HardBlock, NotFound, SourceError, Unavailable
 from discountz.domain.scheduling import SourceBudget
 from discountz.infra.http import (
+    CATALOG_MAX_BODY_BYTES,
     MAX_BODY_BYTES,
     BlockKind,
     FakeHttp,
@@ -195,3 +196,40 @@ def test_paced_client_passes_files() -> None:
     files = {"f": ("n.png", b"P", "image/png")}
     client.request("POST", "https://x.test/up", data={"a": "1"}, files=files)
     assert fake.uploads == [({"a": "1"}, {"f": ("n.png", b"P", "image/png")})]
+
+
+def test_httpx_client_encodes_spaces_as_percent_20() -> None:
+    """El WAF de VTEX responde 400 a `P:[1+TO+9]`; con `%20` sí filtra (medido el 2026-10-17)."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, content=b"[]")
+
+    client = HttpxClient("panamericana", transport=httpx.MockTransport(handler))
+    client.request("GET", URL, params=[("fq", "C:/1/"), ("fq", "P:[1 TO 31622]")])
+    assert seen == [f"{URL}?fq=C%3A%2F1%2F&fq=P%3A%5B1%20TO%2031622%5D"]
+    key = f"{URL}?q=a%20b"  # el transporte falso arma la misma URL
+    FakeHttp({key: HttpResponse(200, key, {}, b"[]", 2)}).request("GET", URL, params={"q": "a b"})
+
+
+def test_body_cap_is_configurable_per_client() -> None:
+    big = ok(b"x" * (MAX_BODY_BYTES + 1))
+    client = PacedClient(
+        FakeHttp({URL: big}),
+        BUDGET,
+        Clock().sleep,
+        Clock().monotonic,
+        random.Random(0),
+        captcha,
+        source="exito",
+        max_body=CATALOG_MAX_BODY_BYTES,
+    )
+    assert client.request("GET", URL).body == big.body
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=big.body)
+
+    mock = httpx.MockTransport(handler)
+    roomy = HttpxClient("olimpica", transport=mock, max_body=2 * len(big.body))
+    assert len(roomy.request("GET", URL).body) == len(big.body)

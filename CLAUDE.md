@@ -38,7 +38,7 @@ Estado actual, siguiente paso y pendientes en `docs/estado.md`: léelo al empeza
 - ruff 0.17 formatea Markdown: `docs/` está en `extend-exclude`.
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero».
 - Producción: el job de `cycle` solo corre con la variable de Actions `DISCOUNTZ_ACTIVO=true`. `/buscar` exige `Capability.SEARCH` (Newegg no la tiene).
-- Rastreo: el `ListPrice` de VTEX viene inflado (nunca usarlo); `*.vtexassets.com` está bloqueado por el proxy de la sesión en la nube (no desde Actions). El job `crawl` solo corre con `DISCOUNTZ_RASTREO=true`.
+- Rastreo: el `ListPrice` de VTEX viene inflado (nunca usarlo); su WAF rechaza `+` como espacio en la query (`infra/http` usa `%20`) y las páginas de catálogo pesan hasta ~7 MB; `*.vtexassets.com` está bloqueado por el proxy de la sesión en la nube (no desde Actions). El job `crawl` solo corre con `DISCOUNTZ_RASTREO=true`.
 - Fixtures marcadas con `"nota"` en su `.meta.json` son sintéticas (la búsqueda de Newegg, que da CAPTCHA en todas las redes probadas, y las de las API de Best Buy y Walmart hasta grabarlas con las claves de David). `record-fixture` no sigue redirecciones: grabar la URL final.
 
 ## Reglas de David (prevalecen sobre las skills, incluida superpowers)

@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal, Protocol
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 from curl_cffi import requests as curl_requests
@@ -20,6 +20,8 @@ from discountz.domain.errors import BudgetExhausted, HardBlock, NotFound, Unavai
 from discountz.domain.scheduling import SourceBudget
 
 MAX_BODY_BYTES = 5 * 1024 * 1024
+# Páginas de catálogo VTEX de 50 productos: Olímpica ~7 MB, Éxito ~6 MB (medido el 2026-10-17).
+CATALOG_MAX_BODY_BYTES = 24 * 1024 * 1024
 TIMEOUT_S = 20.0
 MAX_RETRIES = 2
 MAX_RETRY_AFTER_S = 60.0
@@ -86,7 +88,8 @@ def _pairs(params: Params) -> list[tuple[str, str | int | float | bool | None]]:
 
 
 def _full_url(url: str, params: Params | None) -> str:
-    return f"{url}?{urlencode(_pairs(params))}" if params else url
+    """Espacios como `%20`: el WAF de VTEX rechaza `+` en filtros como `P:[1 TO 9]`."""
+    return f"{url}?{urlencode(_pairs(params), quote_via=quote)}" if params else url
 
 
 class HttpxClient:
@@ -99,9 +102,11 @@ class HttpxClient:
         *,
         transport: httpx.BaseTransport | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        max_body: int = MAX_BODY_BYTES,
     ) -> None:
         self._source = source
         self._monotonic = monotonic
+        self._max_body = max_body
         self._client = httpx.Client(
             timeout=httpx.Timeout(TIMEOUT_S, connect=5.0),
             follow_redirects=False,
@@ -126,8 +131,7 @@ class HttpxClient:
         try:
             with self._client.stream(
                 method,
-                url,
-                params=_pairs(params) if params else None,
+                _full_url(url, params),
                 json=dict(json) if json is not None else None,
                 data=dict(data) if data is not None else None,
                 files=dict(files) if files is not None else None,
@@ -138,7 +142,7 @@ class HttpxClient:
                 size = 0
                 for chunk in resp.iter_bytes():
                     size += len(chunk)
-                    if size > MAX_BODY_BYTES:
+                    if size > self._max_body:
                         raise Unavailable(self._source, "too_large", resp.status_code)
                     if self._monotonic() > deadline:
                         raise Unavailable(self._source, "deadline", resp.status_code)
@@ -183,8 +187,7 @@ class CurlClient:
         try:
             resp: Any = self._session.request(
                 method,
-                url,
-                params=_pairs(params) if params else None,
+                _full_url(url, params),
                 json=dict(json) if json is not None else None,
                 data=dict(data) if data is not None else None,
                 headers=dict(headers) if headers else None,
@@ -232,8 +235,10 @@ class PacedClient:
         source: str,
         pace_multiplier: int = 1,
         deadline: float | None = None,
+        max_body: int = MAX_BODY_BYTES,
     ) -> None:
         self._inner = inner
+        self._max_body = max_body
         self._budget = budget
         self._sleep = sleep
         self._monotonic = monotonic
@@ -273,7 +278,7 @@ class PacedClient:
                     raise HardBlock(self._source, kind.value, resp.status)
                 if resp.status == 404:
                     raise NotFound(self._source, "not_found", 404)
-                if len(resp.body) > MAX_BODY_BYTES:
+                if len(resp.body) > self._max_body:
                     raise Unavailable(self._source, "too_large", resp.status)
                 if resp.status not in RETRY_STATUS:
                     if resp.status >= 400:
