@@ -161,11 +161,16 @@ def deliver(
                 thread_id=thread,
             )
 
-        def send_anywhere(body: str) -> int:
+        def send_anywhere(body: str, topic: str | None = row.topic) -> int:
             nonlocal thread, missing_topic
             try:
                 return send(body, thread=thread)
             except TelegramThreadNotFound:
+                # Tema borrado en Telegram: se olvida para que /temas lo vuelva a crear.
+                if topic is not None:
+                    threads.pop(topic, None)
+                    with conn.transaction():
+                        db.forget_topic_thread(conn, topic)
                 thread, missing_topic = None, True
                 return send(body, thread=None)
 

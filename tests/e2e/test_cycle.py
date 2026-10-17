@@ -22,9 +22,11 @@ from discountz.config import Settings, load_canaries, load_params
 from discountz.domain.money import Currency
 from discountz.domain.scheduling import plan_run
 from discountz.infra import db as repo
+from discountz.infra.db import connect
 from discountz.infra.healthchecks import Healthchecks
 from discountz.infra.http import FakeHttp, HttpClient, HttpResponse
 from discountz.infra.log import configure_logging
+from discountz.infra.migrate import migrate
 from discountz.infra.telegram import TelegramClient
 from discountz.sources.fixtures import load_fixture
 from discountz.sources.registry import load_all
@@ -479,3 +481,13 @@ def test_cycle_delivers_card_photo_with_photo_client(conn: psycopg.Connection) -
     run_cycle(replace(deps(conn, {}, tg), photos=photos), T)
     assert [c[1] for c in photos.calls] == [img]
     assert len(tg.uploads) == 1
+
+
+def test_cycle_on_previous_schema_skips_with_notice(empty_db_url: str) -> None:  # noqa: F811
+    """Entre el merge y la migración el ciclo corre contra el esquema 1: avisa y no falla."""
+    with connect(empty_db_url) as old:
+        migrate(old, 1)
+        result = run_cycle(deps(old, {}, telegram()), T)
+        assert result.status == "skipped_schema"
+        rows = old.execute("SELECT purpose, body_html FROM discountz.outbox").fetchall()
+        assert len(rows) == 1 and "migración pendiente" in rows[0][1]

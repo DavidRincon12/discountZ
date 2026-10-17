@@ -14,7 +14,7 @@ import pytest
 from discountz.app.crawl import CrawlDeps, CrawlResult, run_crawl
 from discountz.config import load_params, load_topics
 from discountz.domain.catalog import CatalogObservation, CatalogState
-from discountz.domain.errors import ParseError
+from discountz.domain.errors import ParseError, Unavailable
 from discountz.domain.model import (
     ExtractionPath,
     Lead,
@@ -33,6 +33,7 @@ from discountz.sources.base import (
     Capability,
     CardFacts,
     CatalogPage,
+    ListingFailed,
     ListingFound,
     ListingGone,
     ListingOutcome,
@@ -121,6 +122,8 @@ class FakeCatalog:
     supports_changed: bool = False
     max_batch: int = 50
     since_seen: list[datetime] = field(default_factory=list)
+    default_offers: dict[str, Offer] = field(default_factory=dict)  # vendedor por defecto (v1)
+    fail_confirms: int = 0  # confirmaciones que fallan por red antes de responder
     descriptor: SourceDescriptor = field(init=False)
 
     def __post_init__(self) -> None:
@@ -178,6 +181,19 @@ class FakeCatalog:
         self, ctx: SourceContext, refs: Sequence[ListingRef]
     ) -> list[ListingOutcome]:
         ctx.http.request("GET", "https://fake/listings")
+        offers = self.offers | self.default_offers
+        return [
+            ListingFound(offers[r.external_id]) if r.external_id in offers else ListingGone(r)
+            for r in refs
+        ]
+
+    def fetch_catalog_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        ctx.http.request("GET", "https://fake/listings")
+        if self.fail_confirms > 0:
+            self.fail_confirms -= 1
+            return [ListingFailed(r, Unavailable("fake", "timeout")) for r in refs]
         return [
             ListingFound(self.offers[r.external_id])
             if r.external_id in self.offers
@@ -363,6 +379,32 @@ def test_crawl_confirmation_mismatch_drops_candidate(db: psycopg.Connection) -> 
     assert count(db, "outbox") == 0
 
 
+def test_crawl_confirms_with_cheapest_in_stock_seller(db: psycopg.Connection) -> None:
+    """Vendedor por defecto agotado y otro con stock: la confirmación usa la regla del recorrido."""
+    seed_history(db, "123", 99_900)
+    gone = replace(offer("123", 59_900), in_stock=False)
+    src = FakeCatalog(
+        {"C:/1/": [[obs("123", 59_900)]]},
+        offers={"123": offer("123", 59_900)},
+        default_offers={"123": gone},
+    )
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 1
+
+
+def test_crawl_confirm_failure_keeps_candidate_for_next_run(db: psycopg.Connection) -> None:
+    seed_history(db, "123", 99_900)
+    src = FakeCatalog(
+        {"C:/1/": [[obs("123", 59_900)]]}, offers={"123": offer("123", 59_900)}, fail_confirms=1
+    )
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 0
+    assert count(db, "catalog_price_change") == 0  # el cambio queda sin aplicar
+    d2, _ = deps(db, src, Clock())
+    assert run_crawl(d2, T + timedelta(hours=1), minutes=60).alerts == 1
+    assert count(db, "catalog_price_change") == 1
+
+
 def test_crawl_ean_duplicate_is_skipped(db: psycopg.Connection) -> None:
     ean = "7701234567890"
     start = T - timedelta(days=5)
@@ -460,3 +502,25 @@ def test_crawl_price_error_also_posts_line_in_category(db: psycopg.Connection) -
     assert rows["errores"].card is not None
     assert rows["tecnologia"].card is None
     assert "Errores de precio" in rows["tecnologia"].body_html
+
+
+def test_crawl_stops_when_breaker_opens_meanwhile_and_keeps_it(db: psycopg.Connection) -> None:
+    """El ciclo de la v1 abre el breaker a mitad de la corrida: el rastreo para y no lo pisa."""
+    src = FakeCatalog({"C:/1/": [page_of(1, 0), page_of(1, 1), page_of(1, 2)]})
+    original = src.fetch_catalog_page
+
+    def page(ctx: SourceContext, partition: str, page: int) -> CatalogPage:
+        n = page
+        if n == 1:
+            b = repo.load_breakers(db)["exito"]
+            repo.save_breaker(
+                db, "exito", replace(b, state="open", open_until=T + timedelta(hours=1))
+            )
+        return original(ctx, partition, page)
+
+    src.fetch_catalog_page = page  # type: ignore[method-assign]
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.status == "blocked"
+    assert transport.kinds().count("page") == 2
+    assert repo.load_breakers(db)["exito"].state == "open"

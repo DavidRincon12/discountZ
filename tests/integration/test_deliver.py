@@ -205,3 +205,14 @@ def test_deliver_without_any_topic_sends_to_general_without_notice(
     assert db.execute(
         "SELECT count(*) FROM discountz.outbox WHERE purpose = 'system'"
     ).fetchone() == (0,)
+
+
+def test_thread_not_found_forgets_topic_so_temas_recreates_it(db: psycopg.Connection) -> None:
+    repo.save_topic(db, "hogar", "🛋️ Hogar y muebles", 22)
+    repo.save_topic(db, "moda", "👟 Moda y calzado", 33)
+    enqueue(db, "alert:1", topic="hogar")
+    enqueue(db, "alert:2", topic="hogar")
+    http = run(db, {f"{API}/sendMessage": [thread_not_found(), ok(2), ok(3)]})
+    threads = [c[2].get("message_thread_id") for c in http.calls]  # type: ignore[union-attr]
+    assert threads == [22, None, None]  # la segunda ya no insiste en el hilo borrado
+    assert repo.topic_threads(db) == {"moda": 33}

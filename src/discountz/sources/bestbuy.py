@@ -216,6 +216,11 @@ class BestBuySource:
                 out.append(ListingFound(_offer(p, ctx.now)) if p else ListingGone(r))
         return out
 
+    def fetch_catalog_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        return self.fetch_listings(ctx, refs)  # un solo vendedor: la misma lectura de la API
+
     def search(self, ctx: SourceContext, spec: SearchSpec, page: int) -> SearchPage:
         del page  # una sola página de 100
         words = [w for w in (_WORD.sub("", t) for t in spec.query.split()) if w][:8]

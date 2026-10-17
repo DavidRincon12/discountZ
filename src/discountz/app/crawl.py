@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
@@ -35,6 +35,7 @@ from discountz.sources.base import (
     CardFacts,
     CrawlSource,
     CredentialStore,
+    ListingFailed,
     ListingFound,
     SourceContext,
 )
@@ -169,6 +170,7 @@ class _Run:
 
     def sweep(self) -> CrawlStatus:
         while self.time_left():
+            self.check_breaker()
             c = self.cursor
             if not c.partitions:
                 parts = self.guarded(lambda: self.deps.source.catalog_partitions(self.ctx))
@@ -223,9 +225,7 @@ class _Run:
             result = call()
         except ParseError:
             self.parse_streak += 1
-            self.breaker = breaker_transition(
-                self.breaker, BreakerEvent.PARSE_ERROR, self.now, self.deps.rnd
-            )
+            self.breaker_event(BreakerEvent.PARSE_ERROR)
             if self.parse_streak >= PARSE_STOP:
                 self.cursor = replace(self.cursor, page=self.cursor.page + 1)
                 raise _Stop("partial") from None
@@ -233,18 +233,28 @@ class _Run:
         except BudgetExhausted:
             raise _Stop("ok") from None
         except HardBlock:
-            self.breaker = breaker_transition(
-                self.breaker, BreakerEvent.HARD_BLOCK, self.now, self.deps.rnd
-            )
+            self.breaker_event(BreakerEvent.HARD_BLOCK)
             raise _Stop("blocked") from None
         except SourceError:
-            self.breaker = breaker_transition(
-                self.breaker, BreakerEvent.UNAVAILABLE, self.now, self.deps.rnd
-            )
+            self.breaker_event(BreakerEvent.UNAVAILABLE)
             raise _Stop("partial") from None
         self.parse_streak = 0
         self.ok_pages += 1
         return result
+
+    def breaker_event(self, ev: BreakerEvent) -> None:
+        """Transición atómica sobre la fila de la BD: el ciclo de la v1 escribe la misma fila."""
+        with self.conn.transaction():
+            current = db.load_breaker_for_update(self.conn, self.code) or self.breaker
+            self.breaker = breaker_transition(current, ev, self.now, self.deps.rnd)
+            db.save_breaker(self.conn, self.code, self.breaker)
+
+    def check_breaker(self) -> None:
+        """Si otro proceso abrió el breaker durante la corrida, el rastreo para."""
+        current = db.load_breaker_for_update(self.conn, self.code)
+        if current is not None and effective_state(current, self.now) == "open":
+            self.breaker = current
+            raise _Stop("blocked")
 
     def save_cursor(self) -> None:
         db.save_cursor(self.conn, self.with_requests())
@@ -264,7 +274,7 @@ class _Run:
         self.pages += 1
         params = self.deps.topics.params
         states = db.load_catalog_states(self.conn, self.code, [o.external_id for o in items])
-        rows: list[db.CatalogRow] = []
+        rows: dict[str, db.CatalogRow] = {}
         found: list[_Found] = []
         for o in items:
             topic = assign_topic(self.deps.topics.rules, self.code, o.category_path)
@@ -272,15 +282,24 @@ class _Run:
                 states.get(o.external_id), o, self.now, params[topic], self.deps.params.glob
             )
             currency = o.price.currency.value
-            rows.append(db.CatalogRow(o.external_id, o.ean, topic, currency, state, changed))
+            rows[o.external_id] = db.CatalogRow(
+                o.external_id, o.ean, topic, currency, state, changed
+            )
             self.items += 1
             self.changes += int(changed)
             if cand is not None:
                 found.append(_Found(o, cand, topic))
-        db.save_catalog_page(self.conn, self.code, rows, self.now)
         fresh = [f for f in found if not self.duplicate(f)]
+        # Un candidato no mueve su estado hasta que la confirmación responda: si falla por red,
+        # bloqueo o corte, la próxima lectura lo vuelve a detectar (revisión final, hallazgo 2).
+        real = {f.obs.external_id: rows[f.obs.external_id] for f in fresh}
+        for ext, row in real.items():
+            prev = states.get(ext)
+            if prev is not None:
+                rows[ext] = replace(row, state=prev, price_changed=False)
+        db.save_catalog_page(self.conn, self.code, list(rows.values()), self.now)
         if fresh:
-            self.confirm(fresh)
+            self.confirm(fresh, real)
 
     def duplicate(self, f: _Found) -> bool:
         if f.obs.ean is None:
@@ -299,18 +318,32 @@ class _Run:
 
     # ───────────── Confirmación y alerta (spec §4)
 
-    def confirm(self, found: Sequence[_Found]) -> None:
+    def confirm(self, found: Sequence[_Found], real: Mapping[str, db.CatalogRow]) -> None:
         src = self.deps.source
         refs = [ListingRef(self.code, f.obs.external_id) for f in found]
-        outcomes = self.guarded(lambda: src.fetch_listings(self.ctx, refs)) or []
+        outcomes = self.guarded(lambda: src.fetch_catalog_listings(self.ctx, refs))
+        if outcomes is None:
+            return
+        by_ext = {
+            (o.offer.ref if isinstance(o, ListingFound) else o.ref).external_id: o for o in outcomes
+        }
+        settled = [
+            f
+            for f in found
+            if f.obs.external_id in by_ext
+            and not isinstance(by_ext[f.obs.external_id], ListingFailed)
+        ]
         offers = {o.offer.ref.external_id: o.offer for o in outcomes if isinstance(o, ListingFound)}
-        ok = [f for f in found if self.accepts(f, offers.get(f.obs.external_id))]
+        ok = [f for f in settled if self.accepts(f, offers.get(f.obs.external_id))]
+        rejected = [real[f.obs.external_id] for f in settled if f not in ok]
+        db.save_catalog_page(self.conn, self.code, rejected, self.now)
         if not ok:
             return
         ids = [f.obs.external_id for f in ok]
         facts = self.guarded(lambda: src.fetch_card_facts(self.ctx, ids)) or {}
         for f in ok:
             self.alert(f, offers[f.obs.external_id], facts.get(f.obs.external_id))
+            db.save_catalog_page(self.conn, self.code, [real[f.obs.external_id]], self.now)
 
     def accepts(self, f: _Found, raw: Offer | None) -> bool:
         reason = None
@@ -467,9 +500,8 @@ def run_crawl(deps: CrawlDeps, now: datetime, minutes: int) -> CrawlResult:
         except _Stop as stop:
             status = stop.status
         if status == "ok" and run.ok_pages:
-            run.breaker = breaker_transition(run.breaker, BreakerEvent.OK, now, deps.rnd)
+            run.breaker_event(BreakerEvent.OK)
         db.save_cursor(deps.conn, run.with_requests())
-        db.save_breaker(deps.conn, code, run.breaker)
     finally:
         db.release_crawl_lease(deps.conn, code, deps.holder)
     result = CrawlResult(status, run.pages, run.items, run.changes, run.alerts, run.http.used)

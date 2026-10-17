@@ -8,7 +8,7 @@
   - VTEX ×4 por categoría raíz con bandas de precio; Best Buy por su API oficial (`BESTBUY_API_KEY`); Walmart lista para su API de afiliados (4 secretos).
   - Alertas del catálogo como tarjeta PNG con foto en el tema de su categoría; las de la v1 también van a su tema (Slickdeals a «Comunidad EE. UU.»). Comandos `/temas`, `/seguir` hasta 20 URLs, `/dejar aNN|auto`.
   - Seguimientos automáticos desde Slickdeals (Amazon 300, Newegg 100), mantenimiento y resumen diario del catálogo.
-- Suite: 605 pruebas (unitarias + integración) en verde el 2026-10-16.
+- Suite: 613 pruebas (unitarias + integración) en verde el 2026-10-17, tras la revisión final de la rama.
 
 ## Último cambio
 - 2026-10-16: Tasks 11-15 del rastreo: entrega con foto y tema, comandos, seguimientos automáticos, mantenimiento, CLI `crawl`, workflow y guía de activación (README §9).
@@ -40,6 +40,8 @@
 - Fechas del calendario de eventos 2026-2027 estimadas: David debe confirmarlas (Hot Sale y Cyber Lunes de Colombia, sobre todo).
 - Falta: `setup-bot`, `pg_terminate_backend` tras 3 `skipped_locked`, descarte G10 contra `R_listing`, mensaje agrupado de tormenta y `config/supabase-ca.crt` para `sslmode=verify-full`.
 - Una alerta de un ciclo que murió antes de componer sale con vista reducida (sin línea de histórico).
+- VTEX `products/search` con varios `fq=skuId:` devuelve solo 10 productos sin `_from`/`_to` (medido 2026-10-17): los lotes de más de 10 piden el rango. Afectaba también a los seguimientos de la v1.
+- Pendientes menores de la revisión del rastreo: reloj fijo en toda la corrida, `min_seen` sin ventana de 90 d, tope diario por día UTC, orden del barrido VTEX, fotos sin mirar el plazo, C07 sin unir tiendas, desalojo de automáticos por antigüedad, `crawl` sin verificar `SCHEMA_VERSION`, código 3 compartido, borrado del catálogo tras 30 d sin rastreo.
 - `*.vtexassets.com` (fotos VTEX) está bloqueado por el proxy de la sesión en la nube, no desde Actions. Las fixtures de las API de Best Buy y Walmart son sintéticas (`"nota"`).
 - Un producto que ya se sigue (manual o automático) y reaparece en Slickdeals con lectura de hace < 6 h no da `COMMUNITY_DEAL` (regla de la v1).
 - ruff 0.17 formatea Markdown: `docs/` está excluido. La imagen `postgres:17` del CI no tiene digest fijado.

@@ -177,6 +177,11 @@ class CatalogSource(Protocol):
     def fetch_card_facts(
         self, ctx: SourceContext, external_ids: Sequence[str]
     ) -> dict[str, CardFacts]: ...
+    def fetch_catalog_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        """Confirmación del rastreo: la ficha con la misma regla de vendedor del recorrido."""
+        ...
 
 
 class CrawlSource(Source, CatalogSource, Protocol):

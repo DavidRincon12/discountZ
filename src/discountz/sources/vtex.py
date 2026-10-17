@@ -43,6 +43,7 @@ from discountz.sources.blocks import detect_block_common
 from discountz.sources.registry import register
 
 MAX_BATCH = 50
+DEFAULT_PAGE = 10  # productos que devuelve products/search sin `_from`/`_to`
 CATALOG_PAGE = 50
 CATALOG_CAP = 2_500  # VTEX no pagina más allá de _from=2500
 PRICE_MAX = 999_999_999  # techo de la primera banda de precio (COP)
@@ -175,20 +176,37 @@ def _unit_key(item: _Item, title: str) -> str:
     return pack if key == "un|1" and pack else key
 
 
-def _seller(item: _Item) -> _Seller | None:
+def _seller(item: _Item, *, cheapest: bool = False) -> _Seller | None:
+    """El vendedor por defecto; con `cheapest`, el más barato con stock (regla del rastreo)."""
+    if cheapest:
+        stocked = [
+            (price.minor, s.sellerId != "1", s)
+            for s in item.sellers
+            if s.commertialOffer.AvailableQuantity > 0
+            and (price := _money(s.commertialOffer.Price)) is not None
+        ]
+        if stocked:
+            return min(stocked, key=lambda t: (t[0], t[1]))[2]
     default = [s for s in item.sellers if s.sellerDefault] or item.sellers
     return default[0] if default else None
 
 
-def _offer(product: _Product, item: _Item, store: VtexStore, observed_at: datetime) -> Offer | None:
-    seller = _seller(item)
+def _offer(
+    product: _Product,
+    item: _Item,
+    store: VtexStore,
+    observed_at: datetime,
+    *,
+    cheapest: bool = False,
+) -> Offer | None:
+    seller = _seller(item, cheapest=cheapest)
     if seller is None or not _SKU_RE.fullmatch(item.itemId):
         return None
     co = seller.commertialOffer
     price = _money(co.Price)
     list_price = _money(max(Decimal(co.ListPrice), Decimal(co.PriceWithoutDiscount)))
     title = " ".join((item.nameComplete or product.productName).split())
-    first_party = seller.sellerId == "1" and seller.sellerDefault
+    first_party = seller.sellerId == "1" and (seller.sellerDefault or cheapest)
     return Offer(
         ref=ListingRef(store.code, item.itemId),
         parent_external_id=product.productId if _SKU_RE.fullmatch(product.productId) else None,
@@ -205,7 +223,12 @@ def _offer(product: _Product, item: _Item, store: VtexStore, observed_at: dateti
 
 
 def parse_vtex_products(
-    body: bytes, store: VtexStore, observed_at: datetime, *, max_per_product: int | None = None
+    body: bytes,
+    store: VtexStore,
+    observed_at: datetime,
+    *,
+    max_per_product: int | None = None,
+    cheapest: bool = False,
 ) -> list[Offer]:
     """Un `Offer` por ítem (SKU). En búsquedas, `max_per_product` limita los ítems en stock."""
     data = _load(body)
@@ -219,7 +242,7 @@ def parse_vtex_products(
             raise _parse_error(exc) from None
         kept = 0
         for item in product.items:
-            offer = _offer(product, item, store, observed_at)
+            offer = _offer(product, item, store, observed_at, cheapest=cheapest)
             if offer is None:
                 continue
             if max_per_product is not None:
@@ -319,20 +342,30 @@ class VtexSource:
     def fetch_listings(
         self, ctx: SourceContext, refs: Sequence[ListingRef]
     ) -> list[ListingOutcome]:
+        return self._fetch_offers(ctx, refs, cheapest=False)
+
+    def fetch_catalog_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        """Confirmación del rastreo: la ficha con la misma regla de vendedor del recorrido."""
+        return self._fetch_offers(ctx, refs, cheapest=True)
+
+    def _fetch_offers(
+        self, ctx: SourceContext, refs: Sequence[ListingRef], *, cheapest: bool
+    ) -> list[ListingOutcome]:
         out: list[ListingOutcome] = []
         for i in range(0, len(refs), MAX_BATCH):
             batch = refs[i : i + MAX_BATCH]
-            params = [("fq", f"skuId:{r.external_id}") for r in batch]
             try:
                 resp = ctx.http.request(
                     "GET",
                     f"{self.store.api_base}/catalog_system/pub/products/search",
-                    params=params,
+                    params=_sku_params([r.external_id for r in batch]),
                     headers=_HEADERS,
                 )
                 found = {
                     o.ref.external_id: o
-                    for o in parse_vtex_products(resp.body, self.store, ctx.now)
+                    for o in parse_vtex_products(resp.body, self.store, ctx.now, cheapest=cheapest)
                 }
                 self._remember(resp.body)
             except (SourceError, ParseError) as exc:
@@ -431,7 +464,7 @@ class VtexSource:
         resp = ctx.http.request(
             "GET",
             f"{self.store.api_base}/catalog_system/pub/products/search",
-            params=[("fq", f"skuId:{i}") for i in ids],
+            params=_sku_params(ids),
             headers=_HEADERS,
         )
         return [o for o in parse_vtex_catalog(resp.body) if o.external_id in ids]
@@ -445,7 +478,7 @@ class VtexSource:
         resp = ctx.http.request(
             "GET",
             f"{self.store.api_base}/catalog_system/pub/products/search",
-            params=[("fq", f"skuId:{i}") for i in ids],
+            params=_sku_params(ids),
             headers=_HEADERS,
         )
         out: dict[str, CardFacts] = {}
@@ -484,10 +517,20 @@ def _split_band(band: tuple[int, int]) -> list[str]:
     return [f"P:[{lo} TO {mid}]", f"P:[{mid + 1} TO {hi}]"]
 
 
+def _sku_params(ids: Sequence[str]) -> list[tuple[str, str]]:
+    """Un `fq=skuId:` por SKU. Sin rango, VTEX devuelve solo 10 productos (medido en Éxito el
+    2026-10-17): los lotes mayores piden `_from`/`_to`; los de hasta 10 quedan como en la v1."""
+    params = [("fq", f"skuId:{i}") for i in ids]
+    if len(ids) > DEFAULT_PAGE:
+        params += [("_from", "0"), ("_to", str(len(ids) - 1))]
+    return params
+
+
 def _resources_total(resp: HttpResponse) -> int:
+    """Total de la cabecera `resources`; sin ella no se sabe si hay más páginas."""
     raw = next((v for k, v in resp.headers.items() if k.lower() == "resources"), None)
     if raw is None:
-        return 0
+        raise ParseError("no_resources")
     _, _, total = raw.rpartition("/")
     if not total.isdigit():
         raise ParseError("bad_resources")

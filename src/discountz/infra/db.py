@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 import psycopg
-from psycopg import errors
+from psycopg import errors, sql
 from psycopg.types.json import Jsonb
 
 from discountz.domain.catalog import CatalogState
@@ -483,28 +483,47 @@ def enqueue(
     topic: str | None = None,
     card: Mapping[str, Any] | None = None,
 ) -> int:
-    """Encola un mensaje; si el `dedup_key` ya existe devuelve el id existente."""
-    row = _one(
-        conn,
-        """INSERT INTO discountz.outbox (purpose, dedup_key, priority, body_html, reply_markup,
-               silent, reply_to_message_id, not_before, expires_at, topic, card)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-           ON CONFLICT (dedup_key) DO NOTHING
-           RETURNING id""",
-        (
-            purpose,
-            dedup_key,
-            priority,
-            body_html,
-            None if reply_markup is None else Jsonb(dict(reply_markup)),
-            silent,
-            reply_to_message_id,
-            now,
-            now + ttl,
-            topic,
-            None if card is None else Jsonb(dict(card)),
-        ),
+    """Encola un mensaje; si el `dedup_key` ya existe devuelve el id existente.
+
+    `topic` y `card` (migración 0002) solo se nombran si vienen: el aviso de migración
+    pendiente se encola contra el esquema anterior.
+    """
+    cols = [
+        "purpose",
+        "dedup_key",
+        "priority",
+        "body_html",
+        "reply_markup",
+        "silent",
+        "reply_to_message_id",
+        "not_before",
+        "expires_at",
+    ]
+    values: list[object] = [
+        purpose,
+        dedup_key,
+        priority,
+        body_html,
+        None if reply_markup is None else Jsonb(dict(reply_markup)),
+        silent,
+        reply_to_message_id,
+        now,
+        now + ttl,
+    ]
+    if topic is not None:
+        cols.append("topic")
+        values.append(topic)
+    if card is not None:
+        cols.append("card")
+        values.append(Jsonb(dict(card)))
+    query = sql.SQL(
+        "INSERT INTO discountz.outbox ({}) VALUES ({}) ON CONFLICT (dedup_key) DO NOTHING"
+        " RETURNING id"
+    ).format(
+        sql.SQL(", ").join(map(sql.Identifier, cols)),
+        sql.SQL(", ").join(sql.Placeholder() * len(cols)),
     )
+    row = conn.execute(query, values).fetchone()
     if row is None:
         row = _one(conn, "SELECT id FROM discountz.outbox WHERE dedup_key = %s", (dedup_key,))
     return int(_required(row)[0])
@@ -582,6 +601,19 @@ def load_breakers(conn: psycopg.Connection) -> dict[str, BreakerState]:
              FROM discountz.source WHERE enabled"""
     ).fetchall()
     return {r[0]: BreakerState(r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]) for r in rows}
+
+
+def load_breaker_for_update(conn: psycopg.Connection, source: str) -> BreakerState | None:
+    """Breaker de una fuente bloqueando su fila (dentro de una transacción) para no pisar al
+    otro proceso que lo escribe."""
+    r = _one(
+        conn,
+        """SELECT breaker, breaker_open_until, breaker_trips, consecutive_unavailable,
+                  consecutive_parse_failures, quarantine_cycles, last_trip_at, last_trip_kind
+             FROM discountz.source WHERE code = %s FOR UPDATE""",
+        (source,),
+    )
+    return None if r is None else BreakerState(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7])
 
 
 def save_breaker(conn: psycopg.Connection, source: str, b: BreakerState) -> None:
@@ -1896,6 +1928,10 @@ def topic_threads(conn: psycopg.Connection) -> dict[str, int]:
         "SELECT code, thread_id FROM discountz.topic WHERE thread_id IS NOT NULL"
     ).fetchall()
     return {r[0]: int(r[1]) for r in rows}
+
+
+def forget_topic_thread(conn: psycopg.Connection, code: str) -> None:
+    conn.execute("UPDATE discountz.topic SET thread_id = NULL WHERE code = %s", (code,))
 
 
 def save_topic(conn: psycopg.Connection, code: str, title: str, thread_id: int | None) -> None:

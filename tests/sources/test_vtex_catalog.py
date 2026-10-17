@@ -12,10 +12,16 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 import pytest
 
 from discountz.domain.errors import ParseError
-from discountz.domain.model import SellerClass
+from discountz.domain.model import ListingRef, SellerClass
 from discountz.domain.money import Currency, Money
 from discountz.infra.http import FakeHttp, Files, HttpResponse, Method, Params
-from discountz.sources.base import Capability, CatalogPage, NoCredentials, SourceContext
+from discountz.sources.base import (
+    Capability,
+    CatalogPage,
+    ListingFound,
+    NoCredentials,
+    SourceContext,
+)
 from discountz.sources.fixtures import load_fixture
 from discountz.sources.vtex import CATALOG_CAP, STORES, VtexSource
 
@@ -239,3 +245,43 @@ def test_catalog_items_by_sku_batch() -> None:
     assert items[0].category_path == "/Tecnología/Celulares/Smartphones/"
     assert "fq=skuId%3A101&fq=skuId%3A102" in fake.urls[0]
     assert "skuId%3Ax" not in fake.urls[0]
+
+
+def test_sku_batch_over_ten_asks_for_full_page() -> None:
+    """VTEX devuelve 10 productos si no se pide rango (medido en Éxito el 2026-10-17)."""
+    ids = [str(1000 + i) for i in range(12)]
+    body = [product(i, [("1", True, 59900.0, 3)]) for i in ids]
+    source = VtexSource(STORES["exito"])
+    refs = [ListingRef("exito", i) for i in ids]
+    for call in (
+        lambda c: source.fetch_listings(c, refs),
+        lambda c: source.fetch_catalog_listings(c, refs),
+        lambda c: source.fetch_catalog_items(c, ids),
+        lambda c: source.fetch_card_facts(c, ids),
+    ):
+        fake = _Router(lambda q: resp(body, total=12, end=11))
+        call(ctx(fake))
+        q = dict(parse_qsl(urlsplit(fake.urls[0]).query))
+        assert (q["_from"], q["_to"]) == ("0", "11")
+    small = _Router(lambda q: resp(body[:2], total=2, end=1))
+    source.fetch_listings(ctx(small), refs[:2])
+    assert "_to" not in small.urls[0]  # lotes de hasta 10: misma URL que en la v1
+
+
+def test_catalog_page_without_resources_header_is_parse_error() -> None:
+    fake = _Router(lambda q: HttpResponse(200, "x", {}, b"[]", 0))
+    with pytest.raises(ParseError):
+        VtexSource(STORES["exito"]).fetch_catalog_page(ctx(fake), "C:/1/", 0)
+
+
+def test_catalog_listings_take_cheapest_seller_in_stock() -> None:
+    body = [product("101", [("1", True, 0.0, 0), ("ab12", False, 59900.0, 3)])]
+    fake = _Router(lambda q: resp(body, total=1))
+    source = VtexSource(STORES["exito"])
+    (default,) = source.fetch_listings(ctx(fake), [ListingRef("exito", "101")])
+    (cheapest,) = source.fetch_catalog_listings(ctx(fake), [ListingRef("exito", "101")])
+    assert isinstance(default, ListingFound) and not default.offer.in_stock
+    assert isinstance(cheapest, ListingFound)
+    assert cheapest.offer.in_stock
+    assert cheapest.offer.price == Money(59_900, Currency.COP)
+    assert cheapest.offer.seller_class is SellerClass.MARKETPLACE
