@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -1990,3 +1990,95 @@ def catalog_daily_stats(conn: psycopg.Connection, now: datetime) -> CatalogDaily
         alerts_by_topic={r[0]: int(r[1]) for r in alerts},
         last_sweep_s_by_source={r[0]: int(r[1]) for r in sweeps},
     )
+
+
+# ───────────── Canales de Telegram (spec de canales §6)
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelCursor:
+    last_id: int
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RecentPost:
+    key: str  # «<código>:<post_id>»
+    title_norm: str
+    price_minor: int
+    currency: str
+    coupon: str | None
+
+
+def get_channel_cursor(conn: psycopg.Connection, code: str) -> ChannelCursor | None:
+    row = _one(
+        conn,
+        "SELECT last_id, updated_at FROM discountz.channel_cursor WHERE channel = %s",
+        (code,),
+    )
+    return None if row is None else ChannelCursor(int(row[0]), row[1])
+
+
+def save_channel_cursor(conn: psycopg.Connection, code: str, last_id: int, now: datetime) -> None:
+    """Guarda el cursor; `updated_at` marca la última lectura aunque el id no cambie."""
+    conn.execute(
+        """INSERT INTO discountz.channel_cursor (channel, last_id, updated_at)
+           VALUES (%s, %s, %s)
+           ON CONFLICT (channel) DO UPDATE SET
+               last_id = greatest(channel_cursor.last_id, EXCLUDED.last_id),
+               updated_at = EXCLUDED.updated_at""",
+        (code, last_id, now),
+    )
+
+
+def recent_channel_posts(conn: psycopg.Connection, since: datetime) -> list[RecentPost]:
+    """Publicaciones enviadas desde `since` (los duplicados no cuentan como originales)."""
+    rows = conn.execute(
+        """SELECT channel || ':' || post_id, title_norm, price_minor, currency, coupon
+             FROM discountz.channel_post
+            WHERE seen_at >= %s AND duplicate_of IS NULL
+            ORDER BY seen_at, channel, post_id""",
+        (since,),
+    ).fetchall()
+    return [RecentPost(r[0], r[1], int(r[2]), r[3], r[4]) for r in rows]
+
+
+def insert_channel_post(
+    conn: psycopg.Connection,
+    code: str,
+    post_id: int,
+    *,
+    published_at: datetime,
+    title_norm: str,
+    price_minor: int,
+    currency: str,
+    coupon: str | None,
+    topic: str,
+    duplicate_of: str | None,
+    now: datetime,
+) -> bool:
+    """Registra la publicación; `False` si ya estaba (relectura de una página)."""
+    cur = conn.execute(
+        """INSERT INTO discountz.channel_post (channel, post_id, published_at, title_norm,
+               price_minor, currency, coupon, topic, duplicate_of, seen_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+           ON CONFLICT (channel, post_id) DO NOTHING""",
+        (
+            code,
+            post_id,
+            published_at,
+            title_norm,
+            price_minor,
+            currency,
+            coupon,
+            topic,
+            duplicate_of,
+            now,
+        ),
+    )
+    return cur.rowcount == 1
+
+
+def delete_old_channel_posts(conn: psycopg.Connection, before: datetime) -> int:
+    cur = conn.execute("DELETE FROM discountz.channel_post WHERE seen_at < %s", (before,))
+    return cur.rowcount
