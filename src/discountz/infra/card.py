@@ -50,6 +50,9 @@ STORE_COLORS: Mapping[str, str] = MappingProxyType(
         "tg_descuentostech": "#229ED9",
         "tg_clubgratis": "#2B6CB0",
         "tg_cajitatech": "#0E7490",
+        # Feeds sin verificar: colores propios (no son los de sus marcas).
+        "dealnews": "#7C3AED",
+        "slickdeals_amazon": "#4D7C0F",
     }
 )
 DEFAULT_COLOR = "#334155"

@@ -44,6 +44,8 @@ SOURCE_NAMES = {
     "tg_descuentostech": "DescuentosTech",
     "tg_clubgratis": "Clubgratis",
     "tg_cajitatech": "cajitatech",
+    "dealnews": "DealNews",
+    "slickdeals_amazon": "Slickdeals",
 }
 
 _HEADERS = {
@@ -293,7 +295,17 @@ CHANNEL_TITLE = 120  # spec de canales §5
 
 
 def _channel_post_url(post: ChannelPost) -> str:
+    if post.post_url is not None:
+        return str(post.post_url)
     return f"https://t.me/{CHANNELS.get(post.channel, post.channel)}/{post.post_id}"
+
+
+def _channel_labels(post: ChannelPost) -> tuple[str, str]:
+    """Cabecera y botón de la publicación: un canal de Telegram o el feed por su nombre."""
+    if post.channel in CHANNELS:
+        return "OFERTA DE CANAL", "Ver en el canal"
+    name = source_name(post.channel)
+    return f"OFERTA DE {name.upper()}", f"Ver en {name}"
 
 
 def channel_card(post: ChannelPost, topic: str) -> dict[str, Any]:
@@ -314,7 +326,8 @@ def channel_card(post: ChannelPost, topic: str) -> dict[str, Any]:
 
 def render_channel_deal(post: ChannelPost, topic: str) -> RenderedMessage:
     """Pie de foto de una oferta de canal (spec de canales §5); cabe en 1.024."""
-    head = f"<b>OFERTA DE CANAL</b> · #{topic}"
+    header, post_button = _channel_labels(post)
+    head = f"<b>{header}</b> · #{topic}"
     if post.store:
         head += f" · {esc(post.store)}"
     lines = [
@@ -329,7 +342,7 @@ def render_channel_deal(post: ChannelPost, topic: str) -> RenderedMessage:
     if post.price.currency is Currency.USD:
         lines.append(CASILLERO)
     in_channel = _channel_post_url(post)
-    buttons = [[Button("Ver en el canal", url=in_channel)]]
+    buttons = [[Button(post_button, url=in_channel)]]
     if str(post.link) != in_channel:
         buttons.insert(0, [Button("Ver oferta", url=str(post.link))])
     return RenderedMessage("\n".join(lines), buttons)
