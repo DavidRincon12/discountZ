@@ -224,7 +224,8 @@ class _Run:
         """Ejecuta una petición de la fuente; `None` si la página no se pudo leer."""
         try:
             result = call()
-        except ParseError:
+        except ParseError as exc:
+            self.log_error(exc)
             self.parse_streak += 1
             self.breaker_event(BreakerEvent.PARSE_ERROR)
             if self.parse_streak >= PARSE_STOP:
@@ -233,15 +234,20 @@ class _Run:
             return None
         except BudgetExhausted:
             raise _Stop("ok") from None
-        except HardBlock:
+        except HardBlock as exc:
+            self.log_error(exc)
             self.breaker_event(BreakerEvent.HARD_BLOCK)
             raise _Stop("blocked") from None
-        except SourceError:
+        except SourceError as exc:
+            self.log_error(exc)
             self.breaker_event(BreakerEvent.UNAVAILABLE)
             raise _Stop("partial") from None
         self.parse_streak = 0
         self.ok_pages += 1
         return result
+
+    def log_error(self, exc: ParseError | SourceError) -> None:
+        event(log, "source_error", logging.WARNING, source=self.code, code=exc.code)
 
     def breaker_event(self, ev: BreakerEvent) -> None:
         """Transición atómica sobre la fila de la BD: el ciclo de la v1 escribe la misma fila."""
@@ -489,11 +495,11 @@ def run_crawl(deps: CrawlDeps, now: datetime, minutes: int) -> CrawlResult:
     code = deps.source.descriptor.code
     breaker = db.load_breakers(deps.conn).get(code)
     if breaker is None or (code in PAUSED_AT_450 and db.bot_state(deps.conn).discovery_paused):
-        return CrawlResult("disabled", 0, 0, 0, 0, 0)
+        return _skipped(code, "disabled")
     if effective_state(breaker, now) == "open":
-        return CrawlResult("blocked", 0, 0, 0, 0, 0)
+        return _skipped(code, "blocked")
     if not db.acquire_crawl_lease(deps.conn, code, deps.holder, now, LEASE_TTL):
-        return CrawlResult("skipped_locked", 0, 0, 0, 0, 0)
+        return _skipped(code, "skipped_locked")
     run = _Run(deps, now, deps.monotonic() + minutes * 60, breaker)
     try:
         try:
@@ -516,3 +522,9 @@ def run_crawl(deps: CrawlDeps, now: datetime, minutes: int) -> CrawlResult:
         count=result.items,
     )
     return result
+
+
+def _skipped(code: str, status: CrawlStatus) -> CrawlResult:
+    """Corrida que no pidió nada: el log dice por qué (con el breaker abierto sale en rojo)."""
+    event(log, "crawl_done", source=code, status=status, requests=0)
+    return CrawlResult(status, 0, 0, 0, 0, 0)

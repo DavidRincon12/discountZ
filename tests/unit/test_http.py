@@ -127,6 +127,35 @@ def test_oversized_body_is_unavailable() -> None:
         paced(FakeHttp({URL: big}), Clock()).request("GET", URL)
 
 
+class _OversizedTransport:
+    """Transporte que corta la descarga por tamaño, como `HttpxClient` con su tope."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def request(self, method: str, url: str, **_: object) -> HttpResponse:
+        self.calls += 1
+        raise Unavailable("exito", "too_large", 206)
+
+
+def test_body_cut_by_transport_is_too_large_without_retry() -> None:
+    """Una página que no cabe no cabrá al reintentarla: se avisa a la fuente de una vez."""
+    inner = _OversizedTransport()
+    client = PacedClient(
+        inner,
+        BUDGET,
+        Clock().sleep,
+        Clock().monotonic,
+        random.Random(0),
+        captcha,
+        source="exito",
+    )
+    with pytest.raises(Unavailable) as exc:
+        client.request("GET", URL)
+    assert exc.value.code == "too_large"
+    assert inner.calls == 1
+
+
 def test_fake_http_unmapped_url_fails_the_test() -> None:
     with pytest.raises(AssertionError):
         FakeHttp({}).request("GET", URL)
