@@ -4,8 +4,9 @@
 `dealnews:price`. Sus ids no crecen con la publicación (DealNews vuelve a subir ofertas viejas),
 así que el paso de canales lee el feed entero sin cursor por id (`ordered_ids=False`). Las
 ofertas llegan «sin verificar», como las de los canales de Telegram. Los términos de DealNews
-piden no modificar sus enlaces ni sus códigos de referido y atribuirles el contenido: el enlace
-`?iref=rss` se guarda tal cual y la tarjeta dice «Visto en DealNews».
+piden no modificar sus enlaces ni sus códigos de referido y atribuirles el contenido: un enlace
+que la validación cambiaría no se usa (cuenta como formato roto), el resto llega tal cual
+(`?iref=rss`) y la tarjeta dice «Visto en DealNews».
 """
 
 from __future__ import annotations
@@ -53,6 +54,12 @@ def _safe(raw: str, hosts: frozenset[str]) -> SafeUrl | None:
         return SafeUrl.parse(raw.strip(), hosts)
     except UnsafeUrl:
         return None
+
+
+def _untouched(raw: str, hosts: frozenset[str]) -> SafeUrl | None:
+    """El enlace solo si validarlo no lo cambia: `SafeUrl` quita `utm_*` y `ref` y recodifica."""
+    url = _safe(raw, hosts)
+    return url if url is not None and str(url) == raw else None
 
 
 def _published(item: Element) -> datetime | None:
@@ -118,7 +125,7 @@ def parse_dealnews_feed(body: bytes, now: datetime) -> ChannelPage:
     for item in items:
         # El id de la oferta va en el `<guid>`: en las de tipo «product» el `<link>` abre la
         # página del producto y lleva su id, que se repite entre ofertas del mismo producto.
-        link = _safe(_text(item.find("link")), HOSTS)
+        link = _untouched(_text(item.find("link")), HOSTS)
         guid = _safe(_text(item.find("guid")), HOSTS)
         m = _ID_RE.search(guid.path) if guid is not None else None
         title = _text(item.find("title"))[:TITLE_MAX]

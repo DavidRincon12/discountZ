@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, unescape
 
 import pytest
 from hypothesis import given, settings
@@ -169,6 +170,26 @@ def test_items_that_are_not_usable_deals_are_skipped(kwargs: dict[str, str]) -> 
 def test_unreadable_items_are_a_format_signal(kwargs: dict[str, str]) -> None:
     page = parse_dealnews_feed(feed(item(**kwargs)), NOW)  # type: ignore[arg-type]
     assert (page.posts, page.unparsed) == ((), 1)
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "https://www.dealnews.com/Mouse/22291098.html?iref=rss&utm_source=rss&ref=x",
+        "https://www.dealnews.com/Mouse/22291098.html?iref=rss#oferta",
+        "https://www.dealnews.com/Mouse/22291098.html?iref=rss&q=a%20b",
+    ],
+)
+def test_link_that_validation_would_change_is_not_used(link: str) -> None:
+    page = parse_dealnews_feed(feed(item(link=link)), NOW)
+    assert (page.posts, page.unparsed) == ((), 1)  # sus términos: no cambiar sus enlaces
+
+
+def test_real_feed_links_are_kept_byte_for_byte() -> None:
+    body = load_fixture("dealnews", "amazon").body
+    raw = re.findall(r"<link>(https://www\.dealnews\.com/[^<]+)</link>", body.decode())
+    links = {str(p.link) for p in parse_dealnews_feed(body, NOW).posts}
+    assert len(links) == 39 and links <= {unescape(r) for r in raw}
 
 
 def test_expired_deal_is_skipped_quietly() -> None:
