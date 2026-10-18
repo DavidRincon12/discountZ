@@ -47,13 +47,14 @@ jobs:
           api=https://api.ebay.com
           H=(-H 'X-EBAY-C-MARKETPLACE-ID: EBAY_US' -H 'X-EBAY-C-ENDUSERCTX: contextualLocation=country%3DUS%2Czip%3D33166')
           F='conditions:{NEW},buyingOptions:{FIXED_PRICE},deliveryCountry:US,price:[15..],priceCurrency:USD'
-          dump() { echo "==FIXTURE $1 $2=="; gzip -9 -c "$3" | base64 -w0; echo; }
+          # Sin los campos que el adaptador no lee (descripciones, fotos extra, impuestos).
+          dump() { echo "==FIXTURE $1 $2=="; jq -c 'walk(if type == "object" then del(.description, .shortDescription, .additionalImages, .thumbnailImages, .localizedAspects, .returnTerms, .paymentMethods, .taxes, .itemHref, .itemAffiliateWebUrl, .leafCategoryIds, .shipToLocations, .primaryProductReviewRating, .estimatedAvailabilities[]?.availabilityThresholdType) else . end)' "$3"; }
           get() { curl -sS -o "$2" -w '%{http_code}' --max-time 60 -G -H "Authorization: Bearer $EBAY_TOKEN" "${H[@]}" "${@:3}" "$1"; }
-          c=$(get $api/buy/browse/v1/item_summary/search cat.json --data-urlencode category_ids=27386 --data-urlencode "filter=$F" --data-urlencode limit=20); dump search-category $c cat.json
-          c=$(get $api/buy/browse/v1/item_summary/search q.json --data-urlencode 'q=rtx 4070' --data-urlencode "filter=$F" --data-urlencode limit=10); dump search-query $c q.json
+          c=$(get $api/buy/browse/v1/item_summary/search cat.json --data-urlencode category_ids=27386 --data-urlencode "filter=$F" --data-urlencode limit=6); dump search-category $c cat.json
+          c=$(get $api/buy/browse/v1/item_summary/search q.json --data-urlencode 'q=rtx 4070' --data-urlencode "filter=$F" --data-urlencode limit=3); dump search-query $c q.json
           c=$(get $api/buy/browse/v1/item_summary/search shoes.json --data-urlencode category_ids=15709 --data-urlencode "filter=$F" --data-urlencode limit=50)
           var=$(jq -r '[.itemSummaries[] | select(.itemId | test("\\|0$") | not) | .itemId][0]' shoes.json)
-          ids="$(jq -r '[.itemSummaries[0:2][].itemId] | join(",")' cat.json),$var,v1|111111111111|0"
+          ids="$(jq -r '[.itemSummaries[0:1][].itemId] | join(",")' cat.json),$var,v1|111111111111|0"
           echo "ids pedidos: $ids"
           c=$(get $api/buy/browse/v1/item/ bulk.json --data-urlencode "item_ids=$ids"); dump items-bulk $c bulk.json
           one=$(jq -r '.itemSummaries[0].itemId' cat.json)
@@ -62,7 +63,7 @@ jobs:
           get $api/commerce/taxonomy/v1/category_tree/0 tree.json > /dev/null
           jq -c '{categoryTreeId, categoryTreeVersion, rootCategoryNode: {category: .rootCategoryNode.category, childCategoryTreeNodes: [.rootCategoryNode.childCategoryTreeNodes[]
               | select(.category.categoryId == "1" or .category.categoryId == "293" or .category.categoryId == "11232" or .category.categoryId == "15032")
-              | .childCategoryTreeNodes |= [.[]? | .childCategoryTreeNodes |= [.[]? | del(.childCategoryTreeNodes)]]]}}' tree.json > small.json
+              | .childCategoryTreeNodes |= (.[0:4] | map(if .childCategoryTreeNodes then .childCategoryTreeNodes |= (.[0:3] | map(del(.childCategoryTreeNodes))) else . end))]}}' tree.json > small.json
           dump taxonomy 200 small.json
       - name: Tamaño del barrido
         run: |
