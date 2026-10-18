@@ -41,6 +41,31 @@ jobs:
           echo "vence en: $(jq .expires_in token.json) s"
           echo "EBAY_TOKEN=$token" >> "$GITHUB_ENV"
           rm token.json
+      - name: Tamaño del barrido
+        run: |
+          set -euo pipefail
+          api=https://api.ebay.com
+          auth=(-H "Authorization: Bearer $EBAY_TOKEN")
+          curl -sS -o tree.json --max-time 60 "${auth[@]}" "$api/commerce/taxonomy/v1/category_tree/0"
+          fuera='[1,99,260,550,870,237,64482,45100,10542,1305,3252,316,172008,11116,20081]'
+          jq -c --argjson fuera "$fuera" '[.rootCategoryNode.childCategoryTreeNodes[]
+            | select((.category.categoryId | tonumber) as $id | $fuera | index($id) | not)
+            | {root: .category.categoryName,
+               nivel2: (.childCategoryTreeNodes // [] | length),
+               nivel3: ([.childCategoryTreeNodes[]?.childCategoryTreeNodes[]?] | length),
+               hojas: ([.. | objects | select(.leafCategoryTreeNode == true)] | length)}]
+            | (.[] | tostring), "TOTAL nivel2=\(map(.nivel2)|add) nivel3=\(map(.nivel3)|add) hojas=\(map(.hojas)|add)"' tree.json
+          # Estabilidad del orden por defecto: dos lecturas seguidas de la misma consulta
+          q() { curl -sS --max-time 30 -G "${auth[@]}" -H 'X-EBAY-C-MARKETPLACE-ID: EBAY_US' \
+            -H 'X-EBAY-C-ENDUSERCTX: contextualLocation=country%3DUS%2Czip%3D33166' \
+            --data-urlencode "category_ids=$1" \
+            --data-urlencode 'filter=conditions:{NEW},buyingOptions:{FIXED_PRICE},deliveryCountry:US,price:[15..],priceCurrency:USD' \
+            --data-urlencode 'limit=200' --data-urlencode "offset=$2" \
+            $api/buy/browse/v1/item_summary/search | jq -r '.itemSummaries[]?.itemId' | sort; }
+          for cat in 27386 112529; do
+            q $cat 0 > a.txt; q $cat 0 > b.txt; q $cat 200 > c.txt
+            echo "cat $cat: misma consulta repetida comparte $(comm -12 a.txt b.txt | wc -l)/200; página 2 repite $(comm -12 a.txt c.txt | wc -l)"
+          done
       - name: Cobertura por categoría (casillero en Miami)
         run: |
           set -euo pipefail
