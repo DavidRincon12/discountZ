@@ -223,6 +223,7 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
         monotonic=deps.monotonic,
         deadline=deadline + 120,  # la entrega puede usar el margen hasta el plazo duro
         photos=make_photo_fetcher(deps.photos, deps.sources) if deps.photos else None,
+        channel_id=deps.settings.telegram_channel_id,
     )
     status: CycleStatus = "partial" if any(r.failed for r in runs) else "ok"
     counters = db.RunCounters(

@@ -50,6 +50,7 @@ En *Settings → Secrets and variables → Actions* del repo:
 | `TELEGRAM_BOT_TOKEN` | token del paso 1 |
 | `TELEGRAM_CHAT_ID` | chat_id del paso 1 |
 | `TELEGRAM_OWNER_ID` | owner_id del paso 1 |
+| `TELEGRAM_CHANNEL_ID` | opcional: id del canal general de ofertas (paso 12) |
 | `HEALTHCHECKS_PING_URL` | opcional: URL de ping de [healthchecks.io](https://healthchecks.io/) (periodo 10 min, gracia 60 min) |
 
 Luego, en *Settings → Environments*, crea el environment **`production-db`** con tu usuario como revisor obligatorio y agrégale el secreto `DATABASE_URL_MIGRATOR` (URL del rol `discountz_owner`).
@@ -131,6 +132,17 @@ Amazon bloquea las lecturas desde Actions, así que sus ofertas llegan por otro 
 2. **Nada más.** La primera lectura de cada feed solo marca lo que hay. Desde la siguiente, cada oferta nueva llega como tarjeta con foto al tema de su categoría, con «📣 Visto en DealNews · sin verificar» (o en Slickdeals) y el cupón cuando lo pide. La de DealNews trae un solo botón, «Ver en DealNews», con su enlace sin cambios, como piden sus términos; la de Slickdeals trae «Ver oferta» (Amazon) y «Ver en Slickdeals» (el hilo).
 
 Las ofertas repetidas con los canales llegan una sola vez y suman en la línea «Canales» del resumen diario. Para apagar un feed: `/fuente off dealnews` o `/fuente off slickdeals_amazon`.
+
+### 12. Canal general de ofertas
+
+Opcional: un canal de Telegram de solo lectura que recibe una copia de cada oferta, sin importar la categoría. Los temas del grupo siguen igual y los comandos se siguen dando solo en el grupo.
+
+1. **Crear el canal.** En Telegram: *Nuevo canal*, ponle nombre (por ejemplo «discountZ · Todas las ofertas») y elige *Privado* o *Público*. En un canal solo los administradores publican; el resto solo lee.
+2. **Hacer admin al bot.** En el canal: *Administradores → Agregar administrador*, busca tu bot y deja activado **Publicar mensajes** (los demás pueden ir apagados).
+3. **Id del canal.** Abre [Telegram Web](https://web.telegram.org/a/), entra al canal y copia el número de la barra de direcciones después de `#` (empieza por `-100`).
+4. **Secreto.** En *Settings → Secrets and variables → Actions* crea `TELEGRAM_CHANNEL_ID` con ese número. Desde el ciclo siguiente cada oferta llega también al canal.
+
+Al canal solo van las ofertas (no los avisos del sistema ni las respuestas a comandos) y sin los botones «Seguir» y «Silenciar», que solo funcionan en el grupo. Si el bot pierde el permiso de publicar, el grupo sigue recibiendo todo y el log del ciclo dice `channel_off`. Para apagar la copia, borra el secreto.
 
 ### Si algo falla
 

@@ -4,14 +4,15 @@
 - v1 en producción desde el 2026-10-14 (Supabase, `DISCOUNTZ_ACTIVO=true`, cron-job.org cada 5 min).
 - Rastreo de catálogo (ADR 0004) en producción desde el 2026-10-17: VTEX ×4, grupo con 14 temas, tarjetas PNG; canales de Telegram (ADR 0005) y feeds de Amazon «sin verificar» (ADR 0006/0007) también.
 - Best Buy y Walmart fuera por decisión de David. Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
-- eBay (`ebay_us`, ADR 0008) listo en la rama `claude/project-thread-onaeks`: `/seguir`, `/buscar` y job `crawl` con bajada de la misma publicación y `MODEL_LOW` (mediana del mismo `epid`). Esquema 5.
-- Suite: 884 pruebas (unitarias, integración y e2e) en verde el 2026-10-18.
+- eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18 (PR #13): `/seguir`, `/buscar` y job `crawl` con bajada de la misma publicación y `MODEL_LOW` (mediana del mismo `epid`). Esquema 5.
+- Canal general de ofertas (opcional, secreto `TELEGRAM_CHANNEL_ID`): copia de cada oferta al canal, sin tema y sin botones de callback.
+- Suite: 889 pruebas (unitarias, integración y e2e) en verde el 2026-10-18.
 
 ## Último cambio
-- Fuente de eBay por la Browse API (spec `docs/superpowers/specs/2026-10-18-ebay-design.md`, plan `docs/superpowers/plans/2026-10-18-ebay.md`, Native, Tasks 1-8 hechas). Fixtures reales grabadas desde Actions; se borró `ebay-probe.yml`.
+- Rama `claude/project-thread-cve3z4`: `deliver` copia las ofertas (`alert` y `digest`) al canal general si `DISCOUNTZ_TELEGRAM_CHANNEL_ID` está puesto; de mejor esfuerzo, sin migración.
 
 ## Siguiente paso
-- David: fusionar el PR y correr `migrate` con `to = head` (esquema 5). Hasta entonces el ciclo se niega a correr por la versión del esquema; el job `crawl` de eBay sale `disabled` sin la fila de la fuente.
+- David: crear el canal, hacer admin al bot con «Publicar mensajes» y guardar su id en el secreto `TELEGRAM_CHANNEL_ID` (README, paso 12).
 - Revisar el texto oficial del acuerdo de la API de eBay (6 h de atraso máximo, nada de entrenar IA) antes de dejar el job encendido.
 - Mirar la primera semana: alertas de eBay al día, cuota (`Unavailable quota` en los logs) y peso de la BD (tope 150 mil publicaciones). Si satura: `/fuente off ebay_us`.
 - Opcional: pedir a eBay acceso a `getItems` (Application Growth Check) para releer 20 fichas por llamada en la capa caliente.
