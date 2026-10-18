@@ -22,6 +22,7 @@ BASE_ENV = {
     "DISCOUNTZ_TELEGRAM_CHAT_ID": "1",
     "DISCOUNTZ_TELEGRAM_OWNER_ID": "2",
 }
+EBAY_VARS = ("DISCOUNTZ_EBAY_APP_ID", "DISCOUNTZ_EBAY_CERT_ID")
 WALMART = (
     "DISCOUNTZ_WALMART_CONSUMER_ID",
     "DISCOUNTZ_WALMART_KEY_VERSION",
@@ -44,7 +45,7 @@ def pem(key: rsa.RSAPrivateKey) -> str:
 
 
 def settings(monkeypatch: pytest.MonkeyPatch, **extra: str) -> Settings:
-    for k in (*WALMART, "DISCOUNTZ_BESTBUY_API_KEY"):
+    for k in (*WALMART, "DISCOUNTZ_BESTBUY_API_KEY", *EBAY_VARS):
         monkeypatch.delenv(k, raising=False)
     for k, v in {**BASE_ENV, **extra}.items():
         monkeypatch.setenv(k, v)
@@ -156,3 +157,41 @@ def test_walmart_public_id(monkeypatch: pytest.MonkeyPatch, rsa_key: rsa.RSAPriv
         EnvCredentials(settings(monkeypatch)).public_id("walmart")
     with pytest.raises(CredentialUnavailable):
         NoCredentials().public_id("walmart")
+
+
+EBAY = {"DISCOUNTZ_EBAY_APP_ID": "app", "DISCOUNTZ_EBAY_CERT_ID": "cert"}
+
+
+def test_ebay_bearer_is_basic(monkeypatch: pytest.MonkeyPatch) -> None:
+    creds = EnvCredentials(settings(monkeypatch, **EBAY))
+    assert creds.bearer("ebay").get_secret_value() == "YXBwOmNlcnQ="
+
+
+def test_ebay_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(CredentialUnavailable):
+        EnvCredentials(settings(monkeypatch)).bearer("ebay")
+
+
+def test_ebay_repr_hides_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    s = settings(monkeypatch, DISCOUNTZ_EBAY_APP_ID="app", DISCOUNTZ_EBAY_CERT_ID="c3rtS3cret")
+    for text in (repr(s), repr(EnvCredentials(s))):
+        assert "c3rtS3cret" not in text
+    assert "ebay=True" in repr(EnvCredentials(s))
+
+
+@pytest.mark.parametrize("key", list(EBAY))
+def test_settings_ebay_all_or_none(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], key: str
+) -> None:
+    settings(monkeypatch)
+    monkeypatch.setenv(key, "x")
+    assert main(["check-config"]) != 0
+    assert "ebay" in capsys.readouterr().err
+
+
+def test_crawl_ebay_without_credentials_is_skipped(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings(monkeypatch)
+    assert main(["crawl", "--source", "ebay_us"]) == 0
+    assert "sin credenciales" in capsys.readouterr().out

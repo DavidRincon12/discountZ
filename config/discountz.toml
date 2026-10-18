@@ -189,6 +189,17 @@ watch_interval_min = 360
 search_interval_min = 720
 max_batch = 100
 
+[sources.ebay_us]  # Browse API: /seguir y /buscar; el rastreo tiene su propio presupuesto
+group = "ebay_us"
+min_pause_s = 1
+jitter_s = 1
+max_per_run = 10
+max_per_24h = 1500
+watch_interval_min = 120
+search_interval_min = 360
+max_batch = 20
+max_auto_watches = 100
+
 [sources.slickdeals]
 group = "slickdeals"
 min_pause_s = 0
@@ -336,3 +347,19 @@ name = "Cyber Monday"
 sources = ["amazon_us", "newegg", "walmart_us", "bestbuy_us", "slickdeals"]
 starts = "2027-11-29T00:00"
 ends = "2027-11-30T00:00"
+
+[crawl.ebay_us]  # ~120 búsquedas del barrido y ~80 lotes de la capa caliente por hora (ADR 0008)
+min_pause_s = 0.5
+jitter_s = 0.5
+max_per_run = 200
+max_per_24h = 4800
+hot_share_bp = 4000
+
+[ebay]  # spec de eBay §2 y §3
+ship_to_zip = "33166"          # casillero en Miami: solo publicaciones que envían ahí
+items_per_partition = 75       # publicaciones mejor posicionadas por categoría de nivel 3
+max_items = 150000             # tope de publicaciones guardadas
+min_feedback_pct = 98
+min_feedback_score = 100
+# Raíces fuera: coleccionables, arte, servicios, boletas, bienes raíces y tarjetas regalo.
+excluded_roots = [1, 99, 237, 260, 316, 550, 870, 1305, 3252, 10542, 11116, 20081, 45100, 64482, 172008]
