@@ -5,7 +5,7 @@
 - Rastreo de catálogo (ADR 0004) en producción desde el 2026-10-17: VTEX ×4, grupo con 14 temas, tarjetas PNG; canales de Telegram (ADR 0005) y feeds de Amazon «sin verificar» (ADR 0006/0007) también.
 - Best Buy y Walmart fuera por decisión de David. Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
 - eBay (`ebay_us`, ADR 0008) listo en la rama `claude/project-thread-onaeks`: `/seguir`, `/buscar` y job `crawl` con bajada de la misma publicación y `MODEL_LOW` (mediana del mismo `epid`). Esquema 5.
-- Suite: 880 pruebas (unitarias, integración y e2e) en verde el 2026-10-18.
+- Suite: 884 pruebas (unitarias, integración y e2e) en verde el 2026-10-18.
 
 ## Último cambio
 - Fuente de eBay por la Browse API (spec `docs/superpowers/specs/2026-10-18-ebay-design.md`, plan `docs/superpowers/plans/2026-10-18-ebay.md`, Native, Tasks 1-8 hechas). Fixtures reales grabadas desde Actions; se borró `ebay-probe.yml`.
@@ -35,4 +35,5 @@
 - VTEX: el WAF rechaza `+` como espacio (`infra/http` usa `%20`); una página de 50 productos pesa hasta ~43 MB (se pide por mitades sobre 24 MB); `products/search` con varios `skuId` devuelve 10 sin `_from`/`_to`.
 - Pendientes menores del rastreo: reloj fijo por corrida, `min_seen` sin ventana de 90 d, tope diario por día UTC, orden del barrido VTEX, fotos sin mirar el plazo, C07 sin unir tiendas, desalojo de automáticos por antigüedad, `crawl` sin verificar `SCHEMA_VERSION`, código 3 compartido, borrado del catálogo tras 30 d sin rastreo. Un producto ya seguido que reaparece en Slickdeals con lectura de hace < 6 h no da `COMMUNITY_DEAL`.
 - Canales y feeds: un cambio de formato (≥ 5 ilegibles y 0 ofertas, una página sin posts o un feed vacío) cuenta como `PARSE_ERROR` (3 seguidos abren el breaker). Las fixtures de `t.me` llevan los usuarios cambiados por «Usuario»: anonimizar al regrabar. En los temas, «board», «monitor», «mouse», «control» y «switch» mandan a Tecnología títulos en inglés como «Cutting Board».
+- eBay, pendientes menores: `count(*)` del tope por página (y hasta +74 sobre el tope), sin filtro genérico de `external_id` en `process`, parámetros leídos del TOML al importar el adaptador, 100 auto-seguimientos cada 2 h no caben en 1.000 al día, tamaño del árbol completo sin medir contra el tope de 24 MB.
 - ruff 0.17 formatea Markdown: `docs/` está excluido. La imagen `postgres:17` del CI no tiene digest fijado.

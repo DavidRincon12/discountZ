@@ -220,3 +220,36 @@ def test_crawl_max_items_only_for_ebay() -> None:
     params = load_params()
     assert crawl_max_items("ebay_us", params) == 150_000
     assert crawl_max_items("exito", params) is None
+
+
+def test_model_candidate_same_price_after_cooldown_does_not_realert() -> None:
+    """La mediana no converge como el «antes»: sin bajar más, no vuelve a alertar (spec §4.2)."""
+    state = alerted(8_000, T0 - timedelta(hours=73))
+    assert model_candidate(state, T0, usd(8_000), [10_000] * 5, TECH, GLOB) is None
+    assert model_candidate(state, T0, usd(7_700), [10_000] * 5, TECH, GLOB) is not None
+    old = alerted(8_000, T0 - timedelta(days=31))
+    assert model_candidate(old, T0, usd(8_000), [10_000] * 5, TECH, GLOB) is not None
+
+
+def test_cycle_quota_does_not_trip_breaker() -> None:
+    import random as _random
+    from collections import deque
+    from typing import Any
+
+    from discountz.app.collect import Collector, SourceRun
+    from discountz.config import load_params
+    from discountz.domain.errors import Unavailable
+    from discountz.domain.health import BreakerState
+    from discountz.sources.registry import load_all
+
+    closed = BreakerState("closed", None, 0, 0, 0, 0)
+    no_db: Any = None  # on_error no toca la BD
+    c = Collector(
+        no_db, T0, load_params(), {}, _random.Random(0), lambda: 0.0, 1e9, timedelta(minutes=5)
+    )
+    run = SourceRun(load_all()["ebay_us"], None, None, closed, deque())  # type: ignore[arg-type]
+    c.on_error(run, Unavailable("ebay_us", "quota", 429))
+    assert run.breaker.consecutive_unavailable == 0
+    assert run.stopped
+    c.on_error(run, Unavailable("ebay_us", "http_error", 500))
+    assert run.breaker.consecutive_unavailable == 1

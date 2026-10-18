@@ -19,6 +19,9 @@ STABLE_FOR = timedelta(hours=24)  # un precio pasa a «habitual» tras 24 h…
 MIN_READS = 2  # …y al menos 2 lecturas
 WARMUP = timedelta(days=3)  # observación mínima para CATALOG_DROP
 COOLDOWN = timedelta(hours=72)
+# La mediana del modelo no converge al precio nuevo como el «antes»: sin bajar más, la misma
+# publicación no vuelve a alertar por §4.2 en este plazo (spec de eBay §4.2).
+MODEL_REALERT = timedelta(days=30)
 MAX_MIN_DAYS = 90
 MIN_PEERS = 5  # publicaciones del mismo modelo para comparar (spec de eBay §4.2)
 
@@ -113,13 +116,19 @@ def _candidate(
     return CatalogCandidate(kind, obs.price, Money(u, obs.price.currency), drop_bp, days)
 
 
-def _cooling(state: CatalogState | None, p: int, now: datetime, glob: GlobalParams) -> bool:
-    """Ya alertó hace menos de 72 h y el precio no mejoró lo suficiente."""
+def _cooling(
+    state: CatalogState | None,
+    p: int,
+    now: datetime,
+    glob: GlobalParams,
+    window: timedelta = COOLDOWN,
+) -> bool:
+    """Ya alertó dentro de `window` (72 h por defecto) y el precio no mejoró lo suficiente."""
     return (
         state is not None
         and state.last_alert_at is not None
         and state.last_alert_minor is not None
-        and now - state.last_alert_at < COOLDOWN
+        and now - state.last_alert_at < window
         and p * 10_000 > state.last_alert_minor * (10_000 - glob.improve_bp)
     )
 
@@ -151,6 +160,6 @@ def model_candidate(
         kind = AlertKind.MODEL_LOW
     else:
         return None
-    if _cooling(state, p, now, glob):
+    if _cooling(state, p, now, glob, MODEL_REALERT):
         return None
     return CatalogCandidate(kind, obs.price, Money(median, obs.price.currency), drop_bp, 0)

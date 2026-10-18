@@ -263,6 +263,9 @@ class Collector:
             r.counters.not_found += 1
         elif isinstance(exc, BudgetExhausted):
             r.stopped = True
+        elif exc.code == "quota":  # cuota diaria de la API: vuelve sola, no es una falla
+            r.counters.unavailable += 1
+            r.stopped = True
         else:
             r.counters.unavailable += 1
             r.failed = True

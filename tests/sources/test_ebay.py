@@ -527,3 +527,20 @@ def test_registered_with_repo_params() -> None:
     registered = load_all()[CODE]
     assert isinstance(registered, EbaySource)
     assert 1 in registered.params.excluded_roots
+
+
+def test_fetch_listings_stops_at_quota() -> None:
+    src = source()
+    api = by_path({ITEM_PATH: fx("error-quota")})
+    refs = [ListingRef(CODE, "206636580754"), ListingRef(CODE, "206636580755")]
+    out = src.fetch_listings(ctx(paced(api, src)), refs)
+    assert all(isinstance(o, ListingFailed) for o in out)
+    assert sum(1 for c in api.calls if c[1].startswith("/buy/browse/v1/item/")) == 1
+
+
+def test_nan_feedback_is_not_first_party() -> None:
+    data = fx_json("item-single")
+    data["seller"] = {"feedbackPercentage": "NaN", "feedbackScore": 500}
+    item = parse_item(json.dumps(data).encode(), RULES)
+    assert item is not None
+    assert item.seller_class is SellerClass.MARKETPLACE

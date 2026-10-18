@@ -236,6 +236,8 @@ def _seller(listing: _Listing, rules: EbayRules) -> tuple[SellerClass, Decimal, 
         pct = Decimal(seller.feedbackPercentage or "0")
     except InvalidOperation:
         pct = Decimal(0)
+    if not pct.is_finite():  # «NaN» o «Infinity» no se comparan: vendedor sin dato
+        pct = Decimal(0)
     score = seller.feedbackScore or 0
     ok = pct >= rules.min_feedback_pct and score >= rules.min_feedback_score
     return (SellerClass.FIRST_PARTY if ok else SellerClass.MARKETPLACE), pct, score
@@ -459,12 +461,18 @@ class EbaySource:
         self, ctx: SourceContext, refs: Sequence[ListingRef]
     ) -> list[ListingOutcome]:
         out: list[ListingOutcome] = []
+        quota: Unavailable | None = None
         for ref in refs:
+            if quota is not None:  # sin cuota no se gastan más peticiones
+                out.append(ListingFailed(ref, quota))
+                continue
             try:
                 item = self._fetch_item(ctx, ref.external_id)
             except (SourceError, ParseError) as exc:
                 if isinstance(exc, CredentialUnavailable):
                     raise
+                if isinstance(exc, Unavailable) and exc.code == "quota":
+                    quota = exc
                 out.append(ListingFailed(ref, exc))
                 continue
             out.append(ListingFound(_offer(item, ctx.now)) if item else ListingGone(ref))
