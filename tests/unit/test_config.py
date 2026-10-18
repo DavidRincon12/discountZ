@@ -48,6 +48,7 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "newegg",
         "walmart_us",
         "bestbuy_us",
+        "ebay_us",
         "slickdeals",
         "tg_descuentostech",
         "tg_clubgratis",
@@ -164,13 +165,15 @@ def test_check_config_fails_with_exit_2(
 
 def test_crawl_budgets_match_spec() -> None:
     c = load_params(PARAMS_PATH).crawl
-    assert set(c) == {"exito", "carulla", "olimpica", "panamericana", "bestbuy_us"}
+    assert set(c) == {"exito", "carulla", "olimpica", "panamericana", "bestbuy_us", "ebay_us"}
     assert (c["exito"].min_pause_s, c["exito"].jitter_s, c["exito"].max_per_24h) == (1, 1, 24_000)
     assert (c["carulla"].min_pause_s, c["carulla"].max_per_24h) == (1, 12_000)
     assert (c["olimpica"].min_pause_s, c["olimpica"].max_per_24h) == (2, 6_000)
     assert (c["panamericana"].min_pause_s, c["panamericana"].max_per_24h) == (2, 6_000)
     assert (c["bestbuy_us"].min_pause_s, c["bestbuy_us"].max_per_24h) == (0.25, 40_000)
-    assert all(b.hot_share_bp == 2500 for b in c.values())
+    ebay = c.pop("ebay_us") if isinstance(c, dict) else c["ebay_us"]
+    assert (ebay.max_per_run, ebay.max_per_24h, ebay.hot_share_bp) == (170, 4000, 3000)
+    assert all(b.hot_share_bp == 2500 for code, b in c.items() if code != "ebay_us")
     assert all(b.max_per_run <= b.max_per_24h for b in c.values())
 
 
@@ -196,3 +199,18 @@ def test_channel_interval_is_ten_minutes() -> None:
     from datetime import timedelta
 
     assert load_params(PARAMS_PATH).channel_interval == timedelta(minutes=10)
+
+
+def test_params_ebay_defaults() -> None:
+    p = load_params(PARAMS_PATH)
+    e = p.ebay
+    assert e.ship_to_zip == "33166"
+    assert (e.items_per_partition, e.max_items) == (75, 150_000)
+    assert (e.min_feedback_pct, e.min_feedback_score) == (98, 100)
+    assert e.excluded_roots == frozenset(
+        {1, 99, 237, 260, 316, 550, 870, 1305, 3252, 10542, 11116, 20081, 45100, 64482, 172008}
+    )
+    b = p.budgets["ebay_us"]
+    # `getItems` sin acceso: una ficha por petición; barrido + ciclo caben en 5.000 al día.
+    assert (b.max_batch, b.max_per_run, b.max_per_24h) == (1, 10, 1000)
+    assert b.max_per_24h + p.crawl["ebay_us"].max_per_24h <= 5000

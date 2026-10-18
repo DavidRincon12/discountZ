@@ -1,4 +1,4 @@
-"""Credenciales leídas del entorno: clave de Best Buy y firma RSA de Walmart.
+"""Credenciales leídas del entorno: clave de Best Buy, firma RSA de Walmart y eBay.
 
 Nunca se registran ni se ponen en `repr`; los errores llevan solo el proveedor y un código.
 """
@@ -20,6 +20,10 @@ from discountz.domain.errors import CredentialUnavailable
 class EnvCredentials:
     def __init__(self, settings: Settings) -> None:
         self._bestbuy = settings.bestbuy_api_key
+        self._ebay: SecretStr | None = None
+        if settings.ebay_app_id and settings.ebay_cert_id:
+            pair = f"{settings.ebay_app_id}:{settings.ebay_cert_id.get_secret_value()}"
+            self._ebay = SecretStr(base64.b64encode(pair.encode()).decode("ascii"))
         self._walmart: tuple[str, str, SecretStr] | None = None
         self._publisher = settings.walmart_publisher_id
         if (
@@ -36,12 +40,14 @@ class EnvCredentials:
     def __repr__(self) -> str:
         return (
             f"EnvCredentials(bestbuy={self._bestbuy is not None}, "
-            f"walmart={self._walmart is not None})"
+            f"walmart={self._walmart is not None}, ebay={self._ebay is not None})"
         )
 
     def bearer(self, provider: str) -> SecretStr:
         if provider == "bestbuy" and self._bestbuy is not None:
             return self._bestbuy
+        if provider == "ebay" and self._ebay is not None:
+            return self._ebay  # `Basic` del token de aplicación (base64 de app_id:cert_id)
         raise CredentialUnavailable(provider, "missing")
 
     def public_id(self, provider: str) -> str:

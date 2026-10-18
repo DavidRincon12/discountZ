@@ -161,3 +161,31 @@ def test_channel_rules_route_english_feed_deals(
 ) -> None:
     rules = load_topics().channel_rules
     assert assign_channel_topic(_feed_post(title, hashtags), rules) == topic
+
+
+# Las 19 raíces de producto de EBAY_US que recorre el barrido (las otras 15 están en
+# `[ebay] excluded_roots`; árbol 0 versión 134, medido el 2026-10-18).
+EBAY_ROOTS = (
+    "Baby", "Books & Magazines", "Business & Industrial", "Cameras & Photo",
+    "Cell Phones & Accessories", "Clothing, Shoes & Accessories", "Computers/Tablets & Networking",
+    "Consumer Electronics", "Crafts", "Health & Beauty", "Home & Garden", "Jewelry & Watches",
+    "Movies & TV", "Music", "Musical Instruments & Gear", "Pet Supplies", "Sporting Goods",
+    "Toys & Hobbies", "Video Games & Consoles",
+)  # fmt: skip
+
+
+@pytest.mark.parametrize("name", EBAY_ROOTS)
+def test_ebay_roots_have_topics(name: str) -> None:
+    topics = load_topics()
+    path = normalize_path(f"/{name}/")
+    intentional = f"ebay_us:{path}" in topics.intentional_otros
+    assert assign_topic(topics.rules, "ebay_us", f"/{name}/") != "otros" or intentional
+
+
+def test_ebay_subcategories_change_topic() -> None:
+    rules = load_topics().rules
+    ce = "/Computers/Tablets & Networking/Computer Components & Parts/Graphics/Video Cards/"
+    assert assign_topic(rules, "ebay_us", ce) == "tecnologia"
+    assert assign_topic(rules, "ebay_us", "/Home & Garden/Major Appliances/Washers/") == "electro"
+    assert assign_topic(rules, "ebay_us", "/Home & Garden/Bedding/") == "hogar"
+    assert assign_topic(rules, "ebay_us", "/Pet Supplies/Dog Supplies/") == "mascotas"

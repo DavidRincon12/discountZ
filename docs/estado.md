@@ -2,28 +2,26 @@
 
 ## Estado actual
 - v1 en producción desde el 2026-10-14 (Supabase, `DISCOUNTZ_ACTIVO=true`, cron-job.org cada 5 min).
-- Rastreo de catálogo (ADR 0004) en producción desde el 2026-10-17: VTEX ×4 por categoría raíz, grupo con 14 temas, tarjetas PNG, `/temas`, `/seguir` hasta 20 URLs, `/dejar aNN|auto`, seguimientos automáticos desde Slickdeals.
-- Canales de Telegram (ADR 0005, PR #8) en producción desde el 2026-10-17: `tg_descuentostech`, `tg_clubgratis` y `tg_cajitatech`, tarjetas «sin verificar» y línea «Canales» en el resumen diario.
-- Best Buy y Walmart fuera por decisión de David (sin `BESTBUY_API_KEY`, `/fuente off walmart_us`). Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
-- Feeds de Amazon «sin verificar» (ADR 0006, PR #9) en producción desde el 2026-10-17 23:30Z (`dealnews` y `slickdeals_amazon`, esquema 4).
-- Suite: 779 pruebas (unitarias, integración y e2e) en verde el 2026-10-18.
+- Rastreo de catálogo (ADR 0004) en producción desde el 2026-10-17: VTEX ×4, grupo con 14 temas, tarjetas PNG; canales de Telegram (ADR 0005) y feeds de Amazon «sin verificar» (ADR 0006/0007) también.
+- Best Buy y Walmart fuera por decisión de David. Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
+- eBay (`ebay_us`, ADR 0008) listo en la rama `claude/project-thread-onaeks`: `/seguir`, `/buscar` y job `crawl` con bajada de la misma publicación y `MODEL_LOW` (mediana del mismo `epid`). Esquema 5.
+- Suite: 884 pruebas (unitarias, integración y e2e) en verde el 2026-10-18.
 
 ## Último cambio
-- `/fuente on <codigo>` cierra el breaker y pone en cero sus rachas (conserva `breaker_trips`); la rampa del 50 % solo se fija si la fuente venía apagada. Antes había que esperar el backoff (hasta 12 h).
-- PR #10 (VTEX por mitades sobre 24 MB) y PR #11 (DealNews re-destacadas, ADR 0007) fusionados el 2026-10-18.
+- Fuente de eBay por la Browse API (spec `docs/superpowers/specs/2026-10-18-ebay-design.md`, plan `docs/superpowers/plans/2026-10-18-ebay.md`, Native, Tasks 1-8 hechas). Fixtures reales grabadas desde Actions; se borró `ebay-probe.yml`.
 
 ## Siguiente paso
-- David: fusionar este PR y mandar `/fuente on exito`, `/fuente on olimpica` y `/fuente on carulla` en el grupo; la siguiente corrida de `crawl` (cada hora) debe terminar en verde.
-- Las tarjetas de las tiendas CO llegan cuando un producto lleva 24 h con precio estable tras ese rastreo.
-- Mirar el volumen de la primera semana (~33 al día de DealNews más ~13 re-destacadas y ~5 por hora de Slickdeals). Si satura: `/fuente off slickdeals_amazon`.
-- eBay (Browse API): esperar el App ID de David y probarlo antes de diseñar la fuente.
+- David: fusionar el PR y correr `migrate` con `to = head` (esquema 5). Hasta entonces el ciclo se niega a correr por la versión del esquema; el job `crawl` de eBay sale `disabled` sin la fila de la fuente.
+- Revisar el texto oficial del acuerdo de la API de eBay (6 h de atraso máximo, nada de entrenar IA) antes de dejar el job encendido.
+- Mirar la primera semana: alertas de eBay al día, cuota (`Unavailable quota` en los logs) y peso de la BD (tope 150 mil publicaciones). Si satura: `/fuente off ebay_us`.
+- Opcional: pedir a eBay acceso a `getItems` (Application Growth Check) para releer 20 fichas por llamada en la capa caliente.
 
 ## Decisiones vigentes
-- Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006) y DealNews sin tope de antigüedad (ADR 0007).
+- Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006), DealNews sin tope de antigüedad (ADR 0007) y eBay por la Browse API con comparación por modelo (ADR 0008).
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero». Si spec y plan difieren, manda spec §0.2 y luego el plan.
 - La confirmación exige ±1 %, stock, misma variante y mismo vendedor; en búsquedas sin vendedor visible (Amazon, Newegg) la ficha decide.
 - Rastreo: descuento solo contra precios observados (nunca `ListPrice`); la alerta exige «antes» estable 24 h y 2 lecturas, confirmación en la ficha y que otra tienda no haya alertado el mismo EAN en 6 h.
-- Sin temas guardados todo va a *General* sin aviso; con temas, una alerta cuyo tema falta va a *General* y se avisa una vez al día que corra `/temas`. Con la BD en ≥ 450 MB se pausan las búsquedas y el rastreo de Éxito y Carulla.
+- Sin temas guardados todo va a *General* sin aviso; con temas, una alerta cuyo tema falta va a *General* y se avisa una vez al día que corra `/temas`. Con la BD en ≥ 450 MB se pausan las búsquedas y el rastreo de Éxito, Carulla y eBay.
 - Slickdeals: un solo task `feed` por ciclo, sin reserva de confirmación; el lead se omite si el listing se leyó hace < 6 h. Sus leads a Amazon se descartan con el breaker abierto: los cubre `slickdeals_amazon`.
 - No se sortea ningún CAPTCHA ni detección de bots (camelcamelcamel descartado por Cloudflare; Keepa en pausa por costo).
 
@@ -37,4 +35,5 @@
 - VTEX: el WAF rechaza `+` como espacio (`infra/http` usa `%20`); una página de 50 productos pesa hasta ~43 MB (se pide por mitades sobre 24 MB); `products/search` con varios `skuId` devuelve 10 sin `_from`/`_to`.
 - Pendientes menores del rastreo: reloj fijo por corrida, `min_seen` sin ventana de 90 d, tope diario por día UTC, orden del barrido VTEX, fotos sin mirar el plazo, C07 sin unir tiendas, desalojo de automáticos por antigüedad, `crawl` sin verificar `SCHEMA_VERSION`, código 3 compartido, borrado del catálogo tras 30 d sin rastreo. Un producto ya seguido que reaparece en Slickdeals con lectura de hace < 6 h no da `COMMUNITY_DEAL`.
 - Canales y feeds: un cambio de formato (≥ 5 ilegibles y 0 ofertas, una página sin posts o un feed vacío) cuenta como `PARSE_ERROR` (3 seguidos abren el breaker). Las fixtures de `t.me` llevan los usuarios cambiados por «Usuario»: anonimizar al regrabar. En los temas, «board», «monitor», «mouse», «control» y «switch» mandan a Tecnología títulos en inglés como «Cutting Board».
+- eBay, pendientes menores: `count(*)` del tope por página (y hasta +74 sobre el tope), sin filtro genérico de `external_id` en `process`, parámetros leídos del TOML al importar el adaptador, 100 auto-seguimientos cada 2 h no caben en 1.000 al día, tamaño del árbol completo sin medir contra el tope de 24 MB.
 - ruff 0.17 formatea Markdown: `docs/` está excluido. La imagen `postgres:17` del CI no tiene digest fijado.

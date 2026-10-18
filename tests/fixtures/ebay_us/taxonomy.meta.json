@@ -1,0 +1,6 @@
+{
+  "status": 200,
+  "url": "https://api.ebay.com/commerce/taxonomy/v1/category_tree/0",
+  "recorded_at": "2026-10-18",
+  "recorte": "Recorte del árbol real (4 raíces, hasta 4 hijos y 3 nietos), sin los href."
+}

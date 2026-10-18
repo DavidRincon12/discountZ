@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -1747,6 +1747,7 @@ class CatalogRow:
     currency: str
     state: CatalogState
     price_changed: bool
+    model_key: str | None = None  # `epid` de eBay (ADR 0008)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1784,10 +1785,11 @@ def save_catalog_page(
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany(
             f"""INSERT INTO discountz.catalog_item (source, external_id, ean, topic, currency,
-                    {_CAT_COLS}, last_seen_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    {_CAT_COLS}, last_seen_at, model_key)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (source, external_id) DO UPDATE SET
                     ean = coalesce(EXCLUDED.ean, catalog_item.ean), topic = EXCLUDED.topic,
+                    model_key = coalesce(EXCLUDED.model_key, catalog_item.model_key),
                     price_minor = EXCLUDED.price_minor, usual_minor = EXCLUDED.usual_minor,
                     min_seen_minor = EXCLUDED.min_seen_minor,
                     stable_since = EXCLUDED.stable_since,
@@ -1811,6 +1813,7 @@ def save_catalog_page(
                     r.state.last_alert_at,
                     r.state.last_alert_minor,
                     now,
+                    r.model_key,
                 )
                 for r in rows
             ],
@@ -1824,6 +1827,59 @@ def save_catalog_page(
                    ON CONFLICT DO NOTHING""",
                 [(now, price, source, ext) for ext, price in changed],
             )
+
+
+def model_peer_prices(
+    conn: psycopg.Connection,
+    source: str,
+    keys: Sequence[str],
+    since: datetime,
+    per_key: int = 200,
+) -> dict[str, list[tuple[str, int]]]:
+    """Precios de las publicaciones de cada modelo vistas desde `since` (las más recientes)."""
+    if not keys:
+        return {}
+    rows = conn.execute(
+        """SELECT model_key, external_id, price_minor FROM (
+               SELECT model_key, external_id, price_minor,
+                      row_number() OVER (PARTITION BY model_key ORDER BY last_seen_at DESC) AS n
+                 FROM discountz.catalog_item
+                WHERE source = %s AND model_key = ANY(%s) AND last_seen_at >= %s) t
+            WHERE n <= %s""",
+        (source, list(keys), since, per_key),
+    ).fetchall()
+    out: dict[str, list[tuple[str, int]]] = {}
+    for key, ext, price in rows:
+        out.setdefault(key, []).append((ext, int(price)))
+    return out
+
+
+def count_catalog_items(conn: psycopg.Connection, source: str) -> int:
+    row = _required(
+        _one(conn, "SELECT count(*) FROM discountz.catalog_item WHERE source = %s", (source,))
+    )
+    return int(row[0])
+
+
+def recent_alert_for_model(
+    conn: psycopg.Connection,
+    source: str,
+    model_key: str,
+    price_minor: int,
+    since: datetime,
+    exclude_external_id: str,
+) -> bool:
+    """¿Otra publicación del mismo modelo alertó a ±1 % desde `since`? (spec de eBay §4.2)."""
+    row = _one(
+        conn,
+        """SELECT 1 FROM discountz.catalog_item
+            WHERE source = %s AND model_key = %s AND external_id <> %s
+              AND last_alert_at >= %s
+              AND abs(last_alert_minor - %s) * 100 <= last_alert_minor
+            LIMIT 1""",
+        (source, model_key, exclude_external_id, since, price_minor),
+    )
+    return row is not None
 
 
 def hot_catalog_ids(

@@ -29,10 +29,10 @@ def _scalar(conn: psycopg.Connection, query: str) -> object:
 
 def test_up_down_up(empty_db_url: str) -> None:
     with connect(empty_db_url) as conn:
-        assert migrate(conn, "head") == [1, 2, 3, 4]
-        assert current_version(conn) == SCHEMA_VERSION == 4
-        assert _scalar(conn, "SELECT count(*) FROM discountz.source") == 14
-        assert migrate(conn, 3) == [4]
+        assert migrate(conn, "head") == [1, 2, 3, 4, 5]
+        assert current_version(conn) == SCHEMA_VERSION == 5
+        assert _scalar(conn, "SELECT count(*) FROM discountz.source") == 15
+        assert migrate(conn, 3) == [5, 4]
         assert _scalar(conn, "SELECT count(*) FROM discountz.source WHERE kind = 'channel'") == 3
         assert migrate(conn, 1) == [3, 2]
         assert _scalar(conn, "SELECT to_regclass('discountz.catalog_item')") is None
@@ -40,7 +40,7 @@ def test_up_down_up(empty_db_url: str) -> None:
         assert migrate(conn, 0) == [1]
         assert current_version(conn) == 0
         assert _scalar(conn, "SELECT to_regclass('discountz.listing')") is None
-        assert migrate(conn, "head") == [1, 2, 3, 4]
+        assert migrate(conn, "head") == [1, 2, 3, 4, 5]
         assert migrate(conn, "head") == []
 
 
@@ -56,7 +56,7 @@ def test_down_0004_removes_feeds_and_the_baseline_flag(db: psycopg.Connection) -
                   ('tg_cajitatech', 88168, now(), 'oled tv', 4499, 'USD', 'electro', now())"""
     )
     assert _scalar(db, "SELECT bool_or(baseline) FROM discountz.channel_post") is False
-    assert migrate(db, 3) == [4]
+    assert migrate(db, 3) == [5, 4]
     assert _scalar(db, "SELECT channel FROM discountz.channel_post") == "tg_cajitatech"
     assert _scalar(db, "SELECT count(*) FROM discountz.channel_cursor") == 0
     flag = """SELECT count(*) FROM information_schema.columns
@@ -72,6 +72,7 @@ def test_seed_sources_and_gates(db: psycopg.Connection) -> None:
         "bestbuy_us": False,
         "carulla": True,
         "dealnews": True,
+        "ebay_us": True,
         "exito": True,
         "newegg": True,
         "olimpica": True,
@@ -165,10 +166,10 @@ def test_migrate_waits_for_lease_then_gives_up(db: psycopg.Connection) -> None:
 def test_migrate_with_free_lease_releases_it(db: psycopg.Connection) -> None:
     assert migrate_with_lease(
         db, 0, holder="migrate:9", wait_s=1, sleep=lambda s: None, monotonic=lambda: 0.0
-    ) == [4, 3, 2, 1]
+    ) == [5, 4, 3, 2, 1]
     assert migrate_with_lease(
         db, "head", holder="migrate:9", wait_s=1, sleep=lambda s: None, monotonic=lambda: 0.0
-    ) == [1, 2, 3, 4]
+    ) == [1, 2, 3, 4, 5]
     assert _scalar(db, "SELECT holder FROM discountz.run_lease") is None
 
 
@@ -178,3 +179,37 @@ def test_cli_migrate_head_and_zero(empty_db_url: str, monkeypatch: pytest.Monkey
     assert main(["migrate", "--to", "0"]) == 0
     with connect(empty_db_url) as conn:
         assert current_version(conn) == 0
+
+
+def test_0005_up_down(db: psycopg.Connection) -> None:
+    assert _scalar(db, "SELECT kind FROM discountz.source WHERE code = 'ebay_us'") == "store"
+    db.execute(
+        """INSERT INTO discountz.catalog_item (source, external_id, model_key, topic, currency,
+               price_minor, first_seen_at, stable_since, last_seen_at)
+           VALUES ('ebay_us', '123456789012', '2288855660', 'tecnologia', 'USD', 8999,
+                   now(), now(), now())"""
+    )
+    with pytest.raises(errors.CheckViolation), db.transaction():
+        db.execute("UPDATE discountz.catalog_item SET model_key = 'abc'")
+    db.execute(
+        """INSERT INTO discountz.listing (source, external_id, canonical_url, title,
+               first_seen_at, last_seen_at, last_in_stock, last_seller_class)
+           VALUES ('ebay_us', '123456789012', 'https://www.ebay.com/itm/123456789012', 't',
+                   now(), now(), true, 'f')"""
+    )
+    db.execute(
+        """INSERT INTO discountz.alert (listing_id, kind, maturity, price_minor, observed_at)
+           SELECT id, 'model_low', 'cold', 8999, now() FROM discountz.listing"""
+    )
+    assert migrate(db, 4) == [5]
+    assert _scalar(db, "SELECT count(*) FROM discountz.source WHERE code = 'ebay_us'") == 0
+    assert _scalar(db, "SELECT count(*) FROM discountz.alert") == 0
+    assert (
+        _scalar(
+            db,
+            """SELECT count(*) FROM information_schema.columns
+                WHERE table_name = 'catalog_item' AND column_name = 'model_key'""",
+        )
+        == 0
+    )
+    assert migrate(db, "head") == [5]

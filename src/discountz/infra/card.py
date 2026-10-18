@@ -53,6 +53,7 @@ STORE_COLORS: Mapping[str, str] = MappingProxyType(
         # Feeds sin verificar: colores propios (no son los de sus marcas).
         "dealnews": "#7C3AED",
         "slickdeals_amazon": "#4D7C0F",
+        "ebay_us": "#0064D2",
     }
 )
 DEFAULT_COLOR = "#334155"
@@ -70,6 +71,8 @@ class CardData:
     kind: AlertKind
     badge: str | None = None  # franja «<Canal> · sin verificar»
     coupon: str | None = None
+    reference_label: str = "Antes"  # eBay §4.2: «Mediana de N publicaciones del mismo modelo»
+    note: str | None = None  # reemplaza la línea «Mínimo en N días» (eBay: vendedor y envío)
 
 
 @cache
@@ -197,18 +200,25 @@ def _community_lines(
 
 
 def _catalog_lines(draw: ImageDraw.ImageDraw, data: CardData, usual: Money) -> None:
-    label_font = _font("SemiBold", 40)
-    draw.text((60, 922), "Antes ", font=label_font, fill=MUTED, anchor="ls")
-    x = 60 + int(draw.textlength("Antes ", font=label_font))
     before = format_money(usual)
+    label = f"{data.reference_label} "
+    label_font = _fit_font(draw, label + before, "SemiBold", 40, 960)
+    draw.text((60, 922), label, font=label_font, fill=MUTED, anchor="ls")
+    x = 60 + int(draw.textlength(label, font=label_font))
     draw.text((x, 922), before, font=label_font, fill=MUTED, anchor="ls")
-    width = int(draw.textlength(before, font=label_font))
-    draw.line((x - 2, 909, x + width + 2, 909), fill=MUTED, width=4)
+    if data.reference_label == "Antes":  # la mediana del modelo no es un precio tachado
+        width = int(draw.textlength(before, font=label_font))
+        draw.line((x - 2, 909, x + width + 2, 909), fill=MUTED, width=4)
 
     if data.kind is AlertKind.PRICE_ERROR:
         draw.text(
             (60, 985), "POSIBLE ERROR DE PRECIO", font=_font("Bold", 34), fill=RED, anchor="ls"
         )
-    else:
+        return
+    line = data.note
+    if line is None and data.kind is not AlertKind.MODEL_LOW:
         line = f"Mínimo en {data.min_days} días"
-        draw.text((60, 985), line, font=_font("Regular", 32), fill=SOFT, anchor="ls")
+    if line is not None:
+        draw.text(
+            (60, 985), line, font=_fit_font(draw, line, "Regular", 32, 960), fill=SOFT, anchor="ls"
+        )

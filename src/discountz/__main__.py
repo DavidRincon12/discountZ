@@ -17,7 +17,7 @@ from typing import Literal, cast
 
 import psycopg
 
-from discountz.app.crawl import CrawlDeps, run_crawl
+from discountz.app.crawl import CrawlDeps, crawl_max_items, run_crawl
 from discountz.app.cycle import CycleDeps, run_cycle
 from discountz.config import Settings, load_canaries, load_params, load_settings, load_topics
 from discountz.domain.errors import ConfigError, LeaseBusy
@@ -234,6 +234,9 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         print(f"crawl: {exc}", file=sys.stderr)
         return EXIT_CONFIG
+    if args.source == "ebay_us" and settings.ebay_cert_id is None:
+        print(f"crawl: {args.source} sin credenciales; se omite")
+        return EXIT_OK
     source = load_all().get(args.source)
     budget = params.crawl.get(args.source)
     if source is None or budget is None or Capability.CATALOG not in source.descriptor.capabilities:
@@ -274,6 +277,7 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
                     monotonic=time.monotonic,
                     sleep=time.sleep,
                     rnd=rnd,
+                    max_items=crawl_max_items(args.source, params),
                 ),
                 now,
                 args.minutes,

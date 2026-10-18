@@ -1,0 +1,6 @@
+{
+  "status": 429,
+  "url": "https://api.ebay.com/buy/browse/v1/item_summary/search",
+  "recorded_at": "2026-10-18",
+  "nota": "Sintética: cuerpo documentado de cuota agotada (errorId 2001); no se gastó la cuota para grabarla."
+}

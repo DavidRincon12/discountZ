@@ -27,9 +27,11 @@ def row(
     ean: str | None = None,
     last_changed: datetime | None = None,
     reads: int = 1,
+    model_key: str | None = None,
+    currency: str = "COP",
 ) -> CatalogRow:
     state_ = state(price, last_changed=last_changed, reads=reads)
-    return CatalogRow(ext, ean, "tecnologia", "COP", state_, changed)
+    return CatalogRow(ext, ean, "tecnologia", currency, state_, changed, model_key)
 
 
 def count(db: psycopg.Connection, table: str) -> int:
@@ -167,3 +169,47 @@ def test_alert_accepts_catalog_drop(db: psycopg.Connection) -> None:
            SELECT id, 'catalog_drop', 'warm', 59900, now() FROM discountz.listing"""
     )
     assert count(db, "alert") == 1
+
+
+def ebay(ext: str, price: int, model_key: str | None = "123456") -> CatalogRow:
+    return row(ext, price, model_key=model_key, currency="USD")
+
+
+def test_model_peer_prices_groups_and_window(db: psycopg.Connection) -> None:
+    repo.save_catalog_page(db, "ebay_us", [ebay("111111111", 9000)], T - timedelta(days=8))
+    repo.save_catalog_page(
+        db,
+        "ebay_us",
+        [ebay("222222222", 10000), ebay("333333333", 11000), ebay("444444444", 12000)],
+        T,
+    )
+    repo.save_catalog_page(db, "ebay_us", [ebay("555555555", 500, model_key="999999")], T)
+    peers = repo.model_peer_prices(db, "ebay_us", ["123456", "777777"], T - timedelta(days=7))
+    assert sorted(peers["123456"]) == [
+        ("222222222", 10000),
+        ("333333333", 11000),
+        ("444444444", 12000),
+    ]
+    assert "777777" not in peers
+
+
+def test_save_page_keeps_model_key_when_missing(db: psycopg.Connection) -> None:
+    repo.save_catalog_page(db, "ebay_us", [ebay("222222222", 10000)], T)
+    repo.save_catalog_page(db, "ebay_us", [ebay("222222222", 9000, model_key=None)], T)
+    r = db.execute("SELECT model_key FROM discountz.catalog_item").fetchone()
+    assert r == ("123456",)
+
+
+def test_count_catalog_items(db: psycopg.Connection) -> None:
+    repo.save_catalog_page(db, "ebay_us", [ebay("222222222", 1), ebay("333333333", 2)], T)
+    repo.save_catalog_page(db, "exito", [row("1", 99_900)], T)
+    assert repo.count_catalog_items(db, "ebay_us") == 2
+
+
+def test_recent_alert_for_model_excludes_self_and_tolerance(db: psycopg.Connection) -> None:
+    repo.save_catalog_page(db, "ebay_us", [ebay("222222222", 10000)], T)
+    repo.mark_catalog_alert(db, "ebay_us", "222222222", 10000, T - timedelta(hours=2))
+    since = T - timedelta(hours=6)
+    assert repo.recent_alert_for_model(db, "ebay_us", "123456", 10050, since, "333333333")
+    assert not repo.recent_alert_for_model(db, "ebay_us", "123456", 10200, since, "333333333")
+    assert not repo.recent_alert_for_model(db, "ebay_us", "123456", 10000, since, "222222222")

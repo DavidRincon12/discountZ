@@ -66,9 +66,14 @@ class Settings(BaseSettings):
     walmart_key_version: str | None = None
     walmart_private_key: SecretStr | None = None
     walmart_publisher_id: str | None = None
+    # eBay (ADR 0008): App ID y Cert ID del keyset de producción; sin ellos, eBay no rastrea.
+    ebay_app_id: str | None = None
+    ebay_cert_id: SecretStr | None = None
 
     @field_validator(
         "bestbuy_api_key",
+        "ebay_app_id",
+        "ebay_cert_id",
         "walmart_consumer_id",
         "walmart_key_version",
         "walmart_private_key",
@@ -89,6 +94,12 @@ class Settings(BaseSettings):
         )
         if any(v is not None for v in given) and not all(v is not None for v in given):
             raise PydanticCustomError("walmart_incomplete", "faltan credenciales de Walmart")
+        return self
+
+    @model_validator(mode="after")
+    def _ebay_both_or_none(self) -> Settings:
+        if (self.ebay_app_id is None) != (self.ebay_cert_id is None):
+            raise PydanticCustomError("ebay_incomplete", "faltan credenciales de ebay")
         return self
 
 
@@ -197,6 +208,15 @@ class _Channels(_Strict):
     interval_min: Pos = 10
 
 
+class _Ebay(_Strict):
+    ship_to_zip: Annotated[str, Field(pattern=r"^[0-9]{5}$")] = "33166"
+    items_per_partition: Annotated[int, Field(ge=1, le=200)] = 75
+    max_items: Pos = 150_000
+    min_feedback_pct: Annotated[int, Field(ge=0, le=100)] = 98
+    min_feedback_score: NonNeg = 100
+    excluded_roots: list[Pos] = Field(default_factory=list)
+
+
 class _Params(_Strict):
     quiet_hours: _Quiet
     pricing: _Pricing
@@ -205,6 +225,19 @@ class _Params(_Strict):
     events: list[_Event] = Field(default_factory=list)
     crawl: dict[str, _Crawl] = Field(default_factory=dict)
     channels: _Channels = Field(default_factory=_Channels)
+    ebay: _Ebay = Field(default_factory=_Ebay)
+
+
+@dataclass(frozen=True, slots=True)
+class EbayParams:
+    """Parámetros del rastreo de eBay (spec de eBay §2 y §3)."""
+
+    ship_to_zip: str = "33166"
+    items_per_partition: int = 75
+    max_items: int = 150_000
+    min_feedback_pct: int = 98
+    min_feedback_score: int = 100
+    excluded_roots: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +250,7 @@ class AppParams:
     quiet_end: time
     crawl: Mapping[str, CrawlBudget] = MappingProxyType({})
     channel_interval: timedelta = timedelta(minutes=10)  # cada canal como máximo cada N
+    ebay: EbayParams = EbayParams()
 
 
 def _days(n: int) -> timedelta:
@@ -332,6 +366,14 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
             }
         ),
         channel_interval=timedelta(minutes=raw.channels.interval_min),
+        ebay=EbayParams(
+            ship_to_zip=raw.ebay.ship_to_zip,
+            items_per_partition=raw.ebay.items_per_partition,
+            max_items=raw.ebay.max_items,
+            min_feedback_pct=raw.ebay.min_feedback_pct,
+            min_feedback_score=raw.ebay.min_feedback_score,
+            excluded_roots=frozenset(raw.ebay.excluded_roots),
+        ),
     )
 
 

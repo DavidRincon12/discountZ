@@ -19,7 +19,13 @@ import psycopg
 
 from discountz.app.render import esc, render_catalog_alert, reply_markup, source_name, truncate
 from discountz.config import AppParams, Topics
-from discountz.domain.catalog import CatalogCandidate, CatalogObservation, observe
+from discountz.domain.catalog import (
+    CatalogCandidate,
+    CatalogObservation,
+    CatalogState,
+    model_candidate,
+    observe,
+)
 from discountz.domain.errors import BudgetExhausted, HardBlock, ParseError, SourceError
 from discountz.domain.guards import check_offer
 from discountz.domain.health import BreakerEvent, BreakerState, breaker_transition, effective_state
@@ -45,6 +51,8 @@ log = logging.getLogger(__name__)
 LEASE_TTL = timedelta(minutes=60)
 HOT_WINDOW = timedelta(days=7)
 EAN_WINDOW = timedelta(hours=6)
+MODEL_WINDOW = timedelta(days=7)  # pares del mismo modelo (spec de eBay §4.2)
+QUOTA = "quota"  # cuota diaria de una API agotada: no es una falla de la fuente
 ALERT_TTL = timedelta(hours=24)
 PARSE_STOP = 3  # errores de parseo seguidos que detienen la corrida
 CONFIRM_TOL_PCT = 1  # la relectura debe quedar a ±1 % del precio visto
@@ -53,7 +61,7 @@ ERRORS_TOPIC = "errores"
 
 # Con la BD en ≥ 450 MB el mantenimiento pausa el descubrimiento: también el rastreo de las
 # tiendas más grandes (spec del rastreo §7.2).
-PAUSED_AT_450 = frozenset({"exito", "carulla"})
+PAUSED_AT_450 = frozenset({"exito", "carulla", "ebay_us"})
 CrawlStatus = Literal["ok", "partial", "blocked", "skipped_locked", "disabled"]
 
 
@@ -70,6 +78,7 @@ class CrawlDeps:
     monotonic: Callable[[], float]
     sleep: Callable[[float], None]
     rnd: random.Random
+    max_items: int | None = None  # tope de publicaciones guardadas (eBay: 150 mil)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +96,7 @@ class _Found:
     obs: CatalogObservation
     candidate: CatalogCandidate
     topic: str
+    peers: int = 0  # > 0: la referencia es la mediana de esos pares del mismo modelo
 
 
 class _Stop(Exception):
@@ -240,7 +250,8 @@ class _Run:
             raise _Stop("blocked") from None
         except SourceError as exc:
             self.log_error(exc)
-            self.breaker_event(BreakerEvent.UNAVAILABLE)
+            if exc.code != QUOTA:  # la cuota vuelve sola mañana: no cuenta para el breaker
+                self.breaker_event(BreakerEvent.UNAVAILABLE)
             raise _Stop("partial") from None
         self.parse_streak = 0
         self.ok_pages += 1
@@ -281,22 +292,24 @@ class _Run:
         self.pages += 1
         params = self.deps.topics.params
         states = db.load_catalog_states(self.conn, self.code, [o.external_id for o in items])
+        items = self.within_cap(items, states)
+        peers = self.model_peers(items)
         rows: dict[str, db.CatalogRow] = {}
         found: list[_Found] = []
         for o in items:
             topic = assign_topic(self.deps.topics.rules, self.code, o.category_path)
-            state, cand, changed = observe(
-                states.get(o.external_id), o, self.now, params[topic], self.deps.params.glob
-            )
+            prev = states.get(o.external_id)
+            state, cand, changed = observe(prev, o, self.now, params[topic], self.deps.params.glob)
             currency = o.price.currency.value
             rows[o.external_id] = db.CatalogRow(
-                o.external_id, o.ean, topic, currency, state, changed
+                o.external_id, o.ean, topic, currency, state, changed, o.model_key
             )
             self.items += 1
             self.changes += int(changed)
-            if cand is not None:
-                found.append(_Found(o, cand, topic))
-        fresh = [f for f in found if not self.duplicate(f)]
+            best = self.best_candidate(prev, o, cand, peers, topic)
+            if best is not None:
+                found.append(best)
+        fresh = _cheapest_per_model([f for f in found if not self.duplicate(f)])
         # Un candidato no mueve su estado hasta que la confirmación responda: si falla por red,
         # bloqueo o corte, la próxima lectura lo vuelve a detectar (revisión final, hallazgo 2).
         real = {f.obs.external_id: rows[f.obs.external_id] for f in fresh}
@@ -308,7 +321,50 @@ class _Run:
         if fresh:
             self.confirm(fresh, real)
 
+    def within_cap(
+        self, items: Sequence[CatalogObservation], states: Mapping[str, CatalogState]
+    ) -> Sequence[CatalogObservation]:
+        """Con el tope alcanzado solo se actualizan las publicaciones ya guardadas."""
+        cap = self.deps.max_items
+        if cap is None or db.count_catalog_items(self.conn, self.code) < cap:
+            return items
+        return [o for o in items if o.external_id in states]
+
+    def model_peers(self, items: Sequence[CatalogObservation]) -> dict[str, list[tuple[str, int]]]:
+        keys = sorted({o.model_key for o in items if o.model_key is not None})
+        return db.model_peer_prices(self.conn, self.code, keys, self.now - MODEL_WINDOW)
+
+    def best_candidate(
+        self,
+        prev: CatalogState | None,
+        o: CatalogObservation,
+        cand: CatalogCandidate | None,
+        peers: Mapping[str, list[tuple[str, int]]],
+        topic: str,
+    ) -> _Found | None:
+        """Bajada de la misma publicación (§4.1) o precio bajo frente al modelo (§4.2): gana la
+        de mayor descuento."""
+        best = _Found(o, cand, topic) if cand is not None else None
+        if o.model_key is None:
+            return best
+        prices = [p for ext, p in peers.get(o.model_key, []) if ext != o.external_id]
+        params = self.deps.topics.params[topic]
+        model = model_candidate(prev, self.now, o, prices, params, self.deps.params.glob)
+        if model is not None and (best is None or model.drop_bp > best.candidate.drop_bp):
+            return _Found(o, model, topic, len(prices))
+        return best
+
     def duplicate(self, f: _Found) -> bool:
+        if f.obs.model_key is not None and db.recent_alert_for_model(
+            self.conn,
+            self.code,
+            f.obs.model_key,
+            f.obs.price.minor,
+            self.now - EAN_WINDOW,
+            exclude_external_id=f.obs.external_id,
+        ):
+            event(log, "catalog_skip", source=self.code, code="model_duplicate")
+            return True
         if f.obs.ean is None:
             return False
         dup = db.recent_alert_for_ean(
@@ -424,7 +480,7 @@ class _Run:
             db.mark_catalog_alert(self.conn, self.code, f.obs.external_id, price, self.now)
             if alert_id is None or delivery != "new":
                 return
-            card = _card(self.code, f.topic, title, url, facts, cand)
+            card = _card(self.code, f.topic, title, url, facts, cand, f.peers)
             msg = render_catalog_alert(card, prev.id, topic.title)
             is_error = kind is AlertKind.PRICE_ERROR
             outbox_id = db.enqueue(
@@ -454,6 +510,19 @@ class _Run:
         self.alerts += 1
 
 
+def _cheapest_per_model(found: Sequence[_Found]) -> list[_Found]:
+    """Dos publicaciones del mismo modelo en una página alertan una sola vez: la más barata."""
+    best: dict[str, _Found] = {}
+    out: list[_Found] = []
+    for f in found:
+        key = f.obs.model_key
+        if key is None:
+            out.append(f)
+        elif key not in best or f.obs.price.minor < best[key].obs.price.minor:
+            best[key] = f
+    return out + list(best.values())
+
+
 def _later(a: datetime | None, b: datetime | None) -> datetime | None:
     if a is None or b is None:
         return a or b
@@ -467,7 +536,12 @@ def _card(
     url: str,
     facts: CardFacts | None,
     cand: CatalogCandidate,
+    peers: int = 0,
 ) -> dict[str, Any]:
+    if peers:
+        label = f"Mediana de {peers} publicaciones del mismo modelo"
+    else:
+        label = facts.reference_label if facts else "Antes"
     return {
         "store": store,
         "topic": topic,
@@ -480,6 +554,9 @@ def _card(
         "drop_bp": cand.drop_bp,
         "min_days": cand.min_days,
         "kind": cand.kind.value,
+        "reference_label": label,
+        "note": facts.note if facts else None,
+        "peers": peers,
     }
 
 
@@ -489,6 +566,11 @@ def _error_line(store: str, title: str, cand: CatalogCandidate, listing_id: int)
         f"<b>{esc(truncate(title, 120))}</b> a <b>{format_money(cand.price)}</b> "
         f"(antes {format_money(cand.usual)}). Detalle en «Errores de precio» · L{listing_id}"
     )
+
+
+def crawl_max_items(code: str, params: AppParams) -> int | None:
+    """Tope de publicaciones guardadas: solo eBay lo tiene (spec de eBay §3)."""
+    return params.ebay.max_items if code == "ebay_us" else None
 
 
 def run_crawl(deps: CrawlDeps, now: datetime, minutes: int) -> CrawlResult:
