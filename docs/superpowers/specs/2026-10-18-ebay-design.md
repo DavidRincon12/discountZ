@@ -66,7 +66,7 @@ Filtro común de búsqueda: `conditions:{NEW},buyingOptions:{FIXED_PRICE},delive
 
 **Precio observado** = `price` + costo del envío más barato a Miami, en centavos de USD. Así, una bajada de precio compensada con un envío más caro no da alerta. El `marketingPrice` nunca se usa como «antes», igual que el `ListPrice` de VTEX.
 
-**Ids:** `external_id` es el `itemId` de la Browse API (`v1|<legacy>|<variación>`, `^v1\|\d{9,15}\|\d{1,15}$`). `parse_url` acepta `www.ebay.com/itm/<legacy>` y `/itm/<slug>/<legacy>`, con `?var=<id>` opcional, y lo traduce sin red a `v1|<legacy>|<var o 0>`.
+**Ids:** la BD exige `external_id` alfanumérico (`^[A-Za-z0-9]{1,40}$`), así que el `itemId` de la Browse API (`v1|<legacy>|<variación>`) se guarda como `<legacy>` (`^\d{9,15}$`) o, si trae variación distinta de 0, `<legacy>V<variación>`. `to_item_id`/`from_item_id` hacen la traducción en el adaptador. `parse_url` acepta `www.ebay.com/itm/<legacy>` y `/itm/<slug>/<legacy>`, con `?var=<id>` opcional, sin red.
 
 **Vendedor:** las publicaciones que pasan el filtro de B4 cuentan como `SellerClass.FIRST_PARTY`, como anticipaba la fila SP-4 de la v1 (`seller_class` según `feedbackScore`). Así pasan la regla `allow_marketplace = false` de Tecnología. En `/seguir`, un vendedor bajo el umbral da `MARKETPLACE` y queda sujeto a esa regla (G14).
 
@@ -76,8 +76,8 @@ Filtro común de búsqueda: `conditions:{NEW},buyingOptions:{FIXED_PRICE},delive
 
 - **Particiones:** las categorías de nivel 3 de las 19 raíces (las de nivel 2 sin hijos cuentan como partición), leídas del árbol al empezar la corrida y ordenadas por id. Hoy son ~2.054. Las raíces excluidas (`[ebay] excluded_roots`) son: 1, 99, 237, 260, 316, 550, 870, 1305, 3252, 10542, 11116, 20081, 45100, 64482 y 172008.
 - **Página:** `limit = [ebay] items_per_partition` (75 por defecto) en el orden por defecto de eBay, solo `offset = 0`. Cada partición es una página, así que `has_more = false`. 2.054 × 75 ≈ 154 mil publicaciones, que es el tope de B4.
-- **Ritmo:** `[crawl.ebay_us]` con `max_per_run = 150` y `max_per_24h = 3600` búsquedas. Una vuelta completa tarda ~14 h y deja ~1.400 búsquedas al día para `/buscar` y `confirm`.
-- **Capa caliente:** relee por `item_ids` (cuota aparte) lo que cambió de precio en 7 días, hasta 200 lotes de 20 por corrida (4.000 publicaciones por hora).
+- **Ritmo:** `[crawl.ebay_us]` con `max_per_run = 200`, `max_per_24h = 4800` y `hot_share_bp = 4000`: por hora ~120 búsquedas del barrido (~2.880 al día, una vuelta completa cada ~17 h) y ~80 lotes de la capa caliente. Quedan ~2.100 búsquedas al día de `buy.browse` para `/buscar` y `confirm`.
+- **Capa caliente:** la de siempre (`hot_catalog_ids`), releída por `item_ids` en lotes de 20 con la cuota aparte: ~1.600 publicaciones que cambiaron de precio en 7 días por hora.
 - **Tope de la BD:** si `catalog_item` de `ebay_us` pasa de `[ebay] max_items` (150.000), la corrida no inserta publicaciones nuevas. Solo actualiza las que ya conoce. Con la BD en ≥ 450 MB, `ebay_us` se pausa igual que Éxito y Carulla.
 - **Tema:** reglas `ebay_us:` en `config/topics.toml` sobre la ruta de categorías de eBay (`/consumer electronics/tv, video & home audio/…`). Las 19 raíces quedan asignadas: ninguna cae en Otros sin querer.
 
@@ -90,12 +90,12 @@ Es `domain/catalog.observe` sin cambios: «antes» estable 24 h, 2 lecturas al m
 ### 4.2 Precio bajo frente al mismo modelo (B3)
 
 - Función pura nueva `domain/catalog.model_candidate(price, peers, topic) -> CatalogCandidate | None`, con `peers = (mediana_minor, n)` de las demás publicaciones del mismo modelo.
-- Hay candidato si `n ≥ 5` y `price ≤ mediana × (1 − t_bp)`. El descuento es `drop_bp = (mediana − price) / mediana` y la alerta es de clase nueva `AlertKind.MODEL_LOW`. Si además `drop_bp ≥ g_bp` del tema, la alerta va como `PRICE_ERROR` al tema de errores, igual que en el rastreo.
-- **Pares:** publicaciones de `ebay_us` con el mismo `model_key` vistas en 7 días, excluida la propia, con una consulta por página para todos los modelos de la página (`percentile_disc(0.5)` agrupado por `model_key`).
+- Hay candidato si `n ≥ 5`, `price ≤ mediana × (1 − t_bp)` y `mediana − price ≥ min_abs` (el piso global en USD). El descuento es `drop_bp = (mediana − price) / mediana` y la alerta es de clase nueva `AlertKind.MODEL_LOW`. Si además `drop_bp ≥ g_bp` del tema, la alerta va como `PRICE_ERROR` al tema de errores, igual que en el rastreo.
+- **Pares:** publicaciones de `ebay_us` con el mismo `model_key` vistas en 7 días, excluida la propia. Una consulta por página trae los precios de todos los modelos de la página (hasta 200 por modelo, los más recientes) y el dominio calcula la mediana (la baja, si son pares).
 - `model_key` es el `epid` (texto `^\d{4,15}$`). En la búsqueda, las publicaciones sin `epid` no tienen modelo y solo usan §4.1.
 - Una publicación no alerta por §4.2 dos veces sin bajar más su precio: aplica el mismo `last_alert_at`/`last_alert_minor` de §4.1. Si en la misma lectura salen §4.1 y §4.2, gana la de mayor `drop_bp`.
 - **Duplicados:** otra publicación del mismo `model_key` que ya alertó en 6 h a ±1 % descarta la nueva. Es la regla del EAN aplicada dentro de la misma fuente.
-- La confirmación es la de §4.1. Además, la ficha debe seguir trayendo el mismo `epid`.
+- La confirmación es la de §4.1.
 
 ## 5. Tarjeta y mensaje
 
@@ -140,7 +140,7 @@ Es la tarjeta del rastreo con estos cambios:
 
 - **Términos de eBay:** según una fuente secundaria, el acuerdo de la API pide que lo mostrado no tenga más de 6 h de atraso y prohíbe entrenar IA con los datos. Toda alerta relee la ficha antes de enviarse, solo se guardan números y nada se redistribuye. Se revisa el texto oficial antes de activar el job.
 - **Cobertura:** el barrido sigue las 75 mejor posicionadas por categoría de nivel 3, no todo eBay. Una publicación nueva que sale barata y no entra en ese corte no se ve, salvo por `/buscar` o `/seguir`.
-- **Modelo mal asignado** por el vendedor: el umbral `t_bp` y n ≥ 5 lo amortiguan, y la confirmación exige el mismo `epid`.
+- **Modelo mal asignado** por el vendedor: el umbral `t_bp`, n ≥ 5 y el piso `min_abs` lo amortiguan.
 - **Cuota:** con 5.000 diarias no hay margen para más particiones. El presupuesto de 24 h la protege.
 - **BD:** ~70 MB estimados con 150 mil publicaciones (de 290 a ~360 MB).
 
