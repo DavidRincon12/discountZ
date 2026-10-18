@@ -33,6 +33,7 @@ jobs:
           DISCOUNTZ_TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           DISCOUNTZ_TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DISCOUNTZ_TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+          DISCOUNTZ_TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           DISCOUNTZ_HEALTHCHECKS_URL: ${{ secrets.HEALTHCHECKS_PING_URL }}
           DISCOUNTZ_GH_RUN_ID: ${{ github.run_id }}
           DISCOUNTZ_GH_RUN_ATTEMPT: ${{ github.run_attempt }}

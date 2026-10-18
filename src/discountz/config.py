@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr
     telegram_chat_id: int
     telegram_owner_id: int
+    # Canal general (solo lectura) que recibe copia de todas las ofertas; sin él no se copia.
+    telegram_channel_id: int | None = None
     healthchecks_url: SecretStr | None = None
     soft_deadline_s: Annotated[int, Field(gt=0, le=900)] = 480
     gh_run_id: int | None = None
@@ -73,6 +75,7 @@ class Settings(BaseSettings):
     @field_validator(
         "bestbuy_api_key",
         "ebay_app_id",
+        "telegram_channel_id",
         "ebay_cert_id",
         "walmart_consumer_id",
         "walmart_key_version",

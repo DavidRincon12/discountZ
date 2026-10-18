@@ -122,6 +122,14 @@ def test_settings_load_and_hide_secrets(env: None) -> None:
     assert SECRET not in repr(s) and "CANARYPASS" not in repr(s)
 
 
+def test_channel_id_is_optional(env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert load_settings().telegram_channel_id is None
+    monkeypatch.setenv("DISCOUNTZ_TELEGRAM_CHANNEL_ID", " ")  # secreto sin definir en Actions
+    assert load_settings().telegram_channel_id is None
+    monkeypatch.setenv("DISCOUNTZ_TELEGRAM_CHANNEL_ID", "-1001234")
+    assert load_settings().telegram_channel_id == -1001234
+
+
 def test_bad_setting_message_has_no_values(env: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DISCOUNTZ_TELEGRAM_CHAT_ID", "no-es-numero")
     with pytest.raises(ConfigError) as info:

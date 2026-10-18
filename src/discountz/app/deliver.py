@@ -5,6 +5,10 @@ Cada mensaje va al tema de su categoría (spec del rastreo §5.1); si el tema no
 (tarjeta PNG) con el texto como pie; la foto del producto solo se descarga de los hosts que la
 fuente declara (`image_hosts`).
 
+Con `channel_id`, cada oferta (`alert` y `digest`) se copia además al canal general, sin tema y
+solo con los botones de enlace: los de callback solo los atiende el grupo. La copia es de mejor
+esfuerzo: no se reintenta y su fallo nunca cambia el estado de la fila del grupo.
+
 Se confirma `sending` antes de llamar a la API (`claim_outbox`): una caída entre el envío y el
 `sent` produce como mucho un duplicado (at-least-once, aceptado).
 """
@@ -54,6 +58,8 @@ TOPICS_NOTICE = (
     "Escribe /temas para crearlos."
 )
 
+CHANNEL_PURPOSES = frozenset({"alert", "digest"})
+
 PhotoFetcher = Callable[[str, str], bytes | None]  # (fuente, URL de la foto) → bytes o None
 
 
@@ -95,6 +101,18 @@ def _topic_titles() -> Mapping[str, str]:
     return out
 
 
+def link_buttons_only(markup: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Teclado sin botones de callback (en el canal nadie los puede atender)."""
+    if markup is None:
+        return None
+    rows = [
+        [b for b in row if isinstance(b, Mapping) and "url" in b]
+        for row in markup.get("inline_keyboard", [])
+    ]
+    rows = [row for row in rows if row]
+    return {"inline_keyboard": rows} if rows else None
+
+
 def card_png(card: Mapping[str, Any], photo: bytes | None) -> bytes:
     store = str(card["store"])
     currency = Currency(str(card["currency"]))
@@ -127,11 +145,32 @@ def deliver(
     deadline: float,
     photos: PhotoFetcher | None = None,
     limit: int = MAX_PER_CYCLE,
+    channel_id: int | None = None,
 ) -> DeliveryResult:
     rows = db.claim_outbox(conn, limit, now)
     threads = db.topic_threads(conn)
     sent = 0
     missing_topic = False
+    channel_ok = channel_id is not None
+
+    def mirror(row: db.OutboxRow, png: bytes | None, body: str, parse_mode: str | None) -> None:
+        nonlocal channel_ok
+        if channel_id is None or not channel_ok or row.purpose not in CHANNEL_PURPOSES:
+            return
+        sleep(PACE_S)
+        markup = link_buttons_only(row.reply_markup)
+        try:
+            if png is not None and parse_mode is not None:
+                tg.send_photo(channel_id, png, body, markup, silent=row.silent, thread_id=None)
+            else:
+                tg.send_message(channel_id, body, markup, silent=row.silent, parse_mode=parse_mode)
+        except (TelegramForbidden, TelegramBadRequest, TelegramRetryAfter) as exc:
+            # Sin permiso, id errado o límite de tasa: no se insiste con el canal en este ciclo.
+            channel_ok = False
+            event(log, "channel_off", logging.ERROR, error=type(exc).__name__)
+        except TelegramError as exc:
+            event(log, "channel_failed", ref=f"O{row.id}", code=str(exc))
+
     for i, row in enumerate(rows):
         if i:
             sleep(PACE_S)
@@ -178,6 +217,7 @@ def deliver(
                 thread, missing_topic = None, True
                 return send(body, thread=None)
 
+        mirrored: tuple[str, str | None] = (row.body_html, "HTML")
         try:
             try:
                 message_id = send_anywhere(row.body_html)
@@ -192,8 +232,9 @@ def deliver(
             event(log, "deliver_rate_limited", count=len(rows) - i)
             break
         except TelegramBadRequest:
+            mirrored = (plain_text(row.body_html), None)
             try:
-                message_id = send(plain_text(row.body_html), None, thread=thread)
+                message_id = send(*mirrored, thread=thread)
             except TelegramError as exc:
                 db.mark_retry(conn, row.id, str(exc))
                 continue
@@ -208,6 +249,7 @@ def deliver(
             continue
         db.mark_sent(conn, row.id, message_id, now)
         sent += 1
+        mirror(row, png, *mirrored)
     if missing_topic:
         db.enqueue(
             conn,

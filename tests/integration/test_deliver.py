@@ -76,10 +76,16 @@ def enqueue(
     )
 
 
+def forbidden() -> HttpResponse:
+    body = {"ok": False, "error_code": 403, "description": "Forbidden: bot is not a member"}
+    return HttpResponse(403, API, {}, json.dumps(body).encode(), 1)
+
+
 def run(
     conn: psycopg.Connection,
     routes: dict[str, HttpResponse | list[HttpResponse]],
     photos: object = None,
+    channel_id: int | None = None,
 ) -> FakeHttp:
     http = FakeHttp(routes)
     tg = TelegramClient(SecretStr(TOKEN), http)
@@ -92,6 +98,7 @@ def run(
         monotonic=lambda: 0.0,
         deadline=1e9,
         photos=photos,  # type: ignore[arg-type]
+        channel_id=channel_id,
     )
     return http
 
@@ -216,3 +223,85 @@ def test_thread_not_found_forgets_topic_so_temas_recreates_it(db: psycopg.Connec
     threads = [c[2].get("message_thread_id") for c in http.calls]  # type: ignore[union-attr]
     assert threads == [22, None, None]  # la segunda ya no insiste en el hilo borrado
     assert repo.topic_threads(db) == {"moda": 33}
+
+
+CHANNEL = -1009
+
+
+def test_deliver_mirrors_card_to_channel_without_topic_or_callbacks(
+    db: psycopg.Connection,
+) -> None:
+    repo.save_topic(db, "tecnologia", "📱 Tecnología", 11)
+    markup = {
+        "inline_keyboard": [
+            [{"text": "Abrir en Éxito", "url": "https://www.exito.com/celular/p"}],
+            [{"text": "Seguir", "callback_data": "fol:L1"}],
+        ]
+    }
+    repo.enqueue(
+        db,
+        "alert",
+        "<b>cat:1</b>",
+        priority=3,
+        dedup_key="cat:1",
+        now=T,
+        ttl=timedelta(hours=24),
+        reply_markup=markup,
+        topic="tecnologia",
+        card=CARD,
+    )
+    http = run(db, {f"{API}/sendPhoto": [ok(5), ok(6)]}, channel_id=CHANNEL)
+    (group, _), (channel, files) = http.uploads
+    assert group is not None and group["chat_id"] == "-100"
+    assert channel is not None and files is not None
+    assert channel["chat_id"] == str(CHANNEL)
+    assert "message_thread_id" not in channel
+    assert channel["caption"] == "<b>cat:1</b>"
+    link_row = markup["inline_keyboard"][0]
+    assert json.loads(channel["reply_markup"]) == {"inline_keyboard": [link_row]}
+    row = db.execute("SELECT status, telegram_message_id FROM discountz.outbox").fetchone()
+    assert row == ("sent", 5)  # el id guardado es el del grupo
+
+
+def test_deliver_mirrors_only_offers_to_channel(db: psycopg.Connection) -> None:
+    rows: tuple[tuple[repo.Purpose, str], ...] = (
+        ("alert", "a"),
+        ("digest", "d"),
+        ("system", "s"),
+        ("reply", "r"),
+    )
+    for purpose, text in rows:
+        repo.enqueue(
+            db, purpose, text, priority=3, dedup_key=f"k:{text}", now=T, ttl=timedelta(hours=24)
+        )
+    http = run(db, {f"{API}/sendMessage": ok()}, channel_id=CHANNEL)
+    sent = [(c[2]["chat_id"], str(c[2]["text"])) for c in http.calls]  # type: ignore[index]
+    assert sorted(t for chat, t in sent if chat == CHANNEL) == ["a", "d"]
+    assert sorted(t for chat, t in sent if chat == -100) == ["a", "d", "r", "s"]
+    to_channel = [c[2] for c in http.calls if c[2] is not None and c[2]["chat_id"] == CHANNEL]
+    assert [p.get("reply_markup") for p in to_channel] == [None, None]
+
+
+def test_channel_failure_does_not_touch_group_delivery(db: psycopg.Connection) -> None:
+    enqueue(db, "alert:1")
+    enqueue(db, "alert:2")
+    http = run(db, {f"{API}/sendMessage": [ok(1), forbidden(), ok(2), ok(3)]}, channel_id=CHANNEL)
+    chats = [c[2]["chat_id"] for c in http.calls]  # type: ignore[index]
+    assert chats == [-100, CHANNEL, -100]  # sin permiso en el canal: no se insiste en el ciclo
+    rows = db.execute("SELECT status FROM discountz.outbox ORDER BY id").fetchall()
+    assert rows == [("sent",), ("sent",)]
+
+
+def test_channel_mirror_uses_plain_text_when_html_was_rejected(db: psycopg.Connection) -> None:
+    enqueue(db, "alert:1")
+    bad = HttpResponse(
+        400,
+        API,
+        {},
+        json.dumps({"ok": False, "error_code": 400, "description": "Bad Request: x"}).encode(),
+        1,
+    )
+    http = run(db, {f"{API}/sendMessage": [bad, ok(1), ok(2)]}, channel_id=CHANNEL)
+    mirror = http.calls[-1][2]
+    assert mirror is not None and mirror["chat_id"] == CHANNEL
+    assert mirror["text"] == "alert:1" and "parse_mode" not in mirror
