@@ -1,0 +1,6 @@
+{
+  "status": 200,
+  "url": "https://api.ebay.com/buy/browse/v1/item_summary/search",
+  "recorded_at": "2026-10-18",
+  "recorte": "Grabada desde Actions el 2026-10-18; sin href/next, descripciones, fotos extra ni el parámetro amdata de itemWebUrl."
+}

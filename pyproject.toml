@@ -95,4 +95,5 @@ addopts = "-m 'not integration'"
 name = "Adaptadores independientes"
 type = "independence"
 modules = ["discountz.sources.vtex", "discountz.sources.amazon", "discountz.sources.newegg", "discountz.sources.slickdeals",
-           "discountz.sources.walmart", "discountz.sources.bestbuy", "discountz.sources.dealnews"]
+           "discountz.sources.walmart", "discountz.sources.bestbuy", "discountz.sources.dealnews",
+           "discountz.sources.ebay"]
