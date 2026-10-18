@@ -3,7 +3,7 @@
 ## Contexto
 Monitor **personal** de ofertas para David (Colombia). Rastrea tiendas colombianas (COP) y de EE. UU. que envían a casillero (USD), filtra descuentos inflados con un histórico propio y avisa por Telegram. Escala: decenas a pocos cientos de productos, un solo usuario, costo $0. Diseño completo: `docs/superpowers/specs/2026-10-13-discountz-v1-design.md`; decisiones en `docs/decisions/`.
 
-Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×4, Amazon US, Newegg, Walmart, Best Buy), el RSS de Slickdeals y el RSS de Amazon de DealNews.
+Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×4, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API), el RSS de Slickdeals y el RSS de Amazon de DealNews.
 
 ## Contenedores
 ```mermaid
@@ -18,7 +18,7 @@ flowchart LR
   david([David]) <-->|comandos y alertas| tg
   gha -.->|ping opcional| hc[[healthchecks.io]]
   cron -->|workflow_dispatch cada hora| crawl[GitHub Actions<br/>python -m discountz crawl<br/>un job por tienda]
-  crawl -->|catálogo VTEX y API de Best Buy| stores
+  crawl -->|catálogo VTEX y APIs de Best Buy y eBay| stores
   crawl --> db
 ```
 
@@ -72,6 +72,8 @@ Migración `0003_canales` (canales de Telegram, ADR 0005):
 
 Migración `0004_feeds_web` (feeds de Amazon, ADR 0006): fuentes `dealnews` y `slickdeals_amazon`, y `channel_post.baseline` para las ofertas que la primera lectura de un feed deja vistas sin enviar.
 
+Migración `0005_ebay` (ADR 0008): fuente `ebay_us`, `catalog_item.model_key` (el `epid` de eBay, con índice parcial) y `alert.kind = 'model_low'`.
+
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
 ## Flujos clave
@@ -91,7 +93,7 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
    1. Breaker abierto ⇒ `blocked`; tienda apagada (o Éxito y Carulla con la BD en ≥ 450 MB) ⇒ `disabled`; lease por tienda.
    2. Capa caliente (≤ 25 % del presupuesto): `fetch_changed` en Best Buy, relectura de lo que cambió hace poco en VTEX.
    3. Barrido desde el cursor: particiones por categoría raíz y, si pasan de 2.500 productos, bandas de precio partidas a demanda.
-   4. Cada página va a `domain/catalog.py` (puro); una bajada real contra el «antes» estable se confirma en la ficha (±1 %, stock, vendedor) y se descarta si otra tienda alertó el mismo EAN.
+   4. Cada página va a `domain/catalog.py` (puro); en eBay también se compara con la mediana de las publicaciones del mismo modelo (`model_candidate`, ADR 0008); una bajada real contra el «antes» estable se confirma en la ficha (±1 %, stock, vendedor) y se descarta si otra tienda alertó el mismo EAN.
    5. La alerta entra a `outbox` con su tema y su tarjeta; el ciclo la entrega como foto (`sendPhoto`) en ese tema.
 4. **Feed de Slickdeals**: una tarea `feed` baja el RSS una vez para todas las búsquedas `source='slickdeals'` vencidas → cada lead que coincide y apunta a una tienda activa (sin red: `href`, `u2=` o `data-aps-asin`) encola en memoria una lectura de ficha en esa tienda, antes que sus demás tareas → `evaluate(origin="lead")` puede dar `COMMUNITY_DEAL`. Los leads no se guardan, pero todo lead que lleva a una ficha crea un seguimiento automático (`aNN`, 30 días sin alerta, tope por tienda).
 
