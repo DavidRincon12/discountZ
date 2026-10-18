@@ -137,7 +137,7 @@ Las ofertas repetidas con los canales llegan una sola vez y suman en la línea �
 - Sin resumen diario de las 08:00: revisa *Actions → cycle* (workflows desactivados, secreto caducado o Supabase pausado).
 - Una alerta llegó a *General* con el aviso «falta su tema»: escribe `/temas` en el grupo.
 - Un canal o un feed aparece como roto en `/estado`: cambió el HTML de `t.me/s` o el RSS de DealNews o Slickdeals, y su circuit breaker lo pausa solo; las demás fuentes siguen.
-- Un job de *Actions → crawl* en rojo con código 3: la tienda bloqueó el rastreo y su circuit breaker la pausa sola; `/estado` muestra cuándo reintenta.
+- Un job de *Actions → crawl* en rojo con código 3: la tienda bloqueó el rastreo y su circuit breaker la pausa sola; `/estado` muestra cuándo reintenta. Si ya sabes que volvió, `/fuente on <codigo>` cierra el breaker de una vez.
 - Para rotar un secreto: BotFather `/revoke`, `ALTER ROLE … PASSWORD` o regenerar el check de healthchecks, y actualiza el secreto en GitHub.
 - Logs y artefactos de Actions se guardan 7 días y nunca contienen URLs, títulos, precios ni secretos.
 

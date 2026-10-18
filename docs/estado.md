@@ -6,16 +6,16 @@
 - Canales de Telegram (ADR 0005, PR #8) en producción desde el 2026-10-17: `tg_descuentostech`, `tg_clubgratis` y `tg_cajitatech`, tarjetas «sin verificar» y línea «Canales» en el resumen diario.
 - Best Buy y Walmart fuera por decisión de David (sin `BESTBUY_API_KEY`, `/fuente off walmart_us`). Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
 - Feeds de Amazon «sin verificar» (ADR 0006, PR #9) en producción desde el 2026-10-17 23:30Z (`dealnews` y `slickdeals_amazon`, esquema 4).
-- Suite: 777 pruebas (unitarias, integración y e2e) en verde el 2026-10-17.
+- Suite: 779 pruebas (unitarias, integración y e2e) en verde el 2026-10-18.
 
 ## Último cambio
-- PR #10: el rastreo de Éxito, Carulla y Olímpica se trababa en páginas de más de 24 MB (Moda de Éxito: 42,8 MB) hasta abrir el breaker; ahora `vtex` las pide por mitades y el log dice el código de cada error.
-- Rama `claude/discountz-puesta-en-marcha-mlcmm6` (ADR 0007): DealNews envía también las ofertas vigentes que vuelve a destacar con su `pubDate` viejo (`SourceDescriptor.refeatures`); la primera lectura las marca igual.
+- `/fuente on <codigo>` cierra el breaker y pone en cero sus rachas (conserva `breaker_trips`); la rampa del 50 % solo se fija si la fuente venía apagada. Antes había que esperar el backoff (hasta 12 h).
+- PR #10 (VTEX por mitades sobre 24 MB) y PR #11 (DealNews re-destacadas, ADR 0007) fusionados el 2026-10-18.
 
 ## Siguiente paso
-- David: fusionar el PR de DealNews con Squash and merge y dejar el disparo de `crawl` en cron-job.org cada hora (desde las 18:40Z del 2026-10-17 llega cada 5 min).
-- Criterio del PR #10 (fusionado 2026-10-17 23:48Z): cuando el breaker pasa a medio abierto (≤ 12 h), las corridas de Éxito, Carulla y Olímpica terminan en verde.
-- Mirar el volumen de la primera semana (estimado: ~33 al día de DealNews más ~13 re-destacadas, de las que ~7 llegan de una vez al fusionar, y ~5 por hora de Slickdeals). Si satura: `/fuente off slickdeals_amazon`.
+- David: fusionar este PR y mandar `/fuente on exito`, `/fuente on olimpica` y `/fuente on carulla` en el grupo; la siguiente corrida de `crawl` (cada hora) debe terminar en verde.
+- Las tarjetas de las tiendas CO llegan cuando un producto lleva 24 h con precio estable tras ese rastreo.
+- Mirar el volumen de la primera semana (~33 al día de DealNews más ~13 re-destacadas y ~5 por hora de Slickdeals). Si satura: `/fuente off slickdeals_amazon`.
 - eBay (Browse API): esperar el App ID de David y probarlo antes de diseñar la fuente.
 
 ## Decisiones vigentes
