@@ -21,13 +21,13 @@ from hypothesis import strategies as st
 from pydantic import SecretStr
 
 from discountz.config import EbayParams
-from discountz.domain.errors import CredentialUnavailable, Unavailable
+from discountz.domain.errors import CredentialUnavailable, ParseError, Unavailable
 from discountz.domain.model import ListingRef, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money
 from discountz.domain.scheduling import SourceBudget
 from discountz.domain.urls import SafeUrl
 from discountz.infra.http import Files, HttpResponse, Method, PacedClient, Params
-from discountz.sources.base import SourceContext
+from discountz.sources.base import ListingFailed, ListingFound, ListingGone, SourceContext
 from discountz.sources.ebay import (
     CODE,
     EbayRules,
@@ -365,3 +365,165 @@ def test_token_never_in_logs(caplog: pytest.LogCaptureFixture) -> None:
     src.search(ctx(paced(api, src)), spec("rtx 4070"), 0)
     text = caplog.text + repr(src)
     assert TOKEN not in text and TOKEN2 not in text and BASIC not in text
+
+
+# --- seguir, buscar y catálogo (Task 6) -----------------------------------------------------
+
+EXCLUDED = EbayParams(excluded_roots=frozenset({1}), items_per_partition=75)
+
+
+def by_path(responses: Mapping[str, HttpResponse]) -> Api:
+    """Token siempre válido y una respuesta por ruta (o 404 si no está)."""
+
+    def handler(method: str, path: str, q: dict[str, str], h: Mapping[str, str]) -> HttpResponse:
+        if path.endswith("/oauth2/token"):
+            return token_resp()
+        return responses.get(path, fx("error-404"))
+
+    return Api(handler)
+
+
+ITEM_PATH = "/buy/browse/v1/item/v1|206636580754|0"
+SEARCH_PATH = "/buy/browse/v1/item_summary/search"
+
+
+def test_partitions_from_taxonomy() -> None:
+    src = EbaySource(EXCLUDED)
+    api = by_path({"/commerce/taxonomy/v1/category_tree/0": fx("taxonomy")})
+    parts = list(src.catalog_partitions(ctx(paced(api, src))))
+    assert parts == sorted(parts, key=int)
+    assert len(parts) == len(set(parts))
+    assert all(p.isdigit() for p in parts)
+    # Coleccionables (raíz 1) fuera; nivel 3 donde hay nietos y nivel 2 donde no los hay.
+    assert not {"36", "3984", "114", "1437"} & set(parts)
+    assert {"296", "4670", "15053", "309", "617", "9355", "20349", "43304"} <= set(parts)
+    assert not {"1500", "9394", "293", "15032"} & set(parts)
+
+
+def test_catalog_page_observations() -> None:
+    src = EbaySource(EXCLUDED)
+    data = fx_json("search-query")
+    first = data["itemSummaries"][0]  # type: ignore[index]
+    first |= {"conditionId": "1000", "seller": {"feedbackPercentage": "99.5", "feedbackScore": 500}}
+    resp = HttpResponse(200, "x", {}, json.dumps(data).encode(), 0)
+    api = by_path({SEARCH_PATH: resp})
+    page = src.fetch_catalog_page(ctx(paced(api, src)), "27386", 0)
+    assert not page.has_more
+    by_id = {o.external_id: o for o in page.items}
+    assert set(by_id) == {"840031700816", "278384636909"}
+    assert by_id["840031700816"].model_key == "13060624345"
+    assert by_id["278384636909"].model_key is None
+    assert by_id["278384636909"].price == usd(71_499)
+    assert all(o.seller_class is SellerClass.FIRST_PARTY for o in page.items)
+    _, _, query, _ = api.calls[-1]
+    assert (query["category_ids"], query["limit"]) == ("27386", "75")
+    assert "offset" not in query or query["offset"] == "0"
+    assert src.fetch_catalog_page(ctx(paced(api, src)), "27386", 1).items == ()
+
+
+def test_catalog_page_rejects_bad_partition() -> None:
+    src = EbaySource(EXCLUDED)
+    with pytest.raises(ParseError):
+        src.fetch_catalog_page(ctx(paced(by_path({}), src)), "27386&q=x", 0)
+
+
+def test_fetch_listings_gone_and_found() -> None:
+    src = source()
+    api = by_path({ITEM_PATH: fx("item-single")})
+    refs = [ListingRef(CODE, "206636580754"), ListingRef(CODE, "111111111111")]
+    out = src.fetch_listings(ctx(paced(api, src)), refs)
+    assert isinstance(out[0], ListingFound)
+    offer = out[0].offer
+    assert offer.price == usd(65_658)
+    assert offer.list_price is None
+    assert offer.url_path == "/itm/206636580754"
+    assert isinstance(out[1], ListingGone)
+
+
+def test_seguir_low_feedback_is_marketplace() -> None:
+    src = source()
+    out = src.fetch_listings(
+        ctx(paced(by_path({ITEM_PATH: fx("item-single")}), src)), [ListingRef(CODE, "206636580754")]
+    )
+    assert isinstance(out[0], ListingFound)
+    assert out[0].offer.seller_class is SellerClass.MARKETPLACE
+
+
+def test_seguir_variant_uses_item_id_with_variation() -> None:
+    src = source()
+    path = "/buy/browse/v1/item/v1|157858848208|459292793708"
+    data = fx_json("item-single") | {"itemId": "v1|157858848208|459292793708"}
+    resp = HttpResponse(200, "x", {}, json.dumps(data).encode(), 0)
+    out = src.fetch_listings(
+        ctx(paced(by_path({path: resp}), src)), [ListingRef(CODE, "157858848208V459292793708")]
+    )
+    assert isinstance(out[0], ListingFound)
+    assert out[0].offer.parent_external_id == "157858848208"
+    assert out[0].offer.url_path == "/itm/157858848208?var=459292793708"
+
+
+def test_fetch_listings_failure_is_reported() -> None:
+    src = source()
+    api = by_path({ITEM_PATH: HttpResponse(200, "x", {}, b"no-json", 0)})
+    out = src.fetch_listings(ctx(paced(api, src)), [ListingRef(CODE, "206636580754")])
+    assert isinstance(out[0], ListingFailed)
+
+
+def test_search_one_page_of_offers() -> None:
+    src = source()
+    api = by_path({SEARCH_PATH: fx("search-query")})
+    page = src.search(ctx(paced(api, src)), spec("rtx 4070"), 3)
+    assert [o.ref.external_id for o in page.offers] == ["278384636909"]
+    assert page.offers[0].seller_class is SellerClass.FIRST_PARTY
+    assert sum(1 for c in api.calls if c[1] == SEARCH_PATH) == 1
+
+
+def test_confirm_uses_single_item() -> None:
+    src = source()
+    api = by_path({ITEM_PATH: fx("item-single")})
+    offers = src.fetch_listings(ctx(paced(api, src)), [ListingRef(CODE, "206636580754")])
+    assert isinstance(offers[0], ListingFound)
+    again = src.confirm(ctx(paced(api, src)), offers[0].offer)
+    assert again is not None and again.price == usd(65_658)
+    assert api.calls[-1][1] == ITEM_PATH
+    gone = src.confirm(ctx(paced(by_path({}), src)), offers[0].offer)
+    assert gone is None
+
+
+def test_catalog_items_and_card_facts() -> None:
+    src = source()
+    api = by_path({ITEM_PATH: fx("item-single")})
+    obs = src.fetch_catalog_items(ctx(paced(api, src)), ["206636580754", "111111111111"])
+    assert [o.external_id for o in obs] == ["206636580754"]
+    assert obs[0].price == usd(65_658)
+    facts = src.fetch_card_facts(ctx(paced(api, src)), ["206636580754", "111111111111"])
+    assert set(facts) == {"206636580754"}
+    card = facts["206636580754"]
+    assert card.url == "https://www.ebay.com/itm/206636580754"
+    assert card.image_url == "https://i.ebayimg.com/images/g/AYkAAeSwguhq1SQh/s-l1600.jpg"
+    assert card.note == "vendedor 100 % (32) · incluye envío a Miami US$7,58"
+
+
+def test_card_note_free_shipping_and_thousands() -> None:
+    data = fx_json("item-single")
+    data["seller"] = {"feedbackPercentage": "99.6", "feedbackScore": 12345}
+    data["shippingOptions"] = [{"shippingCost": {"value": "0.00", "currency": "USD"}}]
+    resp = HttpResponse(200, "x", {}, json.dumps(data).encode(), 0)
+    src = source()
+    facts = src.fetch_card_facts(ctx(paced(by_path({ITEM_PATH: resp}), src)), ["206636580754"])
+    assert facts["206636580754"].note == "vendedor 99,6 % (12.345)"
+
+
+def test_changed_and_resolve_are_not_supported() -> None:
+    src = source()
+    assert src.fetch_changed(ctx(by_path({})), T, 0).items == ()
+    assert not src.descriptor.supports_changed
+    assert src.fetch_leads(ctx(by_path({}))) == []
+
+
+def test_registered_with_repo_params() -> None:
+    from discountz.sources.registry import load_all
+
+    registered = load_all()[CODE]
+    assert isinstance(registered, EbaySource)
+    assert 1 in registered.params.excluded_roots

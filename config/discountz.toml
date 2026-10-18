@@ -194,10 +194,10 @@ group = "ebay_us"
 min_pause_s = 1
 jitter_s = 1
 max_per_run = 10
-max_per_24h = 1500
+max_per_24h = 1000
 watch_interval_min = 120
 search_interval_min = 360
-max_batch = 20
+max_batch = 1          # `getItems` (lote) da 403 sin acceso especial: una ficha por petición
 max_auto_watches = 100
 
 [sources.slickdeals]
@@ -348,12 +348,12 @@ sources = ["amazon_us", "newegg", "walmart_us", "bestbuy_us", "slickdeals"]
 starts = "2027-11-29T00:00"
 ends = "2027-11-30T00:00"
 
-[crawl.ebay_us]  # ~120 búsquedas del barrido y ~80 lotes de la capa caliente por hora (ADR 0008)
+[crawl.ebay_us]  # ~120 búsquedas del barrido y ~50 fichas de la capa caliente por hora (ADR 0008)
 min_pause_s = 0.5
 jitter_s = 0.5
-max_per_run = 200
-max_per_24h = 4800
-hot_share_bp = 4000
+max_per_run = 170
+max_per_24h = 4000  # + 1.000 del ciclo = la cuota diaria de 5.000
+hot_share_bp = 3000
 
 [ebay]  # spec de eBay §2 y §3
 ship_to_zip = "33166"          # casillero en Miami: solo publicaciones que envían ahí

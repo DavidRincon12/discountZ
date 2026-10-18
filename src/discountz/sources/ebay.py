@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -19,14 +20,27 @@ from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from discountz.config import EbayParams
-from discountz.domain.errors import CredentialUnavailable, ParseError, Unavailable
+from discountz.config import PARAMS_PATH, EbayParams, load_params
+from discountz.domain.catalog import CatalogObservation
+from discountz.domain.errors import (
+    CredentialUnavailable,
+    NotFound,
+    ParseError,
+    SourceError,
+    Unavailable,
+)
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec, SellerClass
-from discountz.domain.money import Currency, Money, to_minor
+from discountz.domain.money import Currency, Money, format_money, to_minor
 from discountz.domain.urls import SafeUrl
 from discountz.infra.http import BlockKind, HttpResponse
 from discountz.sources.base import (
     Capability,
+    CardFacts,
+    CatalogPage,
+    ListingFailed,
+    ListingFound,
+    ListingGone,
+    ListingOutcome,
     NeedsResolution,
     SearchPage,
     SourceContext,
@@ -34,11 +48,13 @@ from discountz.sources.base import (
     pack_unit_key,
 )
 from discountz.sources.blocks import detect_block_common
+from discountz.sources.registry import register
 
 CODE = "ebay_us"
 API = "https://api.ebay.com"
 BROWSE = f"{API}/buy/browse/v1"
 TOKEN_URL = f"{API}/identity/v1/oauth2/token"
+TAXONOMY_URL = f"{API}/commerce/taxonomy/v1/category_tree/0"
 SCOPE = "https://api.ebay.com/oauth/api_scope"
 SEARCH_LIMIT = 50
 # `conditionIds:{1000}` y no `conditions:{NEW}`: ese grupo trae «Open box» (1500), que en la prueba
@@ -56,6 +72,8 @@ _EXTERNAL = re.compile(r"^(\d{9,15})(?:V(\d{1,20}))?$")
 _ITM_PATH = re.compile(r"^/itm/(?:[^/]+/)?(\d{9,15})/?$")
 _DIGITS = re.compile(r"^\d{1,20}$")
 _EPID = re.compile(r"^\d{4,15}$")
+_PARTITION = re.compile(r"^\d{1,12}$")
+PARTITION_LEVEL = 3  # categorías de nivel 3 (o de nivel 2 sin hijos): ~2.054 particiones
 _IN_STOCK = frozenset({"IN_STOCK", "LIMITED_STOCK"})
 
 
@@ -126,6 +144,20 @@ class _Listing(_Model):
 class _SearchPage(_Model):
     total: int = 0
     itemSummaries: list[_Listing] = []
+
+
+class _TreeCategory(_Model):
+    categoryId: str
+
+
+class _TreeNode(_Model):
+    category: _TreeCategory
+    categoryTreeNodeLevel: int = 0
+    childCategoryTreeNodes: list[_TreeNode] = []
+
+
+class _Tree(_Model):
+    rootCategoryNode: _TreeNode
 
 
 class _Token(_Model):
@@ -282,10 +314,33 @@ def _offer(item: EbayItem, observed_at: datetime) -> Offer:
     )
 
 
+def _partitions(node: _TreeNode) -> list[str]:
+    if node.categoryTreeNodeLevel >= PARTITION_LEVEL or not node.childCategoryTreeNodes:
+        return [node.category.categoryId]
+    return [p for child in node.childCategoryTreeNodes for p in _partitions(child)]
+
+
+def _observation(item: EbayItem) -> CatalogObservation:
+    return CatalogObservation(
+        item.external_id, item.price, item.category_path, None, item.seller_class, item.model_key
+    )
+
+
+def _note(item: EbayItem) -> str:
+    pct = f"{item.seller_pct.normalize():f}".replace(".", ",")
+    score = f"{item.seller_score:,}".replace(",", ".")
+    note = f"vendedor {pct} % ({score})"
+    if item.shipping.minor > 0:
+        note += f" · incluye envío a Miami {format_money(item.shipping)}"
+    return note
+
+
 class EbaySource:
     def __init__(self, params: EbayParams) -> None:
         self.params = params
         self.rules = EbayRules(params.min_feedback_pct, params.min_feedback_score, False)
+        # Una ficha pedida por id ya es la variante elegida: se acepta aunque tenga grupo.
+        self._item_rules = EbayRules(params.min_feedback_pct, params.min_feedback_score, True)
         self.descriptor = SourceDescriptor(
             code=CODE,
             kind="store",
@@ -355,6 +410,25 @@ class EbaySource:
         self._token = None
         raise CredentialUnavailable(CODE, "bad_key", 401)
 
+    def _fetch_item(self, ctx: SourceContext, external_id: str) -> EbayItem | None:
+        """Una ficha por `getItem`; None si no existe o ya no es comparable (lote, sin envío)."""
+        if not EXTERNAL_ID_RE.fullmatch(external_id):
+            return None
+        url = f"{BROWSE}/item/{quote(to_item_id(external_id), safe='')}"
+        try:
+            item = parse_item(self._get(ctx, url), self._item_rules)
+        except NotFound:
+            return None
+        return item if item is not None and item.external_id == external_id else None
+
+    def _items(self, ctx: SourceContext, external_ids: Sequence[str]) -> list[EbayItem]:
+        out: list[EbayItem] = []
+        for external_id in external_ids:
+            item = self._fetch_item(ctx, external_id)
+            if item is not None:
+                out.append(item)
+        return out
+
     def _search(self, ctx: SourceContext, params: dict[str, str]) -> list[EbayItem]:
         body = self._get(ctx, f"{BROWSE}/item_summary/search", {**params, "filter": FILTER})
         return parse_search(body, self.rules)
@@ -381,8 +455,72 @@ class EbaySource:
         items = self._search(ctx, {"q": query, "limit": str(SEARCH_LIMIT)})
         return SearchPage([_offer(i, ctx.now) for i in items], None)
 
+    def fetch_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        out: list[ListingOutcome] = []
+        for ref in refs:
+            try:
+                item = self._fetch_item(ctx, ref.external_id)
+            except (SourceError, ParseError) as exc:
+                if isinstance(exc, CredentialUnavailable):
+                    raise
+                out.append(ListingFailed(ref, exc))
+                continue
+            out.append(ListingFound(_offer(item, ctx.now)) if item else ListingGone(ref))
+        return out
+
+    def fetch_catalog_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        return self.fetch_listings(ctx, refs)  # la ficha trae el vendedor: misma regla B4
+
+    def confirm(self, ctx: SourceContext, offer: Offer) -> Offer | None:
+        """Ruta independiente de la búsqueda: la ficha de `getItem` con el envío a Miami."""
+        item = self._fetch_item(ctx, offer.ref.external_id)
+        return _offer(item, ctx.now) if item is not None else None
+
     def fetch_leads(self, ctx: SourceContext) -> list[Lead]:
         return []
+
+    # --- catálogo ---------------------------------------------------------------------------
+
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]:
+        tree = _validate(_Tree, _load(self._get(ctx, TAXONOMY_URL)))
+        excluded = {str(r) for r in self.params.excluded_roots}
+        roots = [
+            n
+            for n in tree.rootCategoryNode.childCategoryTreeNodes
+            if n.category.categoryId not in excluded
+        ]
+        found = {p for root in roots for p in _partitions(root) if _PARTITION.fullmatch(p)}
+        return sorted(found, key=int)
+
+    def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
+        """Una búsqueda por categoría en el orden de eBay; cada partición es una sola página."""
+        if not _PARTITION.fullmatch(partition):
+            raise ParseError("bad_partition")
+        if page > 0:
+            return CatalogPage((), False)
+        limit = str(self.params.items_per_partition)
+        items = self._search(ctx, {"category_ids": partition, "limit": limit})
+        return CatalogPage(tuple(_observation(i) for i in items if i.in_stock), False)
+
+    def fetch_changed(self, ctx: SourceContext, since: datetime, page: int) -> CatalogPage:
+        return CatalogPage((), False)  # la Browse API no lista cambios: capa caliente por id
+
+    def fetch_catalog_items(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> list[CatalogObservation]:
+        return [_observation(i) for i in self._items(ctx, external_ids) if i.in_stock]
+
+    def fetch_card_facts(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> dict[str, CardFacts]:
+        return {
+            i.external_id: CardFacts(i.title, i.web_url, i.image_url, note=_note(i))
+            for i in self._items(ctx, external_ids)
+        }
 
     def detect_block(self, resp: HttpResponse) -> BlockKind | None:
         """Cuota y permisos de la API no son bloqueos anti-bots: no abren el breaker."""
@@ -406,3 +544,6 @@ def _error_ids(resp: HttpResponse) -> set[int]:
     return {
         e["errorId"] for e in errors if isinstance(e, dict) and isinstance(e.get("errorId"), int)
     }
+
+
+register(EbaySource(load_params(PARAMS_PATH).ebay))

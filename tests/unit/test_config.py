@@ -172,7 +172,7 @@ def test_crawl_budgets_match_spec() -> None:
     assert (c["panamericana"].min_pause_s, c["panamericana"].max_per_24h) == (2, 6_000)
     assert (c["bestbuy_us"].min_pause_s, c["bestbuy_us"].max_per_24h) == (0.25, 40_000)
     ebay = c.pop("ebay_us") if isinstance(c, dict) else c["ebay_us"]
-    assert (ebay.max_per_run, ebay.max_per_24h, ebay.hot_share_bp) == (200, 4800, 4000)
+    assert (ebay.max_per_run, ebay.max_per_24h, ebay.hot_share_bp) == (170, 4000, 3000)
     assert all(b.hot_share_bp == 2500 for code, b in c.items() if code != "ebay_us")
     assert all(b.max_per_run <= b.max_per_24h for b in c.values())
 
@@ -211,4 +211,6 @@ def test_params_ebay_defaults() -> None:
         {1, 99, 237, 260, 316, 550, 870, 1305, 3252, 10542, 11116, 20081, 45100, 64482, 172008}
     )
     b = p.budgets["ebay_us"]
-    assert (b.max_batch, b.max_per_run, b.max_per_24h) == (20, 10, 1500)
+    # `getItems` sin acceso: una ficha por petición; barrido + ciclo caben en 5.000 al día.
+    assert (b.max_batch, b.max_per_run, b.max_per_24h) == (1, 10, 1000)
+    assert b.max_per_24h + p.crawl["ebay_us"].max_per_24h <= 5000

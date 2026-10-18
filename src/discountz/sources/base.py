@@ -173,6 +173,8 @@ class CardFacts:
     title: str
     url: str
     image_url: str | None
+    note: str | None = None  # línea extra de la tarjeta (eBay: vendedor y envío a Miami)
+    reference_label: str = "Antes"  # rótulo del precio de referencia
 
 
 class CatalogSource(Protocol):
