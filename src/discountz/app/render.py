@@ -53,6 +53,7 @@ _HEADERS = {
     AlertKind.TARGET_REACHED: "PRECIO OBJETIVO ALCANZADO",
     AlertKind.GOOD_DEAL: "BUENA OFERTA",
     AlertKind.CATALOG_DROP: "BAJÓ DE PRECIO",
+    AlertKind.MODEL_LOW: "MÁS BARATO QUE SU MODELO",
     AlertKind.COMMUNITY_DEAL: (
         "OFERTA DE LA COMUNIDAD (Slickdeals), sin histórico propio suficiente"
     ),

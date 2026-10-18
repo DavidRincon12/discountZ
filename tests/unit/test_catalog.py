@@ -9,9 +9,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from discountz.domain.catalog import (
+    MIN_PEERS,
     MIN_READS,
     CatalogObservation,
     CatalogState,
+    median_low,
+    model_candidate,
     observe,
 )
 from discountz.domain.model import AlertKind, SellerClass
@@ -140,3 +143,71 @@ def test_never_alerts_without_usual(prices: list[int]) -> None:
     for i, p in enumerate(prices):
         state, cand, _ = observe(state, obs(p), T0 + timedelta(minutes=i), TECH, GLOB)
         assert cand is None
+
+
+# ───────────── Precio bajo frente al mismo modelo (spec de eBay §4.2)
+
+
+def usd(price: int) -> CatalogObservation:
+    return CatalogObservation(
+        "123456789", Money(price, Currency.USD), "/x/", None, SellerClass.FIRST_PARTY, "999"
+    )
+
+
+def alerted(minor: int, at: datetime) -> CatalogState:
+    return CatalogState(minor, None, None, T0, T0, 1, None, at, minor)
+
+
+def test_min_peers_is_five() -> None:
+    assert MIN_PEERS == 5
+
+
+def test_model_candidate_needs_five_peers() -> None:
+    assert model_candidate(None, T0, usd(8_000), [10_000] * 4, TECH, GLOB) is None
+
+
+def test_model_candidate_equal_to_median_is_none() -> None:
+    assert model_candidate(None, T0, usd(10_000), [10_000] * 5, TECH, GLOB) is None
+
+
+def test_model_candidate_below_threshold() -> None:
+    cand = model_candidate(None, T0, usd(8_700), [10_000] * 5, TECH, GLOB)
+    assert cand is not None
+    assert cand.kind is AlertKind.MODEL_LOW
+    assert cand.drop_bp == 1300
+    assert cand.usual == Money(10_000, Currency.USD)
+    assert cand.price == Money(8_700, Currency.USD)
+    assert cand.min_days == 0
+
+
+def test_model_candidate_above_threshold_is_none() -> None:
+    assert model_candidate(None, T0, usd(8_900), [10_000] * 5, TECH, GLOB) is None
+
+
+def test_model_candidate_min_abs() -> None:
+    assert model_candidate(None, T0, usd(600), [1_000] * 5, TECH, GLOB) is None
+
+
+def test_model_candidate_price_error() -> None:
+    cand = model_candidate(None, T0, usd(4_000), [10_000] * 5, TECH, GLOB)
+    assert cand is not None
+    assert cand.kind is AlertKind.PRICE_ERROR
+
+
+def test_model_candidate_no_threshold_topic() -> None:
+    sin = TopicParams("errores", "Errores", None, None, "otros")
+    assert model_candidate(None, T0, usd(4_000), [10_000] * 5, sin, GLOB) is None
+
+
+def test_model_candidate_cooldown() -> None:
+    state = alerted(8_700, T0 - timedelta(hours=1))
+    assert model_candidate(state, T0, usd(8_650), [10_000] * 5, TECH, GLOB) is None
+    assert model_candidate(state, T0, usd(8_300), [10_000] * 5, TECH, GLOB) is not None
+
+
+@given(st.lists(st.integers(min_value=1, max_value=10**12), min_size=1, max_size=60))
+def test_median_low_is_an_element_and_splits(values: list[int]) -> None:
+    m = median_low(values)
+    assert m in values
+    assert sum(v < m for v in values) <= len(values) // 2
+    assert sum(v > m for v in values) <= len(values) // 2 + 1

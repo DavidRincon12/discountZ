@@ -109,6 +109,7 @@ class AlertKind(StrEnum):
     TARGET_REACHED = "target_reached"
     GOOD_DEAL = "good_deal"
     CATALOG_DROP = "catalog_drop"  # bajada del rastreo del catálogo (spec del rastreo §3)
+    MODEL_LOW = "model_low"  # más barato que su modelo en eBay (spec de eBay §4.2)
     COMMUNITY_DEAL = "community_deal"
 
     @property
@@ -122,6 +123,7 @@ _RANK = {
     AlertKind.TARGET_REACHED: 3,
     AlertKind.GOOD_DEAL: 2,
     AlertKind.CATALOG_DROP: 2,
+    AlertKind.MODEL_LOW: 2,
     AlertKind.COMMUNITY_DEAL: 1,
 }
 

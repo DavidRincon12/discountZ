@@ -606,3 +606,8 @@ def test_slickdeals_deal_links_to_amazon_and_to_the_thread() -> None:
 def test_feed_card_badge_names_the_source() -> None:
     card = channel_card(_channel_post(**DEALNEWS), "belleza")
     assert (card["badge"], card["url"]) == ("DealNews · sin verificar", DEALNEWS_URL)
+
+
+def test_model_low_has_header_in_text_alerts() -> None:
+    view = dataclasses.replace(GOOD, kind=AlertKind.MODEL_LOW)
+    assert render_alert(view).html.startswith("<b>MÁS BARATO QUE SU MODELO</b>")
