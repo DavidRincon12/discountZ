@@ -23,6 +23,11 @@ jobs:
           if [ -z "$EBAY_APP_ID" ] || [ -z "$EBAY_CERT_ID" ]; then
             echo "Faltan los secretos EBAY_APP_ID o EBAY_CERT_ID"; exit 1
           fi
+          # Diagnóstico sin revelar las claves: forma esperada y espacios sobrantes.
+          forma() { [[ $2 =~ $3 ]] && echo "$1: forma OK" || echo "$1: forma inesperada"; }
+          forma EBAY_APP_ID "$EBAY_APP_ID" '^[A-Za-z0-9]+-[A-Za-z0-9]+-PRD-[0-9a-f]+-[0-9a-f]+$'
+          forma EBAY_CERT_ID "$EBAY_CERT_ID" '^PRD-[0-9a-f]+-[0-9a-f]+(-[0-9a-f]+)*$'
+          [[ "$EBAY_APP_ID$EBAY_CERT_ID" =~ [[:space:]] ]] && echo "hay espacios o saltos de línea" || true
           code=$(curl -sS -o token.json -w '%{http_code}' --max-time 20 \
             -u "$EBAY_APP_ID:$EBAY_CERT_ID" \
             -H 'Content-Type: application/x-www-form-urlencoded' \
