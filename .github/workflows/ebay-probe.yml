@@ -41,22 +41,39 @@ jobs:
           echo "vence en: $(jq .expires_in token.json) s"
           echo "EBAY_TOKEN=$token" >> "$GITHUB_ENV"
           rm token.json
-      - name: Búsquedas
+      - name: Cobertura por categoría (casillero en Miami)
         run: |
           set -euo pipefail
-          buscar() {
-            local etiqueta=$1; shift
-            code=$(curl -sS -o res.json -w '%{http_code}' --max-time 20 -G \
-              -H "Authorization: Bearer $EBAY_TOKEN" \
+          api=https://api.ebay.com
+          auth=(-H "Authorization: Bearer $EBAY_TOKEN")
+          code=$(curl -sS -o rl.json -w '%{http_code}' --max-time 20 "${auth[@]}" \
+            "$api/developer/analytics/v1_beta/rate_limit/?api_name=browse")
+          echo "== cuota Browse: HTTP $code"
+          jq -c '.rateLimits[]?.resources[]? | {name, rates: [.rates[]? | {limit, remaining, timeWindow}]}' rl.json || true
+          code=$(curl -sS -o tree.json -w '%{http_code}' --max-time 60 "${auth[@]}" \
+            "$api/commerce/taxonomy/v1/category_tree/0")
+          echo "== árbol EBAY_US: HTTP $code, raíces $(jq '.rootCategoryNode.childCategoryTreeNodes | length' tree.json), hojas $(jq '[.. | objects | select(.leafCategoryTreeNode == true)] | length' tree.json)"
+          jq -r '.rootCategoryNode.childCategoryTreeNodes[] | "\(.category.categoryId) \(.category.categoryName)"' tree.json | head -40
+          for cat in 27386 175672 9355 139971 11071 112529 15709 20710; do
+            code=$(curl -sS -o res.json -w '%{http_code}' --max-time 30 -G "${auth[@]}" \
               -H 'X-EBAY-C-MARKETPLACE-ID: EBAY_US' \
-              -H "X-EBAY-C-ENDUSERCTX: contextualLocation=country%3DCO" \
-              "$@" https://api.ebay.com/buy/browse/v1/item_summary/search)
-            echo "== $etiqueta: HTTP $code, total $(jq '.total // 0' res.json)"
-            jq -c '.itemSummaries[]? | {title: .title[0:60], price, condition, buyingOptions,
-              shipping: .shippingOptions[0]?.shippingCost}' res.json | head -5
-            jq -c '.errors[]? | {errorId, message}' res.json
-          }
-          buscar "rtx 4070 nuevo" --data-urlencode 'q=rtx 4070' \
-            --data-urlencode 'filter=conditions:{NEW}' --data-urlencode 'limit=5'
-          buscar "rtx 4070 con envío a CO" --data-urlencode 'q=rtx 4070' \
-            --data-urlencode 'filter=conditions:{NEW},deliveryCountry:CO' --data-urlencode 'limit=5'
+              -H 'X-EBAY-C-ENDUSERCTX: contextualLocation=country%3DUS%2Czip%3D33166' \
+              --data-urlencode "category_ids=$cat" \
+              --data-urlencode 'filter=conditions:{NEW},buyingOptions:{FIXED_PRICE},deliveryCountry:US' \
+              --data-urlencode 'limit=200' \
+              $api/buy/browse/v1/item_summary/search)
+            jq -c --arg cat "$cat" --arg code "$code" '{cat: $cat, http: $code, total,
+              n: (.itemSummaries // [] | length),
+              con_epid: ([.itemSummaries[]? | select(.epid)] | length),
+              en_usa: ([.itemSummaries[]? | select(.itemLocation.country == "US")] | length),
+              envio_gratis: ([.itemSummaries[]? | select(.shippingOptions[0]?.shippingCost.value == "0.00")] | length),
+              sin_costo_envio: ([.itemSummaries[]? | select(.shippingOptions[0]?.shippingCost == null)] | length),
+              con_precio_tachado: ([.itemSummaries[]? | select(.marketingPrice)] | length),
+              categoria: .itemSummaries[0]?.categories[0]?.categoryName,
+              claves: (.itemSummaries[0] // {} | keys)}' res.json
+          done
+          # Un ítem completo: ¿trae gtin/mpn/brand?
+          id=$(jq -r '.itemSummaries[0].itemId' res.json)
+          curl -sS -o item.json --max-time 20 "${auth[@]}" -H 'X-EBAY-C-MARKETPLACE-ID: EBAY_US' \
+            "$api/buy/browse/v1/item/$id"
+          jq -c '{gtin, mpn, brand, epid, estimatedAvailabilities: [.estimatedAvailabilities[]? | {estimatedAvailabilityStatus, estimatedAvailableQuantity}], keys: keys}' item.json
