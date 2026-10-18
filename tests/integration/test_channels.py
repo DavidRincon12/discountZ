@@ -347,12 +347,31 @@ def test_unordered_marked_deal_is_not_an_original_for_duplicates(db: psycopg.Con
 
 
 def test_unordered_old_posts_and_page_skips_are_not_counted(db: psycopg.Connection) -> None:
-    repo.save_channel_cursor(db, "dealnews", 1, T - timedelta(minutes=10))
-    stale = ChannelPage((deal("dealnews", 400, age=timedelta(hours=7)),), 400, False, skipped=4)
-    result = run(db, FakeChannel("dealnews", [stale]))
+    code = "slickdeals_amazon"
+    repo.save_channel_cursor(db, code, 1, T - timedelta(minutes=10))
+    stale = ChannelPage((deal(code, 400, age=timedelta(hours=7)),), 400, False, skipped=4)
+    result = run(db, FakeChannel(code, [stale]))
     assert outbox(db) == []
     assert (result.sent, result.skipped) == (0, 0)  # se repiten en cada lectura del feed
-    assert repo.get_channel_cursor(db, "dealnews") == repo.ChannelCursor(400, T)
+    assert repo.get_channel_cursor(db, code) == repo.ChannelCursor(400, T)
+
+
+def test_dealnews_sends_an_old_deal_it_features_again(db: psycopg.Connection) -> None:
+    """DealNews vuelve a subir ofertas vigentes con su `pubDate` original (hasta 3 meses)."""
+    repo.save_channel_cursor(db, "dealnews", 1, T - timedelta(minutes=10))
+    again = deal("dealnews", 400, title="Teclado mecánico", age=timedelta(days=86))
+    result = run(db, FakeChannel("dealnews", [page(again)]))
+    assert [k for k, _, _ in outbox(db)] == ["canal:dealnews:400"]
+    assert result.sent == 1
+
+
+def test_dealnews_first_read_marks_old_deals_too(db: psycopg.Connection) -> None:
+    old = deal("dealnews", 400, title="Teclado mecánico", age=timedelta(days=86))
+    fake = FakeChannel("dealnews", [page(deal("dealnews", 500), old)])
+    run(db, fake)
+    run(db, fake, now=T + timedelta(minutes=10))
+    assert outbox(db) == []
+    assert repo.channel_post_ids(db, "dealnews", [400, 500]) == {400, 500}
 
 
 def test_unordered_duplicate_is_not_recounted_on_reread(db: psycopg.Connection) -> None:

@@ -82,6 +82,9 @@ class SourceDescriptor:
     # Canales: los ids crecen con cada publicación y sirven de cursor. Un feed sin ese orden se
     # relee entero en cada lectura y se saltan los ids ya guardados (app/channels.py).
     ordered_ids: bool = True
+    # El feed vuelve a destacar ofertas viejas y vigentes con su fecha original (DealNews): no
+    # aplica el tope de antigüedad de los canales; lo ya guardado se salta por id igual.
+    refeatures: bool = False
 
 
 class CredentialStore(Protocol):

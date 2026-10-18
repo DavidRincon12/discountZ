@@ -180,6 +180,7 @@ class DealNewsSource(PostsOnlySource):
             external_id_re=re.compile(r"^\d{1,12}$"),
             image_hosts=IMAGE_HOSTS,
             ordered_ids=False,
+            refeatures=True,
         )
 
     def fetch_posts(self, ctx: SourceContext, after_id: int | None) -> ChannelPage:

@@ -1,7 +1,7 @@
 # 0006. Leer las ofertas de Amazon de DealNews y Slickdeals como canales sin orden de ids
 
 - Fecha: 2026-10-17
-- Estado: Aceptada
+- Estado: Aceptada (la consecuencia sobre las ofertas viejas de DealNews la reemplaza la 0007)
 - Diseño corto aprobado por David en el hilo «Puesta en marcha» (sin spec: reutiliza ADR 0005)
 
 ## Contexto
