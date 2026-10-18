@@ -175,3 +175,30 @@ def test_community_card_renders_without_usual() -> None:
     card = channel_card(post, "tecnologia")
     assert png(card_png(card, None)).size == (1080, 1080)
     assert png(card_png(card, validate_photo(photo()))).size == (1080, 1080)
+
+
+MODEL_LOW = replace(
+    C01,
+    store_name="eBay",
+    store_color=STORE_COLORS["ebay_us"],
+    price=Money(8_000, Currency.USD),
+    usual=Money(10_000, Currency.USD),
+    drop_bp=2000,
+    min_days=0,
+    kind=AlertKind.MODEL_LOW,
+    reference_label="Mediana de 5 publicaciones del mismo modelo",
+    note="vendedor 99,6 % (12.345) · incluye envío a Miami US$7,58",
+)
+
+
+def test_model_low_card_draws_label_and_note() -> None:
+    img = png(render_card(MODEL_LOW, photo()))
+    assert img.size == (1080, 1080)
+    plain = replace(MODEL_LOW, reference_label="Antes", note=None)
+    lines = (60, 880, 1020, 1000)  # referencia y línea de nota
+    a, b = png(render_card(plain, None)), png(render_card(MODEL_LOW, None))
+    assert distance(average_hash(a.crop(lines)), average_hash(b.crop(lines))) > 0
+
+
+def test_ebay_has_its_own_color() -> None:
+    assert STORE_COLORS["ebay_us"] == "#0064D2"

@@ -17,7 +17,7 @@ from typing import Literal, cast
 
 import psycopg
 
-from discountz.app.crawl import CrawlDeps, run_crawl
+from discountz.app.crawl import CrawlDeps, crawl_max_items, run_crawl
 from discountz.app.cycle import CycleDeps, run_cycle
 from discountz.config import Settings, load_canaries, load_params, load_settings, load_topics
 from discountz.domain.errors import ConfigError, LeaseBusy
@@ -277,6 +277,7 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
                     monotonic=time.monotonic,
                     sleep=time.sleep,
                     rnd=rnd,
+                    max_items=crawl_max_items(args.source, params),
                 ),
                 now,
                 args.minutes,

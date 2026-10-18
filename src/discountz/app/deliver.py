@@ -110,6 +110,8 @@ def card_png(card: Mapping[str, Any], photo: bytes | None) -> bytes:
         kind=AlertKind(str(card["kind"])),
         badge=str(card["badge"]) if card.get("badge") else None,
         coupon=str(card["coupon"]) if card.get("coupon") else None,
+        reference_label=str(card.get("reference_label") or "Antes"),
+        note=str(card["note"]) if card.get("note") else None,
     )
     return render_card(data, photo)
 

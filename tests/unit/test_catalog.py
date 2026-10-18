@@ -211,3 +211,12 @@ def test_median_low_is_an_element_and_splits(values: list[int]) -> None:
     assert m in values
     assert sum(v < m for v in values) <= len(values) // 2
     assert sum(v > m for v in values) <= len(values) // 2 + 1
+
+
+def test_crawl_max_items_only_for_ebay() -> None:
+    from discountz.app.crawl import crawl_max_items
+    from discountz.config import load_params
+
+    params = load_params()
+    assert crawl_max_items("ebay_us", params) == 150_000
+    assert crawl_max_items("exito", params) is None

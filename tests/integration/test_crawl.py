@@ -126,13 +126,14 @@ class FakeCatalog:
     since_seen: list[datetime] = field(default_factory=list)
     default_offers: dict[str, Offer] = field(default_factory=dict)  # vendedor por defecto (v1)
     fail_confirms: int = 0  # confirmaciones que fallan por red antes de responder
+    currency: Currency = Currency.COP
     descriptor: SourceDescriptor = field(init=False)
 
     def __post_init__(self) -> None:
         self.descriptor = SourceDescriptor(
             code=self.code,
             kind="store",
-            currency=Currency.COP,
+            currency=self.currency,
             hosts=frozenset({"www.exito.com"}),
             client="httpx",
             capabilities=frozenset({Capability.DETAIL, Capability.CATALOG}),
@@ -229,6 +230,7 @@ def deps(
     *,
     max_per_run: int = 1000,
     holder: str = "gh:1:1",
+    max_items: int | None = None,
 ) -> tuple[CrawlDeps, Transport]:
     transport = Transport(clock)
     d = CrawlDeps(
@@ -243,6 +245,7 @@ def deps(
         monotonic=clock.monotonic,
         sleep=clock.sleep,
         rnd=random.Random(1),
+        max_items=max_items,
     )
     return d, transport
 
@@ -519,6 +522,9 @@ def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
         "drop_bp": 4004,
         "min_days": 5,
         "kind": "catalog_drop",
+        "reference_label": "Antes",
+        "note": None,
+        "peers": 0,
     }
     assert "BAJÓ DE PRECIO" in row.body_html
     alert = db.execute("SELECT kind, delivery FROM discountz.alert").fetchone()
@@ -560,3 +566,159 @@ def test_crawl_stops_when_breaker_opens_meanwhile_and_keeps_it(db: psycopg.Conne
     assert result.status == "blocked"
     assert transport.kinds().count("page") == 2
     assert repo.load_breakers(db)["exito"].state == "open"
+
+
+# ───────────── eBay: precio bajo frente al mismo modelo (spec de eBay §4.2)
+
+EBAY = "ebay_us"
+EPATH = "/Consumer Electronics/TV/"
+MODEL = "99999"
+
+
+def eobs(ext: str, price: int, model: str | None = MODEL) -> CatalogObservation:
+    return CatalogObservation(
+        ext, Money(price, Currency.USD), EPATH, None, SellerClass.FIRST_PARTY, model
+    )
+
+
+def eoffer(ext: str, price: int) -> Offer:
+    return replace(
+        offer(ext, 0),
+        ref=ListingRef(EBAY, ext),
+        price=Money(price, Currency.USD),
+        url_path=f"/itm/{ext}",
+    )
+
+
+def ebay_source(page: list[CatalogObservation], prices: Mapping[str, int]) -> FakeCatalog:
+    return FakeCatalog(
+        {"293": [page]},
+        offers={e: eoffer(e, p) for e, p in prices.items()},
+        code=EBAY,
+        currency=Currency.USD,
+        max_batch=1,
+    )
+
+
+def seed_ebay(
+    conn: psycopg.Connection, ext: str, price: int, model: str | None = MODEL, days: int = 5
+) -> None:
+    start = T - timedelta(days=days)
+    state = CatalogState(price, price, price, start, start, 20, None, None, None)
+    row = CatalogRow(ext, None, "otros", "USD", state, False, model_key=model)
+    repo.save_catalog_page(conn, EBAY, [row], T - timedelta(hours=1))
+
+
+def seed_peers(conn: psycopg.Connection, price: int, n: int = 5) -> None:
+    for i in range(n):
+        seed_ebay(conn, f"80000000000{i}", price)
+
+
+def test_model_low_alert(db: psycopg.Connection) -> None:
+    seed_peers(db, 10_000)
+    src = ebay_source([eobs("900000000001", 8_000)], {"900000000001": 8_000})
+    d, _ = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.alerts == 1
+    (row,) = repo.claim_outbox(db, 10, T)
+    assert row.card is not None
+    assert row.card["kind"] == "model_low"
+    assert (row.card["usual_minor"], row.card["drop_bp"]) == (10_000, 2000)
+    assert row.card["reference_label"] == "Mediana de 5 publicaciones del mismo modelo"
+    assert row.card["peers"] == 5
+    assert "MÁS BARATO QUE SU MODELO" in row.body_html
+    alert = db.execute("SELECT kind, reference_minor FROM discountz.alert").fetchone()
+    assert alert == ("model_low", 10_000)
+    s = repo.load_catalog_states(db, EBAY, ["900000000001"])["900000000001"]
+    assert s.last_alert_minor == 8_000
+
+
+def test_model_low_needs_five_peers(db: psycopg.Connection) -> None:
+    seed_peers(db, 10_000, n=4)
+    src = ebay_source([eobs("900000000001", 8_000)], {"900000000001": 8_000})
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 0
+
+
+def test_model_low_duplicate_within_source(db: psycopg.Connection) -> None:
+    seed_peers(db, 10_000)
+    first = ebay_source([eobs("900000000001", 8_000)], {"900000000001": 8_000})
+    d, _ = deps(db, first, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 1
+    second = ebay_source([eobs("900000000002", 8_050)], {"900000000002": 8_050})
+    d2, transport = deps(db, second, Clock())
+    assert run_crawl(d2, T + timedelta(minutes=30), minutes=60).alerts == 0
+    assert "listings" not in transport.kinds()
+
+
+def test_model_low_same_page_alerts_once(db: psycopg.Connection) -> None:
+    seed_peers(db, 10_000)
+    page = [eobs("900000000001", 8_000), eobs("900000000002", 7_990)]
+    src = ebay_source(page, {"900000000001": 8_000, "900000000002": 7_990})
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 1
+    (row,) = repo.claim_outbox(db, 10, T)
+    assert row.card is not None and row.card["price_minor"] == 7_990
+
+
+def test_same_read_keeps_bigger_drop(db: psycopg.Connection) -> None:
+    """§4.1 da 2.100 pb y §4.2 da 3.000 pb: una sola alerta, la del modelo."""
+    seed_peers(db, 11_429)
+    seed_ebay(db, "900000000001", 10_127)
+    src = ebay_source([eobs("900000000001", 8_000)], {"900000000001": 8_000})
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 1
+    (row,) = repo.claim_outbox(db, 10, T)
+    assert row.card is not None
+    assert (row.card["kind"], row.card["drop_bp"], row.card["usual_minor"]) == (
+        "model_low",
+        3000,
+        11_429,
+    )
+    assert count(db, "alert") == 1
+
+
+def test_same_read_keeps_listing_drop_when_bigger(db: psycopg.Connection) -> None:
+    seed_peers(db, 10_000)
+    seed_ebay(db, "900000000001", 10_500)
+    src = ebay_source([eobs("900000000001", 7_900)], {"900000000001": 7_900})
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 1
+    (row,) = repo.claim_outbox(db, 10, T)
+    assert row.card is not None
+    assert (row.card["kind"], row.card["reference_label"]) == ("catalog_drop", "Antes")
+
+
+def test_max_items_blocks_new_rows_only(db: psycopg.Connection) -> None:
+    seed_ebay(db, "800000000001", 10_000, model=None)
+    seed_ebay(db, "800000000002", 10_000, model=None)
+    page = [eobs("800000000001", 9_900, None), eobs("900000000009", 5_000, None)]
+    src = ebay_source(page, {})
+    d, _ = deps(db, src, Clock(), max_items=2)
+    run_crawl(d, T, minutes=60)
+    states = repo.load_catalog_states(db, EBAY, ["800000000001", "900000000009"])
+    assert set(states) == {"800000000001"}
+    assert states["800000000001"].price_minor == 9_900
+    assert count(db, "catalog_item", "source = 'ebay_us'") == 2
+
+
+def test_ebay_paused_at_450(db: psycopg.Connection) -> None:
+    repo.set_maintenance_state(db, T.date(), 460_000_000, True)
+    src = ebay_source([eobs("900000000001", 8_000)], {})
+    d, transport = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).status == "disabled"
+    assert transport.urls == []
+
+
+def test_quota_stops_without_tripping_breaker(db: psycopg.Connection) -> None:
+    src = ebay_source([eobs("900000000001", 8_000)], {})
+
+    def quota(ctx: SourceContext, partition: str, page: int) -> CatalogPage:
+        ctx.http.request("GET", f"https://fake/page/{partition}/{page}")
+        raise Unavailable(EBAY, "quota", 429)
+
+    src.fetch_catalog_page = quota  # type: ignore[method-assign]
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).status == "partial"
+    b = repo.load_breakers(db)[EBAY]
+    assert (b.state, b.consecutive_unavailable) == ("closed", 0)

@@ -465,6 +465,39 @@ def test_catalog_price_error_caption_usd() -> None:
     assert visible_length(msg.html) <= 1024
 
 
+def test_catalog_alert_model_low_caption() -> None:
+    card = CARD_C01 | {
+        "store": "ebay_us",
+        "kind": "model_low",
+        "currency": "USD",
+        "price_minor": 8_000,
+        "usual_minor": 10_000,
+        "drop_bp": 2000,
+        "min_days": 0,
+        "reference_label": "Mediana de 5 publicaciones del mismo modelo",
+        "note": "vendedor 99,6 % (12.345) · incluye envío a Miami US$7,58",
+        "peers": 5,
+    }
+    msg = render_catalog_alert(card, 9, "📱 Tecnología")
+    lines = msg.html.split("\n")
+    assert lines[0] == "<b>MÁS BARATO QUE SU MODELO</b> · #tecnologia · eBay"
+    assert (
+        "<b>US$80,00</b>  mediana de 5 publicaciones del mismo modelo US$100,00 (-20,0 %)" in lines
+    )
+    assert "vendedor 99,6 % (12.345) · incluye envío a Miami US$7,58" in lines
+    assert "Mínimo en" not in msg.html
+    assert CASILLERO in msg.html
+    buttons = reply_markup(msg.buttons)["inline_keyboard"]
+    assert buttons[0][0]["text"] == "Abrir en eBay"
+
+
+def test_catalog_drop_keeps_minimum_line_and_adds_note() -> None:
+    card = CARD_C01 | {"note": "vendedor 100 % (500)"}
+    msg = render_catalog_alert(card, 9, "📱 Tecnología")
+    assert "Mínimo en 5 días" in msg.html
+    assert "vendedor 100 % (500)" in msg.html
+
+
 def test_catalog_drop_has_header_in_text_alerts() -> None:
     view = dataclasses.replace(GOOD, kind=AlertKind.CATALOG_DROP)
     assert render_alert(view).html.startswith("<b>BAJÓ DE PRECIO</b>")

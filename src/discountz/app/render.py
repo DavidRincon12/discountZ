@@ -46,6 +46,7 @@ SOURCE_NAMES = {
     "tg_cajitatech": "cajitatech",
     "dealnews": "DealNews",
     "slickdeals_amazon": "Slickdeals",
+    "ebay_us": "eBay",
 }
 
 _HEADERS = {
@@ -268,17 +269,24 @@ def render_catalog_alert(
     price = Money(int(card["price_minor"]), currency)
     usual = Money(int(card["usual_minor"]), currency)
     store = str(card["store"])
+    label = str(card.get("reference_label") or "Antes")
+    reference = (
+        f"antes <s>{format_money(usual)}</s>"
+        if label == "Antes"
+        else f"{esc(label[:1].lower() + label[1:])} {format_money(usual)}"
+    )
     lines = [
         f"<b>{_HEADERS[kind]}</b> · #{card['topic']} · {esc(source_name(store))}",
         f"<b>{esc(truncate(str(card['title']), CAPTION_TITLE))}</b>",
         "",
-        f"<b>{format_money(price)}</b>  antes <s>{format_money(usual)}</s>"
-        f" (-{pct(int(card['drop_bp']))})",
+        f"<b>{format_money(price)}</b>  {reference} (-{pct(int(card['drop_bp']))})",
     ]
     if kind is AlertKind.PRICE_ERROR:
         lines.append("<i>La tienda puede anular el pedido.</i>")
-    else:
+    elif kind is not AlertKind.MODEL_LOW:
         lines.append(f"Mínimo en {int(card['min_days'])} días")
+    if card.get("note"):
+        lines.append(esc(str(card["note"])))
     if currency is Currency.USD:
         lines.append(CASILLERO)
     lines.append(f"<i>{esc(topic_title)} · L{listing_id}</i>")
