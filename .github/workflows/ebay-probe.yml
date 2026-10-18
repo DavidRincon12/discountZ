@@ -1,0 +1,57 @@
+name: ebay-probe
+# Prueba temporal de la Browse API de eBay antes de diseñar la fuente: pide un token OAuth
+# (client credentials) y hace dos búsquedas. Nunca imprime el token ni las claves.
+# Se borra cuando la fuente de eBay exista.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/project-thread-onaeks]
+    paths: [.github/workflows/ebay-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Token OAuth
+        env:
+          EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}
+          EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$EBAY_APP_ID" ] || [ -z "$EBAY_CERT_ID" ]; then
+            echo "Faltan los secretos EBAY_APP_ID o EBAY_CERT_ID"; exit 1
+          fi
+          code=$(curl -sS -o token.json -w '%{http_code}' --max-time 20 \
+            -u "$EBAY_APP_ID:$EBAY_CERT_ID" \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            -d 'grant_type=client_credentials' \
+            --data-urlencode 'scope=https://api.ebay.com/oauth/api_scope' \
+            https://api.ebay.com/identity/v1/oauth2/token)
+          echo "token: HTTP $code"
+          if [ "$code" != 200 ]; then jq -c '{error, error_description}' token.json; exit 1; fi
+          token=$(jq -r .access_token token.json)
+          echo "::add-mask::$token"
+          echo "vence en: $(jq .expires_in token.json) s"
+          echo "EBAY_TOKEN=$token" >> "$GITHUB_ENV"
+          rm token.json
+      - name: Búsquedas
+        run: |
+          set -euo pipefail
+          buscar() {
+            local etiqueta=$1; shift
+            code=$(curl -sS -o res.json -w '%{http_code}' --max-time 20 -G \
+              -H "Authorization: Bearer $EBAY_TOKEN" \
+              -H 'X-EBAY-C-MARKETPLACE-ID: EBAY_US' \
+              -H "X-EBAY-C-ENDUSERCTX: contextualLocation=country%3DCO" \
+              "$@" https://api.ebay.com/buy/browse/v1/item_summary/search)
+            echo "== $etiqueta: HTTP $code, total $(jq '.total // 0' res.json)"
+            jq -c '.itemSummaries[]? | {title: .title[0:60], price, condition, buyingOptions,
+              shipping: .shippingOptions[0]?.shippingCost}' res.json | head -5
+            jq -c '.errors[]? | {errorId, message}' res.json
+          }
+          buscar "rtx 4070 nuevo" --data-urlencode 'q=rtx 4070' \
+            --data-urlencode 'filter=conditions:{NEW}' --data-urlencode 'limit=5'
+          buscar "rtx 4070 con envío a CO" --data-urlencode 'q=rtx 4070' \
+            --data-urlencode 'filter=conditions:{NEW},deliveryCountry:CO' --data-urlencode 'limit=5'
