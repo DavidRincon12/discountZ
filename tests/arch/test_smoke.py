@@ -58,3 +58,10 @@ def test_crawl_workflow_matrix_matches_catalog_sources() -> None:
     assert "DISCOUNTZ_EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}" in text
     assert "DISCOUNTZ_EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}" in text
     assert "timeout-minutes: 55" in text
+
+
+def test_cycle_workflow_passes_ebay_credentials_and_probe_is_gone() -> None:
+    text = WORKFLOWS.joinpath("cycle.yml").read_text(encoding="utf-8")
+    assert "DISCOUNTZ_EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}" in text
+    assert "DISCOUNTZ_EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}" in text
+    assert not WORKFLOWS.joinpath("ebay-probe.yml").exists()

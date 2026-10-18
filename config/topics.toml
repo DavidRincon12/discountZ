@@ -9,6 +9,7 @@ intentional_otros = [
   "carulla:/servicios/", "carulla:/escuela de cocina/", "carulla:/instrumentos musicales/",
   "olimpica:/donaciones/", "olimpica:/otras categorias/",
   "panamericana:/impuestos iva(no utilizar)/",
+  "ebay_us:/musical instruments & gear/",
 ]
 
 [topics.errores]
@@ -294,3 +295,57 @@ words = ["groceries", "grocery", "snacks", "candy", "chocolate", "chocolates", "
 [[channel_rules]]
 topic = "libros"
 words = ["books", "book"]
+
+# eBay (Browse API): las 19 raíces de producto de EBAY_US (spec de eBay §3; árbol 0 v134).
+[[rules]]
+source = "ebay_us"
+prefixes = [
+  "/consumer electronics/", "/computers/tablets & networking/", "/cell phones & accessories/",
+  "/video games & consoles/", "/cameras & photo/",
+]
+topic = "tecnologia"
+
+[[rules]]
+source = "ebay_us"
+prefixes = ["/home & garden/major appliances/", "/home & garden/kitchen, dining & bar/small kitchen appliances/"]
+topic = "electro"
+
+[[rules]]
+source = "ebay_us"
+prefixes = ["/home & garden/"]
+topic = "hogar"
+
+[[rules]]
+source = "ebay_us"
+prefixes = ["/home & garden/home improvement/", "/home & garden/tools & workshop equipment/", "/business & industrial/"]
+topic = "ferreteria"
+
+[[rules]]
+source = "ebay_us"
+prefixes = ["/clothing, shoes & accessories/", "/jewelry & watches/"]
+topic = "moda"
+
+[[rules]]
+source = "ebay_us"
+prefixes = ["/health & beauty/"]
+topic = "belleza"
+
+[[rules]]
+source = "ebay_us"
+prefixes = ["/sporting goods/"]
+topic = "deportes"
+
+[[rules]]
+source = "ebay_us"
+prefixes = ["/toys & hobbies/", "/baby/"]
+topic = "bebes"
+
+[[rules]]
+source = "ebay_us"
+prefixes = ["/pet supplies/"]
+topic = "mascotas"
+
+[[rules]]
+source = "ebay_us"
+prefixes = ["/books & magazines/", "/crafts/", "/movies & tv/", "/music/"]
+topic = "libros"

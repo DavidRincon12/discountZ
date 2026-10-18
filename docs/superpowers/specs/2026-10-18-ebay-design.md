@@ -26,7 +26,7 @@ eBay entra como tienda de EE. UU. por su API oficial (Browse API) con las claves
 | Medida | Valor |
 |---|---|
 | Token de aplicación (`client_credentials`, scope `https://api.ebay.com/oauth/api_scope`) | HTTP 200, dura 7.200 s |
-| Cuota diaria (`developer/analytics/v1_beta/rate_limit`) | `buy.browse` 5.000 y `buy.browse.item.bulk` 5.000, por separado |
+| Cuota diaria (`developer/analytics/v1_beta/rate_limit`) | `buy.browse` 5.000 y `buy.browse.item.bulk` 5.000, por separado (el lote responde 403 «Insufficient permissions» al usarlo) |
 | Árbol EBAY_US (`commerce/taxonomy/v1/category_tree/0`) | 34 raíces y 15.111 hojas. En las 19 raíces elegidas: 281 categorías de nivel 2, 2.054 de nivel 3 y 9.234 hojas |
 | Publicaciones nuevas, a precio fijo y con envío al 33166 (Miami) | Tarjetas gráficas 29 mil, portátiles 53 mil, celulares 153 mil, consolas 55 mil, televisores 9 mil, audífonos 192 mil, tenis 2,0 millones |
 | Con `epid` (modelo de eBay), en muestras de 200 | 13-56 %, en promedio ~35 % |
@@ -53,11 +53,11 @@ Todas las peticiones llevan `X-EBAY-C-MARKETPLACE-ID: EBAY_US` y `X-EBAY-C-ENDUS
 | Uso | Recurso | Cuota |
 |---|---|---|
 | Barrido y `/buscar` | `GET /buy/browse/v1/item_summary/search` | `buy.browse` |
-| `/seguir`, capa caliente, `fetch_catalog_items`, `fetch_catalog_listings` y `fetch_card_facts` | `GET /buy/browse/v1/item/?item_ids=` (hasta 20) | `buy.browse.item.bulk` |
+| `/seguir`, capa caliente, `fetch_catalog_items`, `fetch_catalog_listings` y `fetch_card_facts` | `GET /buy/browse/v1/item/{item_id}` (de a una: `getItems` en lote da 403 sin acceso especial, medido el 2026-10-18) | `buy.browse` |
 | Confirmación independiente de la v1 (`confirm`) | `GET /buy/browse/v1/item/{item_id}` | `buy.browse` |
 | Árbol de categorías (una vez por corrida de `crawl`) | `GET /commerce/taxonomy/v1/category_tree/0` | aparte |
 
-Filtro común de búsqueda: `conditions:{NEW},buyingOptions:{FIXED_PRICE},deliveryCountry:US,price:[15..],priceCurrency:USD`. Después del filtro de la API, el adaptador descarta en el parseo:
+Filtro común de búsqueda (desde la implementación, `conditionIds:{1000}` en vez de `conditions:{NEW}`, que trae «Open box»): `conditions:{NEW},buyingOptions:{FIXED_PRICE},deliveryCountry:US,price:[15..],priceCurrency:USD`. Después del filtro de la API, el adaptador descarta en el parseo:
 
 - `seller.feedbackPercentage` < 98 o `seller.feedbackScore` < 100 (B4);
 - publicaciones con variantes (`itemGroupHref`) en el barrido; en `/seguir` se sigue la variante del enlace;
@@ -76,8 +76,8 @@ Filtro común de búsqueda: `conditions:{NEW},buyingOptions:{FIXED_PRICE},delive
 
 - **Particiones:** las categorías de nivel 3 de las 19 raíces (las de nivel 2 sin hijos cuentan como partición), leídas del árbol al empezar la corrida y ordenadas por id. Hoy son ~2.054. Las raíces excluidas (`[ebay] excluded_roots`) son: 1, 99, 237, 260, 316, 550, 870, 1305, 3252, 10542, 11116, 20081, 45100, 64482 y 172008.
 - **Página:** `limit = [ebay] items_per_partition` (75 por defecto) en el orden por defecto de eBay, solo `offset = 0`. Cada partición es una página, así que `has_more = false`. 2.054 × 75 ≈ 154 mil publicaciones, que es el tope de B4.
-- **Ritmo:** `[crawl.ebay_us]` con `max_per_run = 200`, `max_per_24h = 4800` y `hot_share_bp = 4000`: por hora ~120 búsquedas del barrido (~2.880 al día, una vuelta completa cada ~17 h) y ~80 lotes de la capa caliente. Quedan ~2.100 búsquedas al día de `buy.browse` para `/buscar` y `confirm`.
-- **Capa caliente:** la de siempre (`hot_catalog_ids`), releída por `item_ids` en lotes de 20 con la cuota aparte: ~1.600 publicaciones que cambiaron de precio en 7 días por hora.
+- **Ritmo** (reajustado en la implementación por la falta de `getItems`): `[crawl.ebay_us]` con `max_per_run = 170`, `max_per_24h = 4000` y `hot_share_bp = 3000`: por hora ~120 búsquedas del barrido (una vuelta completa cada ~17-20 h) y ~50 fichas de la capa caliente. `[sources.ebay_us]` queda con 1.000 al día para `/seguir`, `/buscar` y `confirm`.
+- **Capa caliente:** la de siempre (`hot_catalog_ids`), releída ficha por ficha con `getItem`: ~50 publicaciones que cambiaron de precio en 7 días por hora.
 - **Tope de la BD:** si `catalog_item` de `ebay_us` pasa de `[ebay] max_items` (150.000), la corrida no inserta publicaciones nuevas. Solo actualiza las que ya conoce. Con la BD en ≥ 450 MB, `ebay_us` se pausa igual que Éxito y Carulla.
 - **Tema:** reglas `ebay_us:` en `config/topics.toml` sobre la ruta de categorías de eBay (`/consumer electronics/tv, video & home audio/…`). Las 19 raíces quedan asignadas: ninguna cae en Otros sin querer.
 
@@ -118,7 +118,7 @@ Es la tarjeta del rastreo con estos cambios:
 
 - `Settings`: `ebay_app_id: str | None` y `ebay_cert_id: SecretStr | None`. `check-config` avisa si falta uno de los dos.
 - `cycle.yml` y `crawl.yml` pasan `DISCOUNTZ_EBAY_APP_ID` y `DISCOUNTZ_EBAY_CERT_ID` desde los secretos `EBAY_APP_ID` y `EBAY_CERT_ID`, que ya existen. La matriz de `crawl` gana `ebay_us`.
-- `[sources.ebay_us]` en `config/discountz.toml` con un presupuesto para `/seguir` y `/buscar`, y `max_batch = 20`.
+- `[sources.ebay_us]` en `config/discountz.toml` con un presupuesto para `/seguir` y `/buscar`, y `max_batch = 1`.
 - Se borra `.github/workflows/ebay-probe.yml`.
 - Lo que hace David tras fusionar: correr `migrate` con `to = head`. Nada más: los secretos ya están y el job entra solo a la matriz.
 
