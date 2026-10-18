@@ -239,11 +239,14 @@ def _handle_message(
                 return [f"{what} silenciado {days} d."]
             return [f"No encontré {ref} (o aún no tiene la primera lectura)."]
         case c.SourceToggle(source, enabled):
-            ok = db.set_source_enabled(conn, source, enabled, now + RAMP if enabled else None)
-            if not ok:
+            was_on = db.set_source_enabled(conn, source, enabled, now + RAMP if enabled else None)
+            if was_on is None:
                 return [f"No conozco la fuente {esc(source)}."]
-            state = "activada (presupuesto al 50 % durante 7 días)" if enabled else "apagada"
-            return [f"Fuente {esc(source)} {state}."]
+            if not enabled:
+                return [f"Fuente {esc(source)} apagada."]
+            if was_on:
+                return [f"Fuente {esc(source)} ya estaba activa: reinicié su breaker."]
+            return [f"Fuente {esc(source)} activada (presupuesto al 50 % durante 7 días)."]
         case c.TokenExpiry(day):
             db.set_token_expiry(conn, day)
             return [f"Anotado: el token de disparo vence el {day.isoformat()}."]

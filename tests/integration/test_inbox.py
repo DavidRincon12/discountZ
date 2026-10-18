@@ -310,3 +310,43 @@ def test_drop_auto_removes_only_auto(db: psycopg.Connection) -> None:
     assert "1 seguimiento automático" in replies(db)[1]
     run(db, [[msg(3, f"/dejar a{manual}")]])
     assert count(db, "watch") == 1
+
+
+def _trip(db: psycopg.Connection, code: str) -> None:
+    db.execute(
+        """UPDATE discountz.source
+              SET breaker = 'open', breaker_open_until = %s, breaker_trips = 3,
+                  consecutive_unavailable = 5, consecutive_parse_failures = 2
+            WHERE code = %s""",
+        (T + timedelta(hours=8), code),
+    )
+
+
+def _breaker(db: psycopg.Connection, code: str) -> tuple[object, ...] | None:
+    return db.execute(
+        """SELECT breaker, breaker_open_until, breaker_trips, consecutive_unavailable,
+                  consecutive_parse_failures, ramp_until
+             FROM discountz.source WHERE code = %s""",
+        (code,),
+    ).fetchone()
+
+
+def test_source_on_closes_an_open_breaker_without_ramp(db: psycopg.Connection) -> None:
+    _trip(db, "exito")
+    run(db, [[msg(1, "/fuente on exito")]])
+    # Ya estaba activa: no se vuelve a fijar la rampa; las caídas previas (trips) se
+    # conservan para que, si sigue caída, el siguiente disparo espere más.
+    assert _breaker(db, "exito") == ("closed", None, 3, 0, 0, None)
+    (reply,) = replies(db)
+    assert "reinicié su breaker" in reply
+
+
+def test_source_on_after_off_closes_breaker_and_sets_ramp(db: psycopg.Connection) -> None:
+    run(db, [[msg(1, "/fuente off exito")]])
+    _trip(db, "exito")
+    run(db, [[msg(2, "/fuente on exito")]])
+    state = _breaker(db, "exito")
+    assert state is not None
+    assert state[:5] == ("closed", None, 3, 0, 0)
+    assert state[5] is not None
+    assert "activada" in replies(db)[-1]

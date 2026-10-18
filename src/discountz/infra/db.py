@@ -999,15 +999,35 @@ def mute(conn: psycopg.Connection, ref: str, until: datetime) -> bool:
 
 def set_source_enabled(
     conn: psycopg.Connection, code: str, enabled: bool, ramp_until: datetime | None
-) -> bool:
-    """`/fuente on|off`; al activar se fija la rampa (`ramp_until`)."""
-    cur = conn.execute(
-        """UPDATE discountz.source
-              SET enabled = %s, ramp_until = CASE WHEN %s THEN %s ELSE ramp_until END
-            WHERE code = %s""",
-        (enabled, enabled, ramp_until, code),
+) -> bool | None:
+    """`/fuente on|off`; devuelve si estaba activa antes, o `None` si la fuente no existe.
+
+    Al activar se cierra el breaker y se ponen en cero sus rachas: el dueño ya revisó la
+    fuente y no tiene que esperar el backoff (hasta 12 h). `breaker_trips` se conserva, así
+    que si sigue caída el siguiente disparo espera más. La rampa (`ramp_until`) solo se fija
+    si la fuente venía apagada.
+    """
+    row = _one(
+        conn,
+        """WITH old AS (
+             SELECT code, enabled FROM discountz.source WHERE code = %(code)s FOR UPDATE
+           )
+           UPDATE discountz.source s
+              SET enabled = %(on)s,
+                  ramp_until = CASE WHEN %(on)s AND NOT old.enabled THEN %(ramp)s
+                                    ELSE s.ramp_until END,
+                  breaker = CASE WHEN %(on)s THEN 'closed' ELSE s.breaker END,
+                  breaker_open_until = CASE WHEN %(on)s THEN NULL ELSE s.breaker_open_until END,
+                  consecutive_unavailable = CASE WHEN %(on)s THEN 0
+                                                 ELSE s.consecutive_unavailable END,
+                  consecutive_parse_failures = CASE WHEN %(on)s THEN 0
+                                                    ELSE s.consecutive_parse_failures END
+             FROM old
+            WHERE s.code = old.code
+        RETURNING old.enabled""",
+        {"code": code, "on": enabled, "ramp": ramp_until},
     )
-    return cur.rowcount == 1
+    return None if row is None else bool(row[0])
 
 
 def set_token_expiry(conn: psycopg.Connection, day: date) -> None:
