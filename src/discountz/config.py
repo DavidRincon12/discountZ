@@ -27,7 +27,7 @@ from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from discountz.domain.commands import CATEGORIES
-from discountz.domain.community import ChannelRule
+from discountz.domain.community import ChannelRule, stem
 from discountz.domain.errors import ConfigError
 from discountz.domain.model import normalize_title
 from discountz.domain.money import Currency
@@ -493,9 +493,14 @@ def load_topics(path: Path = TOPICS_PATH) -> Topics:
         for code in TOPIC_CODES
     }
     channel_rules: list[ChannelRule] = []
+    seen: dict[str, str] = {}  # término en singular → tema: un término nombra un solo tema
     for i, cr in enumerate(raw.channel_rules):
         if cr.topic not in raw.topics:
             raise ConfigError(f"{path.name}:channel_rules.{i}: tema desconocido")
-        words = frozenset(w for phrase in cr.words for w in normalize_title(phrase).split())
+        words = frozenset(normalize_title(term) for term in cr.words) - {""}
+        for term in sorted(words):
+            other = seen.setdefault(" ".join(stem(t) for t in term.split()), cr.topic)
+            if other != cr.topic:
+                raise ConfigError(f"{path.name}:channel_rules.{i}: «{term}» ya está en {other}")
         channel_rules.append(ChannelRule(cr.topic, words))
     return Topics(MappingProxyType(params), tuple(rules), frozenset(otros), tuple(channel_rules))

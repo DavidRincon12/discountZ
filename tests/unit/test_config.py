@@ -200,9 +200,9 @@ def test_channel_rules_point_to_existing_topics() -> None:
     assert topics.channel_rules
     assert all(rule.topic in topics.params for rule in topics.channel_rules)
     tech = next(r for r in topics.channel_rules if r.topic == "tecnologia")
-    assert {"reloj", "inteligente", "audifonos"} <= tech.words
-    deportes = next(r for r in topics.channel_rules if r.topic == "deportes")
-    assert "banador" in deportes.words
+    assert {"reloj inteligente", "audifono"} <= tech.words
+    moda = next(r for r in topics.channel_rules if r.topic == "moda")
+    assert "banador" in moda.words
 
 
 def test_channel_interval_is_ten_minutes() -> None:
@@ -224,3 +224,13 @@ def test_params_ebay_defaults() -> None:
     # `getItems` sin acceso: una ficha por petición; barrido + ciclo caben en 5.000 al día.
     assert (b.max_batch, b.max_per_run, b.max_per_24h) == (1, 10, 1000)
     assert b.max_per_24h + p.crawl["ebay_us"].max_per_24h <= 5000
+
+
+def test_channel_term_in_two_topics_is_rejected(tmp_path: Path) -> None:
+    from discountz.config import load_topics
+
+    src = Path("config/topics.toml").read_text(encoding="utf-8")
+    path = tmp_path / "topics.toml"
+    path.write_text(src + '\n[[channel_rules]]\ntopic = "moda"\nwords = ["Audífonos"]\n', "utf-8")
+    with pytest.raises(ConfigError, match="audifonos"):
+        load_topics(path)

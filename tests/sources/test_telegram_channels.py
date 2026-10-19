@@ -153,6 +153,46 @@ def test_clubgratis_currency_inference(line: str, price: Money, coupon: str | No
     ]
 
 
+# Formas reales del 2026-10-19 en las que el título salía como «Comprar en Amazon <enlace>»,
+# «Precio incluye envio», «Aplicar cupón» o «ad».
+CLUBGRATIS_TITLES = [
+    (
+        "#ad\n\n➡️ 💰$109.99\nFuente de alimentación NZXT C850 Gold\n\n\n"
+        "Comprar en Amazon https://joylink.io/clubgratis/x\n\nAportes con @Aclubgrabot",
+        "Fuente de alimentación NZXT C850 Gold",
+    ),
+    (
+        "➡️  💰622.389\n\nPrecio incluye envio\n\nKobo Clara BW + funda Sleep Cover\n"
+        "#Ereader #Funda #ad\n\n\n Comprar en Amazon  Japón https://link.amazon/B0071yC7A",
+        "Kobo Clara BW + funda Sleep Cover",
+    ),
+    (
+        "Compra con casillero 🇺🇸\n\n➡️  💰237.34\n\nAplicar cupón \n\n\n#ad\n\n"
+        "Generador inversor PowerSmart de 4400W\n#Generadores\n\n\n\n"
+        " Comprar en Amazon https://joylink.io/clubgratis/x",
+        "Generador inversor PowerSmart de 4400W",
+    ),
+    (
+        "Preventa \n\nEnvío directo \n\n➡️  💰533.93 libras esterlinas\n\n\n#ad\n\n"
+        "Nintendo Switch 2 Zelda Edition  \n#consola\n\n Comprar en Amazon https://link.amazon/B0",
+        "Nintendo Switch 2 Zelda Edition",
+    ),
+    ("➡️ 💰$9.99\n\n#ad\nCable USB-C\n\nComprar en Amazon https://link.amazon/B1", "Cable USB-C"),
+]
+
+
+@pytest.mark.parametrize(("text", "title"), CLUBGRATIS_TITLES)
+def test_clubgratis_title_skips_notes_and_links(text: str, title: str) -> None:
+    result = parse_channel_page("tg_clubgratis", page(post("Clubgratis", 7, text)), NOW)
+    assert [p.title for p in result.posts] == [title]
+
+
+def test_clubgratis_percentage_is_not_a_price() -> None:
+    text = "➡️ 20% off en relojes invicta \n\nCupón 20% \n#ad \n\nComprar en amazon  https://joylink.io/clubgratis/x"
+    result = parse_channel_page("tg_clubgratis", page(post("Clubgratis", 7, text)), NOW)
+    assert result.posts == ()
+
+
 def test_descuentoshome_reads_coupon_only_when_it_has_a_code() -> None:
     text = (
         "#Hogar ✨Por Solo✨ $1.299✅ Envío gratis con Prime 🚚\n{cupon}\n\n"
