@@ -96,6 +96,33 @@ def test_every_first_level_category_is_mapped(store: str) -> None:
     assert unmapped == []
 
 
+# Subcategorías reales (árbol de VTEX del 2026-10-19) que su primer nivel mandaba a otro tema:
+# lo mismo debe quedar con el mismo hashtag en todas las tiendas y en los canales.
+STORE_SUBCATEGORIES = [
+    ("exito", "/Jardín y aire libre/Camping/Carpas/", "deportes"),
+    ("exito", "/Deportes y fitness/Termos y botellas/", "hogar"),
+    ("exito", "/Mercado/Alimentación para bebés/", "bebes"),
+    ("exito", "/Cuidado personal/Higiene para bebés y niños/", "bebes"),
+    ("carulla", "/Electrodomésticos/Cuidado personal/Secadores/", "belleza"),
+    ("carulla", "/Ferretería/Jardinería/", "hogar"),
+    ("carulla", "/Salud y belleza/Pañales y pañitos/", "bebes"),
+    ("carulla", "/Moda y accesorios/Disfraces/", "hogar"),
+    ("olimpica", "/Supermercado/Para tu Mascota/", "mascotas"),
+    ("olimpica", "/Supermercado/Para tu Bebé/", "bebes"),
+    ("exito", "/Tecnología/Televisores/", "tecnologia"),
+]
+
+
+@pytest.mark.parametrize(("store", "path", "topic"), STORE_SUBCATEGORIES)
+def test_store_subcategories_follow_their_product(store: str, path: str, topic: str) -> None:
+    assert assign_topic(load_topics().rules, store, path) == topic
+
+
+def test_televisions_share_topic_with_store_paths() -> None:
+    post = _feed_post("55 OLED S95H 4K Televisor Smart", ("televisor",))
+    assert assign_channel_topic(post, load_topics().channel_rules) == "tecnologia"
+
+
 # Categorías de primer nivel de Best Buy según su sitio y la documentación de la API; se revisan
 # con el árbol real al grabar las fixtures con la clave de David.
 BESTBUY_TOP = (

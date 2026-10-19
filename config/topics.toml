@@ -183,6 +183,48 @@ source = "exito"
 prefixes = ["/electrodomesticos/electrodomesticos de cuidado personal/"]
 topic = "belleza"
 
+# Revisadas con los árboles de VTEX del 2026-10-19: que cada producto lleve el mismo hashtag en
+# todas las tiendas y en los canales (lo de bebés va a Bebés; camping, a Deportes; termos, a Hogar).
+[[rules]]
+source = "exito"
+prefixes = ["/jardin y aire libre/camping/"]
+topic = "deportes"
+
+[[rules]]
+source = "exito"
+prefixes = ["/deportes y fitness/termos y botellas/"]
+topic = "hogar"
+
+[[rules]]
+source = "exito"
+prefixes = ["/mercado/alimentacion para bebes/", "/cuidado personal/higiene para bebes y ninos/"]
+topic = "bebes"
+
+[[rules]]
+source = "carulla"
+prefixes = ["/electrodomesticos/cuidado personal/"]
+topic = "belleza"
+
+[[rules]]
+source = "carulla"
+prefixes = ["/ferreteria/jardineria/", "/moda y accesorios/disfraces/"]
+topic = "hogar"
+
+[[rules]]
+source = "carulla"
+prefixes = ["/salud y belleza/panales y panitos/"]
+topic = "bebes"
+
+[[rules]]
+source = "olimpica"
+prefixes = ["/supermercado/para tu mascota/"]
+topic = "mascotas"
+
+[[rules]]
+source = "olimpica"
+prefixes = ["/supermercado/para tu bebe/"]
+topic = "bebes"
+
 # Best Buy (API oficial): categorías de primer nivel en inglés. Se revisan con el árbol real.
 [[rules]]
 source = "bestbuy_us"
@@ -257,7 +299,7 @@ words = ["belleza", "salud", "cuidado", "cuidadofacial", "cuidadocorporal", "cui
 
 [[channel_rules]]
 topic = "electro"
-words = ["electrodomestico", "televisor", "tv", "television", "freidora", "freidoradeaire",
+words = ["electrodomestico", "freidora", "freidoradeaire",
   "aspiradora", "licuadora", "batidora", "cafetera", "maquina de cafe", "maquina de espresso",
   "microondas", "horno electrico", "horno tostador", "tostadora", "nevera", "refrigerador",
   "lavadora", "secadora", "estufa", "plancha de ropa", "vaporizador", "vaporizador de ropa",
@@ -265,16 +307,18 @@ words = ["electrodomestico", "televisor", "tv", "television", "freidora", "freid
   "calentador", "calefactor", "exprimidor", "extractor de jugo", "wafflera", "maquina de gofres",
   "sandwichera", "arrocera", "olla arrocera", "olla electrica", "parrilla electrica",
   "espumador", "molinillo electrico", "horno", "maquina de yogur", "yogurtera", "raclette",
-  "plancha de vapor", "secador de ropa", "quitapelusas", "limpiador de vapor", "dispensador de agua",
+  "plancha de vapor", "secador de ropa", "quitapelusas", "limpiador de vapor",
+  "dispensador de agua",
   "filtro de agua", "lonchera electrica",
-  "tvs", "vacuum", "vacuums", "fryer", "air fryer", "blender", "microwave", "refrigerator",
+  "vacuum", "vacuums", "fryer", "air fryer", "blender", "microwave", "refrigerator",
   "fridge", "appliance", "appliances", "heater", "humidifier", "dehumidifier", "purifier",
   "coffee maker", "espresso", "toaster", "stand mixer", "juicer", "washer", "dryer",
   "small appliances"]
 
 [[channel_rules]]
 topic = "tecnologia"
-words = ["tecnologia", "gadget", "audifono", "auricular", "parlante", "altavoz", "bocina",
+words = ["tecnologia", "gadget", "televisor", "tv", "television", "smart tv", "audifono",
+  "auricular", "parlante", "altavoz", "bocina",
   "barra de sonido", "celular", "telefono", "movil", "smartphone", "iphone", "ipad", "tablet",
   "laptop", "computador", "computadora", "mini pc", "minipc", "macbook", "monitor", "teclado",
   "mouse", "raton", "usb", "hdmi", "cargador", "power bank", "bateria externa",
@@ -288,7 +332,8 @@ words = ["tecnologia", "gadget", "audifono", "auricular", "parlante", "altavoz",
   "tripode", "aro de luz", "impresora", "smartwatch", "smart watch", "reloj inteligente",
   "relojinteligente", "pulsera inteligente", "gafas inteligentes", "rastreador", "localizador",
   "airtag", "air tracker", "echo", "echo dot", "echo show", "alexa", "kindle", "ereader",
-  "lector electronico", "tocadiscos", "disipador", "sobretension", "karaoke", "regleta", "multitoma",
+  "lector electronico", "tocadiscos", "disipador", "sobretension", "karaoke", "regleta",
+  "multitoma",
   "protector de sobretensiones", "protector de pantalla", "adaptador", "domotica",
   "casa inteligente", "casainteligente", "hogar inteligente", "hogarinteligente",
   "videovigilancia", "timbre", "accesoriostecnologia", "accesorioscelular", "accesoriosmoviles",
@@ -296,7 +341,7 @@ words = ["tecnologia", "gadget", "audifono", "auricular", "parlante", "altavoz",
   "speakers", "keyboard", "keyboards", "mice", "laptops", "tablets", "monitors", "phone",
   "phones", "charger", "chargers", "camera", "cameras", "printer", "controller", "video game",
   "projector", "computer", "graphics card", "hard drive", "flash drive", "memory card",
-  "security camera", "doorbell", "smart plug", "smart display", "surge protector", "ssds"]
+  "security camera", "doorbell", "smart plug", "smart display", "surge protector", "ssds", "tvs"]
 
 [[channel_rules]]
 topic = "moda"
