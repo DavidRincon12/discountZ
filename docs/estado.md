@@ -9,8 +9,7 @@
 - Canales: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 898 pruebas (unitarias, integración y e2e) en verde el 2026-10-19.
 
 ## Último cambio
-- Rama `claude/project-thread-y6ijcd`: las fotos de las tarjetas se amplían hasta llenar el recuadro (antes `thumbnail` solo reducía y las miniaturas de Slickdeals, DealNews y OFERTU, de 250-500 px, quedaban diminutas).
-- Rama `claude/project-thread-onaeks`: `MODEL_LOW` de eBay también cuenta como pares las publicaciones del mismo modelo de la misma página (con su precio actual). Antes la primera lectura de cada categoría nunca alertaba: 6 rastreos del 2026-10-18/19 con 0 alertas.
+- Rama `claude/project-thread-y6ijcd`: las tarjetas de VTEX piden la foto en 1000 px (`ids/<id>-1000-1000/`) y sin punto final en el host; la descarga sigue hasta 2 redirecciones a hosts permitidos y registra `photo_missing` (código y status) cuando no hay foto.
 
 ## Siguiente paso
 - David: crear el canal, hacer admin al bot con «Publicar mensajes» y guardar su id en el secreto `TELEGRAM_CHANNEL_ID` (README, paso 12).

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import cache
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import psycopg
 
@@ -31,6 +31,7 @@ from discountz.app.render import source_name
 from discountz.config import load_topics
 from discountz.domain.errors import (
     DiscountzError,
+    SourceError,
     TelegramBadRequest,
     TelegramError,
     TelegramForbidden,
@@ -60,6 +61,8 @@ TOPICS_NOTICE = (
 
 CHANNEL_PURPOSES = frozenset({"alert", "digest"})
 
+MAX_PHOTO_REDIRECTS = 2
+REDIRECTS = frozenset({301, 302, 303, 307, 308})
 PhotoFetcher = Callable[[str, str], bytes | None]  # (fuente, URL de la foto) → bytes o None
 
 
@@ -74,19 +77,48 @@ def plain_text(body: str) -> str:
 
 
 def make_photo_fetcher(http: HttpClient, sources: Mapping[str, Source]) -> PhotoFetcher:
-    """Descarga la foto solo por https y desde los `image_hosts` de la fuente; valida la imagen."""
+    """Descarga la foto solo por https y desde los `image_hosts` de la fuente; valida la imagen.
+
+    Sigue hasta `MAX_PHOTO_REDIRECTS` redirecciones, cada una a un host permitido (el CDN de
+    VTEX puede mandar de `vteximg.com.br` a `vtexassets.com`). Sin foto, registra el porqué.
+    """
+
+    def allowed(src: Source, url: str) -> bool:
+        parts = urlsplit(url)
+        return (
+            parts.scheme == "https" and (parts.hostname or "").lower() in src.descriptor.image_hosts
+        )
+
+    def missing(source: str, code: str, status: int | None = None) -> None:
+        event(log, "photo_missing", source=source, code=code, http_status=status)
 
     def fetch(source: str, url: str) -> bytes | None:
         src = sources.get(source)
-        parts = urlsplit(url)
-        host = (parts.hostname or "").lower()
-        if src is None or parts.scheme != "https" or host not in src.descriptor.image_hosts:
+        if src is None or not allowed(src, url):
             return None
-        try:
-            resp = http.request("GET", url)
-        except DiscountzError:
+        for _ in range(MAX_PHOTO_REDIRECTS + 1):
+            try:
+                resp = http.request("GET", url)
+            except DiscountzError as exc:
+                missing(source, exc.code if isinstance(exc, SourceError) else "network")
+                return None
+            if resp.status not in REDIRECTS:
+                break
+            target = {k.lower(): v for k, v in resp.headers.items()}.get("location", "")
+            url = urljoin(url, target)
+            if not allowed(src, url):
+                missing(source, "redirect", resp.status)
+                return None
+        else:
+            missing(source, "redirect_loop")
             return None
-        return validate_photo(resp.body) if resp.status == 200 else None
+        if resp.status != 200:
+            missing(source, "status", resp.status)
+            return None
+        photo = validate_photo(resp.body)
+        if photo is None:
+            missing(source, "invalid")
+        return photo
 
     return fetch
 
