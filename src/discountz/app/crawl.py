@@ -331,8 +331,16 @@ class _Run:
         return [o for o in items if o.external_id in states]
 
     def model_peers(self, items: Sequence[CatalogObservation]) -> dict[str, list[tuple[str, int]]]:
+        """Pares guardados más los de esta misma página, con el precio de la página: las
+        publicaciones de un modelo suelen salir juntas, así que la primera lectura de una
+        categoría también compara."""
         keys = sorted({o.model_key for o in items if o.model_key is not None})
-        return db.model_peer_prices(self.conn, self.code, keys, self.now - MODEL_WINDOW)
+        stored = db.model_peer_prices(self.conn, self.code, keys, self.now - MODEL_WINDOW)
+        merged = {k: dict(v) for k, v in stored.items()}
+        for o in items:
+            if o.model_key is not None:
+                merged.setdefault(o.model_key, {})[o.external_id] = o.price.minor
+        return {k: list(v.items()) for k, v in merged.items()}
 
     def best_candidate(
         self,
