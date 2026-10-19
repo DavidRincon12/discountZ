@@ -661,6 +661,30 @@ def test_model_low_same_page_alerts_once(db: psycopg.Connection) -> None:
     assert row.card is not None and row.card["price_minor"] == 7_990
 
 
+def test_model_low_first_read_uses_same_page_peers(db: psycopg.Connection) -> None:
+    """Primera lectura de una categoría: los pares del mismo modelo vienen en la misma página."""
+    page = [eobs(f"80000000000{i}", 10_000) for i in range(5)] + [eobs("900000000001", 8_000)]
+    src = ebay_source(page, {"900000000001": 8_000})
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 1
+    (row,) = repo.claim_outbox(db, 10, T)
+    assert row.card is not None
+    assert (row.card["kind"], row.card["usual_minor"], row.card["peers"]) == (
+        "model_low",
+        10_000,
+        5,
+    )
+
+
+def test_model_low_same_page_price_replaces_stored_one(db: psycopg.Connection) -> None:
+    """Si un par guardado sale en la página con otro precio, cuenta el de la página."""
+    seed_peers(db, 10_000)
+    page = [eobs(f"80000000000{i}", 8_100) for i in range(5)] + [eobs("900000000001", 8_000)]
+    src = ebay_source(page, {"900000000001": 8_000})
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 0
+
+
 def test_same_read_keeps_bigger_drop(db: psycopg.Connection) -> None:
     """§4.1 da 2.100 pb y §4.2 da 3.000 pb: una sola alerta, la del modelo."""
     seed_peers(db, 11_429)

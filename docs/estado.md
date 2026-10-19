@@ -6,7 +6,7 @@
 - Best Buy y Walmart fuera por decisión de David. Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
 - eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18 (PR #13): `/seguir`, `/buscar` y job `crawl` con bajada de la misma publicación y `MODEL_LOW` (mediana del mismo `epid`). Esquema 6 (migración `0006`: canales DescuentosHome y OFERTU).
 - Canal general de ofertas (opcional, secreto `TELEGRAM_CHANNEL_ID`): copia de cada oferta al canal, sin tema y sin botones de callback.
-- Canales: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 916 pruebas (unitarias, integración y e2e) en verde el 2026-10-19.
+- Canales: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 918 pruebas (unitarias, integración y e2e) en verde el 2026-10-19.
 
 ## Último cambio
 - Rama `claude/precision-categorias-qof49c`: el tema (hashtag) de canales y feeds acertaba el 51 % contra ofertas reales etiquetadas; ahora frases, plurales, hashtags compuestos y peso menor tras «para/con/for» (93 % en ofertas no vistas; prueba con 946 etiquetadas exige ≥ 95 %). Subcategorías de las tiendas CO y los televisores quedan con el mismo tema en todas las fuentes.
