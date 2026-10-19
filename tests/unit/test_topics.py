@@ -151,7 +151,8 @@ FEED_TOPICS = [
     ("4-pk 80-ct Lysol Disinfecting Wipes (Mango/Linen/2x Lemon) $8.75", (), "mercado"),
     ('Olympia Tools 36" x 24" Foldable Push Cart Dolly $67.80', (), "ferreteria"),
     ("Billconch Biometric Handgun Safe for $36 + free shipping", (), "otros"),
-    ("Smart Watch Band Care Kit for $9", ("accessories",), "otros"),  # palabras ambiguas
+    ("Smart Watch Band Care Kit for $9", ("accessories",), "tecnologia"),  # «smart watch»
+    ("Billconch Smart Care Kit for $9", ("accessories",), "otros"),  # palabras ambiguas
 ]
 
 

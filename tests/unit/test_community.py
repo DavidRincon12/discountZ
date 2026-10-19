@@ -19,11 +19,13 @@ from discountz.domain.urls import SafeUrl
 T = datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
 USD_30 = Money(3000, Currency.USD)
 RULES = (
-    ChannelRule("tecnologia", frozenset({"teclado", "reloj", "inteligente", "ps5", "tv"})),
-    ChannelRule("hogar", frozenset({"cocina", "cuchillos"})),
-    ChannelRule("moda", frozenset({"reloj", "calzado"})),
+    ChannelRule("tecnologia", frozenset({"teclado", "reloj inteligente", "ps5", "tv", "laptop"})),
+    ChannelRule("hogar", frozenset({"cocina", "cuchillo", "ropa de cama"})),
+    ChannelRule("moda", frozenset({"reloj", "calzado", "zapato", "mochila", "ropa"})),
     ChannelRule("belleza", frozenset({"cuidadofacial", "perfume"})),
+    ChannelRule("bebes", frozenset({"juguete"})),
 )
+PET_FIRST = (ChannelRule("mascotas", frozenset({"para perro"})), *RULES)
 
 
 @dataclass(frozen=True)
@@ -105,11 +107,35 @@ def test_topic_by_hashtag_and_title() -> None:
     assert assign_channel_topic(_post("Set de 7 cuchillos de cocina"), RULES) == "hogar"
 
 
-def test_topic_more_matching_words_wins() -> None:
-    assert assign_channel_topic(_post("Reloj inteligente"), RULES) == "tecnologia"
-    assert (
-        assign_channel_topic(_post("Reloj de pulsera"), RULES) == "tecnologia"
-    )  # empate: el primero
+def test_topic_phrase_beats_its_words() -> None:
+    assert assign_channel_topic(_post("Reloj inteligente 1.57 con llamadas"), RULES) == "tecnologia"
+    assert assign_channel_topic(_post("Reloj Casio vintage"), RULES) == "moda"
+
+
+def test_topic_matches_plurals() -> None:
+    assert assign_channel_topic(_post("Zapatos PUMA Seeker"), RULES) == "moda"
+    assert assign_channel_topic(_post("Set de 7 cuchillos"), RULES) == "hogar"
+
+
+def test_topic_hashtag_matches_by_longest_prefix() -> None:
+    assert assign_channel_topic(_post("Nova 4", hashtags=("zapatoshombre",)), RULES) == "moda"
+    assert assign_channel_topic(_post("Lacoste", hashtags=("ropadecama",)), RULES) == "hogar"
+
+
+def test_topic_sums_hashtags_and_title() -> None:
+    post = _post("Teclado de piano", hashtags=("calzado", "zapatoshombre"))
+    assert assign_channel_topic(post, RULES) == "moda"  # 2 hashtags pesan más que el producto
+
+
+def test_topic_words_after_connector_weigh_less() -> None:
+    assert assign_channel_topic(_post("Mochila escolar para laptop"), RULES) == "moda"
+    assert assign_channel_topic(_post("Laptop 15 con mochila"), RULES) == "tecnologia"
+
+
+def test_topic_phrase_may_start_with_connector() -> None:
+    post = _post("Juguete interactivo para perros")
+    assert assign_channel_topic(post, RULES) == "bebes"
+    assert assign_channel_topic(post, PET_FIRST) == "mascotas"  # empate: la regla anterior
 
 
 def test_topic_defaults_to_otros() -> None:
