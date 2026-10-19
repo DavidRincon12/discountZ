@@ -29,10 +29,10 @@ def _scalar(conn: psycopg.Connection, query: str) -> object:
 
 def test_up_down_up(empty_db_url: str) -> None:
     with connect(empty_db_url) as conn:
-        assert migrate(conn, "head") == [1, 2, 3, 4, 5]
-        assert current_version(conn) == SCHEMA_VERSION == 5
-        assert _scalar(conn, "SELECT count(*) FROM discountz.source") == 15
-        assert migrate(conn, 3) == [5, 4]
+        assert migrate(conn, "head") == [1, 2, 3, 4, 5, 6]
+        assert current_version(conn) == SCHEMA_VERSION == 6
+        assert _scalar(conn, "SELECT count(*) FROM discountz.source") == 17
+        assert migrate(conn, 3) == [6, 5, 4]
         assert _scalar(conn, "SELECT count(*) FROM discountz.source WHERE kind = 'channel'") == 3
         assert migrate(conn, 1) == [3, 2]
         assert _scalar(conn, "SELECT to_regclass('discountz.catalog_item')") is None
@@ -40,7 +40,7 @@ def test_up_down_up(empty_db_url: str) -> None:
         assert migrate(conn, 0) == [1]
         assert current_version(conn) == 0
         assert _scalar(conn, "SELECT to_regclass('discountz.listing')") is None
-        assert migrate(conn, "head") == [1, 2, 3, 4, 5]
+        assert migrate(conn, "head") == [1, 2, 3, 4, 5, 6]
         assert migrate(conn, "head") == []
 
 
@@ -56,7 +56,7 @@ def test_down_0004_removes_feeds_and_the_baseline_flag(db: psycopg.Connection) -
                   ('tg_cajitatech', 88168, now(), 'oled tv', 4499, 'USD', 'electro', now())"""
     )
     assert _scalar(db, "SELECT bool_or(baseline) FROM discountz.channel_post") is False
-    assert migrate(db, 3) == [5, 4]
+    assert migrate(db, 3) == [6, 5, 4]
     assert _scalar(db, "SELECT channel FROM discountz.channel_post") == "tg_cajitatech"
     assert _scalar(db, "SELECT count(*) FROM discountz.channel_cursor") == 0
     flag = """SELECT count(*) FROM information_schema.columns
@@ -81,7 +81,9 @@ def test_seed_sources_and_gates(db: psycopg.Connection) -> None:
         "slickdeals_amazon": True,
         "tg_cajitatech": True,
         "tg_clubgratis": True,
+        "tg_descuentoshome": True,
         "tg_descuentostech": True,
+        "tg_ofertu": True,
         "walmart_us": False,
     }
 
@@ -166,10 +168,10 @@ def test_migrate_waits_for_lease_then_gives_up(db: psycopg.Connection) -> None:
 def test_migrate_with_free_lease_releases_it(db: psycopg.Connection) -> None:
     assert migrate_with_lease(
         db, 0, holder="migrate:9", wait_s=1, sleep=lambda s: None, monotonic=lambda: 0.0
-    ) == [5, 4, 3, 2, 1]
+    ) == [6, 5, 4, 3, 2, 1]
     assert migrate_with_lease(
         db, "head", holder="migrate:9", wait_s=1, sleep=lambda s: None, monotonic=lambda: 0.0
-    ) == [1, 2, 3, 4, 5]
+    ) == [1, 2, 3, 4, 5, 6]
     assert _scalar(db, "SELECT holder FROM discountz.run_lease") is None
 
 
@@ -201,7 +203,7 @@ def test_0005_up_down(db: psycopg.Connection) -> None:
         """INSERT INTO discountz.alert (listing_id, kind, maturity, price_minor, observed_at)
            SELECT id, 'model_low', 'cold', 8999, now() FROM discountz.listing"""
     )
-    assert migrate(db, 4) == [5]
+    assert migrate(db, 4) == [6, 5]
     assert _scalar(db, "SELECT count(*) FROM discountz.source WHERE code = 'ebay_us'") == 0
     assert _scalar(db, "SELECT count(*) FROM discountz.alert") == 0
     assert (
@@ -212,4 +214,22 @@ def test_0005_up_down(db: psycopg.Connection) -> None:
         )
         == 0
     )
-    assert migrate(db, "head") == [5]
+    assert migrate(db, "head") == [5, 6]
+
+
+def test_0006_up_down(db: psycopg.Connection) -> None:
+    db.execute(
+        "INSERT INTO discountz.channel_cursor (channel, last_id, updated_at)"
+        " VALUES ('tg_ofertu', 9737, now())"
+    )
+    db.execute(
+        """INSERT INTO discountz.channel_post (channel, post_id, seen_at, title_norm, price_minor,
+               currency, topic, published_at)
+           VALUES ('tg_descuentoshome', 26814, now(), 'bandeja', 1400, 'USD', 'hogar', now())"""
+    )
+    assert migrate(db, 5) == [6]
+    codes = "SELECT count(*) FROM discountz.source WHERE code IN ('tg_descuentoshome','tg_ofertu')"
+    assert _scalar(db, codes) == 0
+    assert _scalar(db, "SELECT count(*) FROM discountz.channel_post") == 0
+    assert migrate(db, "head") == [6]
+    assert _scalar(db, codes) == 2

@@ -243,6 +243,8 @@ def test_channel_due_every_ten_minutes(db: psycopg.Connection) -> None:
         "tg_descuentostech",
         "tg_clubgratis",
         "tg_cajitatech",
+        "tg_descuentoshome",
+        "tg_ofertu",
         "dealnews",
         "slickdeals_amazon",
     }

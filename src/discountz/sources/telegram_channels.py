@@ -31,8 +31,12 @@ CHANNELS: Mapping[str, str] = MappingProxyType(
         "tg_descuentostech": "DescuentosTech",
         "tg_clubgratis": "Clubgratis",
         "tg_cajitatech": "cajitatech",
+        "tg_descuentoshome": "DescuentosHome",
+        "tg_ofertu": "ofertu",
     }
 )
+# Canales cuyos posts sin código son catálogo y no oferta: se leen pero no se envían.
+REQUIRES_COUPON = frozenset({"tg_ofertu"})
 PAGE_SIZE = 20  # publicaciones por página de `t.me/s`
 TITLE_MAX = 200
 # Con al menos tantas publicaciones con precio y ninguna oferta, el formato cambió (§3).
@@ -208,11 +212,65 @@ def _clubgratis(text: str, hashtags: Sequence[str]) -> _Deal | None:
     return None
 
 
+_DH_PRICE_RE = re.compile(r"Por\s*Solo\s*✨\s*\$\s*([\d.,]+)", re.IGNORECASE)
+# «Aplicando Cupón: AUUCCF58 50%» trae código; «Aplicando Cupón 10%», no.
+_DH_COUPON_RE = re.compile(r"Cup[oó]n:\s*([A-Za-z0-9]{4,})\b(?!\s*%)")
+_DH_LINK_RE = re.compile(r"Comprar:\s*(https?://\S+)")
+
+
+def _descuentoshome(text: str, hashtags: Sequence[str]) -> _Deal | None:
+    paragraphs = _paragraphs(text)
+    for i, para in enumerate(paragraphs):
+        m = _DH_PRICE_RE.search(para)
+        if m is None:
+            continue
+        price = _money(m.group(1), Currency.USD)
+        rest = paragraphs[i + 1 :]
+        if price is None or not rest:
+            return None
+        coupon = _DH_COUPON_RE.search(para)
+        link = _DH_LINK_RE.search(text)
+        return _Deal(
+            title=_clean_title(_first_line(rest[0])),
+            price=price,
+            coupon=coupon.group(1) if coupon else None,
+            store=None,
+            link=link.group(1) if link else None,
+        )
+    return None
+
+
+_OF_PRICE_RE = re.compile(r"💲\s*\$\s*([\d.]+)")
+_OF_COUPON_RE = re.compile(r"Código:\s*([A-Za-z0-9]{4,})")
+_OF_LINK_RE = re.compile(r"🔗\s*(https?://\S+)")
+
+
+def _ofertu(text: str, hashtags: Sequence[str]) -> _Deal | None:
+    """Título en la primera línea y precio en pesos con punto de miles («💲 $ 38.152»)."""
+    m = _OF_PRICE_RE.search(text)
+    if m is None:
+        return None
+    price = _money(m.group(1).rstrip("."), Currency.COP)
+    if price is None:
+        return None
+    coupon = _OF_COUPON_RE.search(text)
+    link = _OF_LINK_RE.search(text)
+    return _Deal(
+        title=_clean_title(_first_line(text.strip())),
+        price=price,
+        coupon=coupon.group(1) if coupon else None,
+        store=None,
+        link=link.group(1) if link else None,
+    )
+
+
 _PARSERS: Mapping[str, Callable[[str, Sequence[str]], _Deal | None]] = MappingProxyType(
     {
         "tg_descuentostech": _descuentostech,
         "tg_cajitatech": _cajitatech,
         "tg_clubgratis": _clubgratis,
+        "tg_descuentoshome": _descuentoshome,
+        "tg_ofertu": _ofertu,
     }
 )
 
@@ -281,13 +339,16 @@ def parse_channel_page(code: str, body: bytes, now: datetime) -> ChannelPage:
     link_hosts = LINK_HOSTS | {h for s in SOURCES.values() for h in s.descriptor.hosts}
     post_url_hosts = frozenset({"t.me"})
     deals: list[ChannelPost] = []
-    priced = 0
+    priced = parsed = 0
     for raw in sorted(raws, key=lambda r: r.post_id):
         hashtags = _hashtags(raw.text)
         if _PRICE_HINT_RE.search(raw.text):
             priced += 1
         deal = _PARSERS[code](raw.text, hashtags) if raw.published_at else None
         if deal is None or not deal.title or raw.published_at is None:
+            continue
+        parsed += 1
+        if code in REQUIRES_COUPON and deal.coupon is None:
             continue
         fallback = SafeUrl.parse(f"https://t.me/{channel}/{raw.post_id}", post_url_hosts)
         deals.append(
@@ -304,14 +365,15 @@ def parse_channel_page(code: str, body: bytes, now: datetime) -> ChannelPage:
                 link=_safe(deal.link, link_hosts) or fallback,
             )
         )
-    if not deals and priced >= FORMAT_BROKEN_MIN:
+    # Un post filtrado por `REQUIRES_COUPON` sí se entendió: no cuenta como formato roto.
+    if not parsed and priced >= FORMAT_BROKEN_MIN:
         raise ParseError("format", loc=code)
     return ChannelPage(
         posts=tuple(deals),
         max_id=max(r.post_id for r in raws),
         has_more=len(raws) >= PAGE_SIZE,
         skipped=len(raws) - len(deals),
-        unparsed=0 if deals else priced,
+        unparsed=0 if parsed else priced,
     )
 
 
