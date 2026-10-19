@@ -6,12 +6,14 @@
 - Best Buy y Walmart fuera por decisión de David. Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
 - eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18 (PR #13): `/seguir`, `/buscar` y job `crawl` con bajada de la misma publicación y `MODEL_LOW` (mediana del mismo `epid`). Esquema 6 (migración `0006`: canales DescuentosHome y OFERTU).
 - Canal general de ofertas (opcional, secreto `TELEGRAM_CHANNEL_ID`): copia de cada oferta al canal, sin tema y sin botones de callback.
-- Canales: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 898 pruebas (unitarias, integración y e2e) en verde el 2026-10-19.
+- Canales: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 924 pruebas (unitarias, integración y e2e) en verde el 2026-10-19.
 
 ## Último cambio
 - Rama `claude/project-thread-y6ijcd`: las tarjetas de VTEX piden la foto en 1000 px (`ids/<id>-1000-1000/`) y sin punto final en el host; la descarga sigue hasta 2 redirecciones a hosts permitidos y registra `photo_missing` (código y status) cuando no hay foto.
+- Rama `claude/precision-categorias-qof49c`: el tema (hashtag) de canales y feeds acertaba el 51 % contra ofertas reales etiquetadas; ahora frases, plurales, hashtags compuestos y peso menor tras «para/con/for» (93 % en ofertas no vistas; prueba con 946 etiquetadas exige ≥ 95 %). Subcategorías de las tiendas CO y los televisores quedan con el mismo tema en todas las fuentes. Clubgratis ya no toma como título «Comprar en Amazon…», «Precio incluye envío» ni «Aplicar cupón», ni un «20 %» como precio.
 
 ## Siguiente paso
+- Ofertas con el tema equivocado: agregar el término a `channel_rules` y la oferta a `tests/fixtures/topics/ofertas-etiquetadas.jsonl`.
 - David: crear el canal, hacer admin al bot con «Publicar mensajes» y guardar su id en el secreto `TELEGRAM_CHANNEL_ID` (README, paso 12).
 - Revisar el texto oficial del acuerdo de la API de eBay (6 h de atraso máximo, nada de entrenar IA) antes de dejar el job encendido.
 - Mirar la primera semana: alertas de eBay al día, cuota (`Unavailable quota` en los logs) y peso de la BD (tope 150 mil publicaciones). Si satura: `/fuente off ebay_us`.
@@ -34,6 +36,6 @@
 - Falta: `setup-bot`, `pg_terminate_backend` tras 3 `skipped_locked`, descarte G10 contra `R_listing`, mensaje agrupado de tormenta y `config/supabase-ca.crt` para `verify-full`. Una alerta de un ciclo que murió antes de componer sale con vista reducida. En `/estado`, los códigos de más de 14 letras (`tg_descuentostech`, `slickdeals_amazon`) descuadran la columna.
 - VTEX: el WAF rechaza `+` como espacio (`infra/http` usa `%20`); una página de 50 productos pesa hasta ~43 MB (se pide por mitades sobre 24 MB); `products/search` con varios `skuId` devuelve 10 sin `_from`/`_to`.
 - Pendientes menores del rastreo: reloj fijo por corrida, `min_seen` sin ventana de 90 d, tope diario por día UTC, orden del barrido VTEX, fotos sin mirar el plazo, C07 sin unir tiendas, desalojo de automáticos por antigüedad, `crawl` sin verificar `SCHEMA_VERSION`, código 3 compartido, borrado del catálogo tras 30 d sin rastreo. Un producto ya seguido que reaparece en Slickdeals con lectura de hace < 6 h no da `COMMUNITY_DEAL`.
-- Canales y feeds: un cambio de formato (≥ 5 ilegibles y 0 ofertas, una página sin posts o un feed vacío) cuenta como `PARSE_ERROR` (3 seguidos abren el breaker). Las fixtures de `t.me` llevan los usuarios cambiados por «Usuario»: anonimizar al regrabar. En los temas, «board», «monitor», «mouse», «control» y «switch» mandan a Tecnología títulos en inglés como «Cutting Board».
+- Canales y feeds: un cambio de formato (≥ 5 ilegibles y 0 ofertas, una página sin posts o un feed vacío) cuenta como `PARSE_ERROR` (3 seguidos abren el breaker). Las fixtures de `t.me` llevan los usuarios cambiados por «Usuario»: anonimizar al regrabar. Temas de canales: cada término de `channel_rules` nombra un solo tema (falla al cargar si se repite); un término nuevo se mide con `tests/unit/test_topic_precision.py`.
 - eBay, pendientes menores: `count(*)` del tope por página (y hasta +74 sobre el tope), sin filtro genérico de `external_id` en `process`, parámetros leídos del TOML al importar el adaptador, 100 auto-seguimientos cada 2 h no caben en 1.000 al día, tamaño del árbol completo sin medir contra el tope de 24 MB.
 - ruff 0.17 formatea Markdown: `docs/` está excluido. La imagen `postgres:17` del CI no tiene digest fijado.

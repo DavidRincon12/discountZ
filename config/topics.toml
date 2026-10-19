@@ -183,6 +183,48 @@ source = "exito"
 prefixes = ["/electrodomesticos/electrodomesticos de cuidado personal/"]
 topic = "belleza"
 
+# Revisadas con los árboles de VTEX del 2026-10-19: que cada producto lleve el mismo hashtag en
+# todas las tiendas y en los canales (lo de bebés va a Bebés; camping, a Deportes; termos, a Hogar).
+[[rules]]
+source = "exito"
+prefixes = ["/jardin y aire libre/camping/"]
+topic = "deportes"
+
+[[rules]]
+source = "exito"
+prefixes = ["/deportes y fitness/termos y botellas/"]
+topic = "hogar"
+
+[[rules]]
+source = "exito"
+prefixes = ["/mercado/alimentacion para bebes/", "/cuidado personal/higiene para bebes y ninos/"]
+topic = "bebes"
+
+[[rules]]
+source = "carulla"
+prefixes = ["/electrodomesticos/cuidado personal/"]
+topic = "belleza"
+
+[[rules]]
+source = "carulla"
+prefixes = ["/ferreteria/jardineria/", "/moda y accesorios/disfraces/"]
+topic = "hogar"
+
+[[rules]]
+source = "carulla"
+prefixes = ["/salud y belleza/panales y panitos/"]
+topic = "bebes"
+
+[[rules]]
+source = "olimpica"
+prefixes = ["/supermercado/para tu mascota/"]
+topic = "mascotas"
+
+[[rules]]
+source = "olimpica"
+prefixes = ["/supermercado/para tu bebe/"]
+topic = "bebes"
+
 # Best Buy (API oficial): categorías de primer nivel en inglés. Se revisan con el árbol real.
 [[rules]]
 source = "bestbuy_us"
@@ -218,83 +260,178 @@ source = "bestbuy_us"
 prefixes = ["/movies & music/", "/office supplies & ink/"]
 topic = "libros"
 
-# Tema de las ofertas de los canales de Telegram (spec de canales §4.2). Se comparan con los
-# hashtags y las palabras del título (normalizados); gana la regla con más palabras y, a igual
-# número, la que va primero. Sin coincidencias van a «Otros».
-# Las palabras en inglés son para los feeds de Amazon (títulos y categorías de DealNews y
-# Slickdeals). Se dejan fuera las ambiguas: care, smart, watch, accessories, outdoor, o «pc»,
-# que en Slickdeals es «piezas» (217-Pc).
-[[channel_rules]]
-topic = "tecnologia"
-words = ["audifonos", "iphone", "celular", "tablet", "laptop", "monitor", "teclado", "raton",
-  "mouse", "control", "videojuego", "consola", "smartwatch", "reloj inteligente", "proyector",
-  "cargador", "accesoriostecnologia", "board", "ssd", "ps5", "xbox", "switch",
-  "headphones", "headphone", "earbuds", "earphones", "airpods", "speaker", "speakers", "keyboard",
-  "keyboards", "mice", "laptops", "tablets", "monitors", "phone", "phones", "smartphone", "ipad",
-  "macbook", "charger", "chargers", "usb", "bluetooth", "wifi", "router", "drone", "drones",
-  "camera", "cameras", "webcam", "printer", "gaming", "nintendo", "playstation", "psu", "gpu",
-  "ssds", "hdmi"]
+# Tema de las ofertas de canales de Telegram y feeds de Amazon (spec de canales §4.2).
+# Cada término es una palabra o una frase y nombra un solo tema (se comprueba al cargar). Se
+# comparan sin tildes y en singular («zapatos» = «zapato», «relojes» = «reloj»):
+#   - hashtag: el término entero o, si el hashtag es compuesto, su prefijo más largo
+#     («zapatoshombre» → «zapato»; si no hay, el sufijo: «accesorioshogar» → «hogar»). Pesa 2.
+#   - título: la frase más larga gana a sus palabras sueltas («reloj inteligente» antes que
+#     «reloj»). Pesa 2 hasta el primer «para», «con», «for»… y 1 después («mochila para laptop»).
+# Gana el tema con más peso; a igual peso, el que va primero aquí. Sin coincidencias: «Otros».
+# Fuera a propósito, por ambiguas: control, board, switch, juego, bolsa, crema, plancha,
+# limpiador, protector, portátil, pc (en Slickdeals es «piezas»), watch, care, smart, outdoor.
 
 [[channel_rules]]
-topic = "electro"
-words = ["televisor", "tv", "freidora", "aspiradora", "licuadora", "cafetera",
-  "tvs", "television", "vacuum", "vacuums", "fryer", "blender", "microwave", "refrigerator",
-  "fridge", "appliance", "appliances", "heater", "humidifier", "dehumidifier"]
-
-[[channel_rules]]
-topic = "hogar"
-words = ["cocina", "sartenes", "ollas", "cuchillos", "almohadilla", "decoracion", "navidad",
-  "termo", "botella",
-  "kitchen", "cookware", "knife", "knives", "bedding", "pillow", "pillows", "mattress",
-  "furniture", "chair", "decor", "rug", "curtains", "towels", "lighting", "lamp", "lamps",
-  "lights", "household", "garden", "lawn", "patio", "landscape", "halloween", "christmas"]
-
-[[channel_rules]]
-topic = "moda"
-words = ["calzado", "zapatilla", "ropa", "camisa", "sueter", "boxer", "ropahombre", "reloj",
-  "mochila",
-  "shoes", "sneakers", "boots", "sandals", "clothing", "apparel", "shirt", "shirts", "hoodie",
-  "jacket", "jackets", "coat", "coats", "pants", "jeans", "socks", "wallet", "backpack", "purse",
-  "handbag", "sunglasses", "jewelry", "luggage"]
+topic = "mascotas"
+words = ["mascota", "perro", "gato", "cachorro", "gatito", "acuario", "guacal", "arenero",
+  "para perro", "para gato", "para mascota", "de perro", "de gato",
+  "pet", "pets", "dog", "cat", "puppy", "kitten", "aquarium", "for dog", "for cat", "for pet"]
 
 [[channel_rules]]
 topic = "belleza"
-words = ["maquillaje", "cuidadofacial", "cuidadocorporal", "cortapelo", "cuidadodelcabello",
-  "perfume",
-  "skin", "skincare", "makeup", "beauty", "cosmetics", "hair", "shampoo", "lotion",
-  "moisturizer", "sunscreen", "fragrance", "fragrances", "cologne", "razor", "shaver",
-  "toothbrush"]
+words = ["belleza", "salud", "cuidado", "cuidadofacial", "cuidadocorporal", "cuidadodelcabello",
+  "cuidadodelapiel", "cuidadodepiel", "cuidadopiel", "cuidadopersonal", "higiene",
+  "cuidado personal", "cuidado de la piel", "maquillaje", "cosmetico", "labial", "brillo labial",
+  "balsamo labial", "paleta de sombras", "rimel", "pestana", "ceja", "brochas de maquillaje",
+  "perfume", "fragancia", "colonia", "agua de toilette", "locion", "crema facial",
+  "crema corporal", "serum", "suero facial", "mascarilla", "protector solar", "bloqueador", "spf",
+  "champu", "shampoo", "acondicionador", "tinte", "cabello", "pelo", "plancha de pelo",
+  "plancha para el cabello", "plancha para cabello", "alisadora", "rizador", "secador",
+  "secador de pelo", "afeitadora", "afeitado", "rasuradora", "cortapelo", "cortadora de cabello",
+  "recortadora", "depiladora", "desodorante", "antitranspirante", "jabon", "cepillo de dientes",
+  "dientes", "dental", "masajeador", "masajeadora", "masaje", "tensiometro", "presion arterial",
+  "termometro", "botiquin", "primeros auxilios", "vendaje", "vitamina", "limpiador facial",
+  "manicure", "esmalte", "corporal", "acne",
+  "beauty", "skin", "skincare", "makeup", "cosmetics", "hair", "conditioner", "lotion",
+  "moisturizer", "sunscreen", "fragrance", "cologne", "razor", "shaver", "shaving", "grooming",
+  "trimmer", "toothbrush", "toothpaste", "deodorant", "lip balm", "lipstick", "nail",
+  "massage gun", "massager"]
+
+[[channel_rules]]
+topic = "electro"
+words = ["electrodomestico", "freidora", "freidoradeaire",
+  "aspiradora", "licuadora", "batidora", "cafetera", "maquina de cafe", "maquina de espresso",
+  "microondas", "horno electrico", "horno tostador", "tostadora", "nevera", "refrigerador",
+  "lavadora", "secadora", "estufa", "plancha de ropa", "vaporizador", "vaporizador de ropa",
+  "purificador", "humidificador", "deshumidificador", "ventilador", "aire acondicionado",
+  "calentador", "calefactor", "exprimidor", "extractor de jugo", "wafflera", "maquina de gofres",
+  "sandwichera", "arrocera", "olla arrocera", "olla electrica", "parrilla electrica",
+  "espumador", "molinillo electrico", "horno", "maquina de yogur", "yogurtera", "raclette",
+  "plancha de vapor", "secador de ropa", "quitapelusas", "limpiador de vapor",
+  "dispensador de agua",
+  "filtro de agua", "lonchera electrica",
+  "vacuum", "vacuums", "fryer", "air fryer", "blender", "microwave", "refrigerator",
+  "fridge", "appliance", "appliances", "heater", "humidifier", "dehumidifier", "purifier",
+  "coffee maker", "espresso", "toaster", "stand mixer", "juicer", "washer", "dryer",
+  "small appliances"]
+
+[[channel_rules]]
+topic = "tecnologia"
+words = ["tecnologia", "gadget", "televisor", "tv", "television", "smart tv", "audifono",
+  "auricular", "parlante", "altavoz", "bocina",
+  "barra de sonido", "celular", "telefono", "movil", "smartphone", "iphone", "ipad", "tablet",
+  "laptop", "computador", "computadora", "mini pc", "minipc", "macbook", "monitor", "teclado",
+  "mouse", "raton", "usb", "hdmi", "cargador", "power bank", "bateria externa",
+  "estacion de carga", "ssd", "disco duro", "memoria usb", "tarjeta de memoria", "microsd",
+  "placa base", "placa madre", "placabase", "tarjeta madre", "tarjetamadre", "motherboard",
+  "fuente de poder", "psu", "gpu", "tarjeta grafica", "cpu", "ryzen", "ddr5", "router",
+  "enrutador", "wifi", "wi fi", "bluetooth", "consola", "videojuego", "control inalambrico",
+  "control de xbox", "control xbox", "controlador", "mando", "joystick", "gamepad", "xbox",
+  "playstation", "ps5", "ps4", "nintendo", "nintendo switch", "gaming", "gamer", "proyector",
+  "camara", "webcam", "camara web", "gopro", "dji", "dron", "drone", "gimbal", "estabilizador",
+  "tripode", "aro de luz", "impresora", "smartwatch", "smart watch", "reloj inteligente",
+  "relojinteligente", "pulsera inteligente", "gafas inteligentes", "rastreador", "localizador",
+  "airtag", "air tracker", "echo", "echo dot", "echo show", "alexa", "kindle", "ereader",
+  "lector electronico", "tocadiscos", "disipador", "sobretension", "karaoke", "regleta",
+  "multitoma",
+  "protector de sobretensiones", "protector de pantalla", "adaptador", "domotica",
+  "casa inteligente", "casainteligente", "hogar inteligente", "hogarinteligente",
+  "videovigilancia", "timbre", "accesoriostecnologia", "accesorioscelular", "accesoriosmoviles",
+  "headphone", "headphones", "earbud", "earbuds", "earphone", "earphones", "airpods", "speaker",
+  "speakers", "keyboard", "keyboards", "mice", "laptops", "tablets", "monitors", "phone",
+  "phones", "charger", "chargers", "camera", "cameras", "printer", "controller", "video game",
+  "projector", "computer", "graphics card", "hard drive", "flash drive", "memory card",
+  "security camera", "doorbell", "smart plug", "smart display", "surge protector", "ssds", "tvs"]
+
+[[channel_rules]]
+topic = "moda"
+words = ["moda", "ropa", "calzado", "zapato", "zapatilla", "tenis", "bota", "sandalia",
+  "pantufla", "chancla", "tacon", "camisa", "camiseta", "polo", "pantalon", "jean", "short",
+  "legging", "vestido", "falda", "blusa", "sueter", "sudadera", "hoodie", "chaqueta", "abrigo",
+  "cardigan", "pijama", "lenceria", "panti", "panties", "calzon", "calzoncillo", "boxer",
+  "brasier", "sosten", "calcetin", "gorra", "sombrero", "bufanda", "cinturon",
+  "cartera", "billetera", "tarjetero", "joya", "joyeria", "pulsera", "anillo", "arete",
+  "brazalete", "traje", "banador", "traje de bano", "mochila", "maleta", "equipaje", "bolso",
+  "bandolera", "bolsa crossbody", "bolsa de hombro", "duffel", "reloj", "gafas", "gafas de sol",
+  "lentes de sol", "accesoriosmoda", "ropahombre", "ropamujer",
+  "shoe", "shoes", "sneaker", "sneakers", "boot", "boots", "sandals", "slipper", "clothing",
+  "apparel", "shirt", "shirts", "jacket", "jackets", "coat", "coats", "pants", "jeans", "socks",
+  "dress", "skirt", "sweater", "pajamas", "underwear", "wallet", "backpack", "purse", "handbag",
+  "sunglasses", "jewelry", "necklace", "bracelet", "earrings", "watches", "belt", "luggage",
+  "suitcase"]
 
 [[channel_rules]]
 topic = "deportes"
-words = ["deportes", "gimnasio", "senderismo", "baloncesto", "bañador",
-  "sports", "fitness", "exercise", "yoga", "treadmill", "dumbbells", "bike", "bikes", "bicycle",
-  "bicycling", "cycling", "scooter", "camping", "hiking", "fishing", "golf", "basketball",
-  "soccer"]
+words = ["deporte", "deportes", "gimnasio", "gym", "ejercicio", "equipoejercicio", "fitness",
+  "yoga", "pesa", "mancuerna", "banda de resistencia", "barra de flexiones", "flexiones",
+  "push up", "saco de boxeo", "boxeo", "balon", "bicicleta", "bicicleta estatica", "ciclismo",
+  "patineta", "patin", "scooter", "monopatin", "camping", "carpa", "hamaca", "senderismo",
+  "trekking", "cana de pescar", "natacion", "golf", "baloncesto", "proteina", "creatina",
+  "electrolito", "caminadora", "maquina de remo", "dardo",
+  "sports", "fitness", "exercise", "workout", "treadmill", "dumbbell", "dumbbells", "kettlebell",
+  "bike", "bikes", "bicycle", "bicycling", "cycling", "hiking", "fishing", "basketball",
+  "soccer", "tent", "protein", "creatine", "rowing", "dart", "hammock", "sports nutrition"]
 
 [[channel_rules]]
 topic = "bebes"
-words = ["juguete", "ninos", "bebe",
-  "toy", "toys", "lego", "kids", "baby", "toddler", "diapers", "stroller"]
+words = ["bebe", "nino", "nina", "infantil", "ropainfantil", "juguete", "jugueteria",
+  "para nino", "para nina", "lego", "rompecabezas", "peluche", "muneca", "figura de accion",
+  "funko", "coleccionable", "cromo", "calendario de adviento", "panal", "tetero", "chupete",
+  "biberon", "cuna", "coche de bebe", "carro de control remoto", "rc", "juego de mesa",
+  "fidget", "walkie talkie", "set de construccion", "bloques de construccion",
+  "baby", "toy", "toys", "kids", "kid", "toddler", "diapers", "stroller", "board game", "puzzle"]
 
 [[channel_rules]]
 topic = "ferreteria"
-words = ["herramienta", "destornillador", "sierra", "accesorioscarro", "taladro",
-  "tool", "tools", "drill", "saw", "screwdriver", "wrench", "automotive", "car", "tire"]
+words = ["ferreteria", "herramienta", "taladro", "destornillador", "sierra", "sierra caladora",
+  "llave inglesa", "martillo", "alicate", "juego de puntas", "broca", "caja de herramientas",
+  "compresor", "generador", "inversor", "soldador", "pistola de pintura", "pulverizador",
+  "hidrolavadora", "linterna", "cinta metrica", "multimetro", "probador de voltaje", "candado",
+  "cerradura", "bisagra", "auto", "carro", "accesorioscarro", "moto", "motocicleta", "llanta",
+  "cera para auto", "automocion", "automotriz",
+  "tool", "tools", "drill", "saw", "screwdriver", "wrench", "wrenches", "hammer", "hammers",
+  "pliers", "snips", "vise", "clamp", "clamps", "nail puller", "pry bar", "workbench",
+  "compressor", "generator", "welder", "pressure washer", "flashlight", "flashlights",
+  "automotive", "car", "tire", "car wash"]
 
-# Después de las demás: «pet wipes» y «dog food» van a Mascotas; «baby wipes», a Bebés.
 [[channel_rules]]
-topic = "mascotas"
-words = ["pets", "pet", "dog", "dogs", "cat", "cats", "puppy", "kitten"]
+topic = "hogar"
+words = ["hogar", "casa", "accesorioshogar", "cocina", "sarten", "olla", "cuchillo", "cubierto",
+  "vajilla", "plato", "vaso", "taza", "termo", "botella", "tumbler", "quencher", "jarra", "tazon",
+  "bowl", "cuenco", "contenedor", "recipiente", "organizador", "almacenamiento", "estante",
+  "repisa", "cesta", "canasta", "carrito", "carro rodante", "sabana", "edredon", "cobija", "manta",
+  "frazada", "almohada", "cojin", "colchon", "toalla", "cortina", "alfombra", "tapete",
+  "ropa de cama", "ropadecama", "decoracion", "adorno", "florero", "lampara", "luz", "iluminacion",
+  "bombilla", "vela", "navidad", "navideno", "halloween", "arbol de navidad", "inflable",
+  "disfraz", "mueble", "silla", "silla de oficina", "sofa", "sillon", "mesa", "escritorio",
+  "cama", "jardin", "jardineria", "planta", "maceta", "patio", "limpieza", "trapeador", "mopa",
+  "escoba", "pano", "ducha", "regadera", "bano", "espatula", "rallador", "picador",
+  "tabla de cortar", "molde", "utensilio", "dispensador", "insecto", "mata insectos",
+  "lavanderia", "hielo", "bascula de cocina", "bascula", "bolsas al vacio", "bolsa de mudanza",
+  "cuidadodelhogar", "cubrecolchon", "parrilla", "mosquito", "luz nocturna", "bolsa de vacio",
+  "home", "kitchen", "cookware", "knife", "knives", "bedding", "pillow", "pillows", "mattress",
+  "furniture", "chair", "decor", "rug", "rugs", "curtain", "curtains", "towel", "towels",
+  "lighting", "lamp", "lamps", "lights", "household", "garden", "lawn", "lawn mower", "mower",
+  "patio", "halloween", "christmas", "sheet", "duvet", "comforter", "blanket", "sofa", "couch",
+  "desk", "shelf", "organizer", "drawer", "bowl", "plate", "mug", "decanter", "dinnerware",
+  "cutlery", "flatware", "spice", "candle", "vase", "ornament", "shower", "bath"]
 
 [[channel_rules]]
 topic = "mercado"
-words = ["groceries", "grocery", "snacks", "candy", "chocolate", "chocolates", "laundry",
-  "detergent", "cleaning", "wipes"]
+words = ["mercado", "despensa", "comida", "arroz", "huevo", "aceite de oliva", "cafe molido",
+  "cafe en grano", "capsula", "nespresso", "chocolate", "dulce", "snack", "galleta", "cereal",
+  "bebida", "vino", "licor", "detergente", "suavizante", "papel higienico", "toallas humedas",
+  "grocery", "groceries", "snacks", "candy", "chocolates", "coffee", "tea", "laundry",
+  "detergent", "wipes", "olive oil", "baking soda", "paper towel", "toilet paper", "capsules"]
 
 [[channel_rules]]
 topic = "libros"
-words = ["books", "book"]
+words = ["libro", "papeleria", "oficina", "lapiz", "boligrafo", "esfero", "cuaderno", "agenda",
+  "utiles escolares", "marcador", "material de oficina", "materialdeoficina", "manualidades",
+  "pintura", "arte", "trituradora de papel", "cortadora de papel", "geometria", "calculadora",
+  "pistola de silicona", "audiolibro", "costura",
+  "book", "books", "stationery", "pen", "pencil", "office supplies", "office school supplies",
+  "stapler", "crayon", "marker", "audiobook"]
 
 # eBay (Browse API): las 19 raíces de producto de EBAY_US (spec de eBay §3; árbol 0 v134).
 [[rules]]

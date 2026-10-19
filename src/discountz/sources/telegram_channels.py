@@ -171,13 +171,18 @@ def _cajitatech(text: str, hashtags: Sequence[str]) -> _Deal | None:
     )
 
 
-_CG_PRICE_RE = re.compile(r"(?:💰|➡️)\s*(?:💰\s*)?(\$?\s*[\d][\d.,]*)")
+_CG_PRICE_RE = re.compile(r"(?:💰|➡️)\s*(?:💰\s*)?(\$?\s*[\d][\d.,]*)(?![\d.,]*\s*%)")
 _CG_BARE_PRICE_RE = re.compile(r"^\$\s*[\d][\d.,]*$")
 _CG_COUPON_RE = re.compile(r"(?:CODE:\s*|cup[oó]n\s+)([A-Za-z0-9]{3,})", re.IGNORECASE)
 _CG_COUPON_ONLY_RE = re.compile(
     r"\W*(?:aplicar\s+)?(?:CODE:\s*|cup[oó]n\s+)[A-Za-z0-9]{3,}\W*", re.IGNORECASE
 )
 _CG_STORE_RE = re.compile(r"Comprar en\s+([^\n]+?)\s*(https?://\S+)")
+# Líneas que no son el producto: avisos entre el precio y el título, y el enlace de compra.
+_CG_NOTE_RE = re.compile(
+    r"(?:aplicar\s+cup[oó]n|precio\s+incluye\s+env[ií]o|env[ií]o\s+(?:directo|gratis)|comprar\s+en)\b",
+    re.IGNORECASE,
+)
 _COP_GROUPS_RE = re.compile(r"\d{1,3}(?:\.\d{3})+")
 
 
@@ -186,6 +191,11 @@ def _clubgratis_money(raw: str) -> Money | None:
     number = raw.replace("$", "").strip().rstrip(".,")
     currency = Currency.COP if _COP_GROUPS_RE.fullmatch(number) else Currency.USD
     return _money(number, currency)
+
+
+def _is_clubgratis_title(line: str) -> bool:
+    text = _HASHTAG_RE.sub("", line).strip()
+    return bool(text) and not (_CG_COUPON_ONLY_RE.fullmatch(line) or _CG_NOTE_RE.match(text))
 
 
 def _clubgratis(text: str, hashtags: Sequence[str]) -> _Deal | None:
@@ -197,13 +207,16 @@ def _clubgratis(text: str, hashtags: Sequence[str]) -> _Deal | None:
         price = _clubgratis_money(m.group(1) if m.re is _CG_PRICE_RE else m.group(0))
         if price is None:
             return None
-        rest = [p for p in paragraphs[i + 1 :] if not _CG_COUPON_ONLY_RE.fullmatch(p)]
+        # El título puede ir en la misma línea que sigue al precio o en un párrafo posterior.
+        tail = para[m.end() :].split("\n", 1)[1:] if m.re is _CG_PRICE_RE else []
+        lines = [line for p in [*tail, *paragraphs[i + 1 :]] for line in p.split("\n")]
+        rest = [line for line in lines if _is_clubgratis_title(line)]
         if not rest:
             return None
         coupon = _CG_COUPON_RE.search(text)
         store = _CG_STORE_RE.search(text)
         return _Deal(
-            title=_clean_title(_first_line(rest[0])),
+            title=_clean_title(rest[0]),
             price=price,
             coupon=coupon.group(1) if coupon else None,
             store=store.group(1).strip().title() if store else None,
