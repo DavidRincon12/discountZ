@@ -22,7 +22,7 @@ for code, ch in CHANNELS.items():
     resp = page_http.request("GET", f"https://t.me/s/{ch}")
     page = parse_channel_page(code, resp.body, now)
     print(f"== {code} status={resp.status} posts={len(page.posts)}", flush=True)
-    for p in page.posts[-3:]:
+    for p in page.posts[-5:]:
         if p.image_url is None:
             print(f"  {p.post_id} sin_url")
             continue
@@ -45,10 +45,3 @@ for code, ch in CHANNELS.items():
             f.write(raw.body)
         with open(f"out/card_{code}_{p.post_id}.png", "wb") as f:
             f.write(card_png(channel_card(p, "general"), ok))
-        import base64
-        with Image.open(io.BytesIO(card_png(channel_card(p, "general"), ok))) as c:
-            c = c.convert("RGB")
-            c.thumbnail((540, 540))
-            b = io.BytesIO()
-            c.save(b, "JPEG", quality=70)
-        print(f"B64 {code}_{p.post_id} {base64.b64encode(b.getvalue()).decode()}", flush=True)
