@@ -9,10 +9,9 @@
 - Canales: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 895 pruebas (unitarias, integración y e2e) en verde el 2026-10-19.
 
 ## Último cambio
-- Rama `claude/project-thread-or2w9l`: agrega los canales `tg_descuentoshome` (Amazon con Prime a Colombia, USD) y `tg_ofertu` (Amazon en COP, solo posts con código); migración `0006`.
+- Rama `claude/project-thread-y6ijcd`: las fotos de las tarjetas se amplían hasta llenar el recuadro (antes `thumbnail` solo reducía y las miniaturas de Slickdeals, DealNews y OFERTU, de 250-500 px, quedaban diminutas).
 
 ## Siguiente paso
-- David: tras fusionar, *Actions → migrate* con `to = head` (el ciclo se salta hasta que el esquema sea 6).
 - David: crear el canal, hacer admin al bot con «Publicar mensajes» y guardar su id en el secreto `TELEGRAM_CHANNEL_ID` (README, paso 12).
 - Revisar el texto oficial del acuerdo de la API de eBay (6 h de atraso máximo, nada de entrenar IA) antes de dejar el job encendido.
 - Mirar la primera semana: alertas de eBay al día, cuota (`Unavailable quota` en los logs) y peso de la BD (tope 150 mil publicaciones). Si satura: `/fuente off ebay_us`.
