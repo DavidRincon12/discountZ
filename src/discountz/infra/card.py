@@ -25,6 +25,7 @@ SIZE = 1080
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
 MAX_PHOTO_PIXELS = 25_000_000  # tope contra bombas de descompresión
 _FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
+PHOTO_BOX = (920, 560)  # espacio de la foto dentro del recuadro blanco
 
 BG = (15, 23, 42)
 WHITE = (255, 255, 255)
@@ -126,7 +127,11 @@ def _photo_box(canvas: Image.Image, data: CardData, photo: bytes | None) -> None
     if photo is not None:
         with Image.open(io.BytesIO(photo)) as img:
             pic = img.convert("RGBA")
-        pic.thumbnail((920, 560), Image.Resampling.LANCZOS)
+        # `thumbnail` solo reduce: las miniaturas de 250-500 px quedaban diminutas. Se escala
+        # en ambos sentidos hasta tocar el recuadro, sin deformar.
+        scale = min(PHOTO_BOX[0] / pic.width, PHOTO_BOX[1] / pic.height)
+        size = (max(1, round(pic.width * scale)), max(1, round(pic.height * scale)))
+        pic = pic.resize(size, Image.Resampling.LANCZOS)
         x = 540 - pic.width // 2
         y = 430 - pic.height // 2
         canvas.paste(pic, (x, y), pic)

@@ -6,13 +6,14 @@
 - Best Buy y Walmart fuera por decisión de David. Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
 - eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18 (PR #13): `/seguir`, `/buscar` y job `crawl` con bajada de la misma publicación y `MODEL_LOW` (mediana del mismo `epid`). Esquema 6 (migración `0006`: canales DescuentosHome y OFERTU).
 - Canal general de ofertas (opcional, secreto `TELEGRAM_CHANNEL_ID`): copia de cada oferta al canal, sin tema y sin botones de callback.
-- Canales: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 897 pruebas (unitarias, integración y e2e) en verde el 2026-10-19.
+- Canales: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 898 pruebas (unitarias, integración y e2e) en verde el 2026-10-19.
 
 ## Último cambio
+- Rama `claude/project-thread-y6ijcd`: las fotos de las tarjetas se amplían hasta llenar el recuadro (antes `thumbnail` solo reducía y las miniaturas de Slickdeals, DealNews y OFERTU, de 250-500 px, quedaban diminutas).
 - Rama `claude/project-thread-onaeks`: `MODEL_LOW` de eBay también cuenta como pares las publicaciones del mismo modelo de la misma página (con su precio actual). Antes la primera lectura de cada categoría nunca alertaba: 6 rastreos del 2026-10-18/19 con 0 alertas.
 
 ## Siguiente paso
-- - David: crear el canal, hacer admin al bot con «Publicar mensajes» y guardar su id en el secreto `TELEGRAM_CHANNEL_ID` (README, paso 12).
+- David: crear el canal, hacer admin al bot con «Publicar mensajes» y guardar su id en el secreto `TELEGRAM_CHANNEL_ID` (README, paso 12).
 - Revisar el texto oficial del acuerdo de la API de eBay (6 h de atraso máximo, nada de entrenar IA) antes de dejar el job encendido.
 - Mirar la primera semana: alertas de eBay al día, cuota (`Unavailable quota` en los logs) y peso de la BD (tope 150 mil publicaciones). Si satura: `/fuente off ebay_us`.
 

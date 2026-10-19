@@ -80,6 +80,14 @@ def test_card_without_photo_draws_store_box() -> None:
     assert region_has_color(without, box, (226, 232, 240))  # recuadro gris con el nombre
 
 
+def test_card_small_photo_fills_the_box() -> None:
+    # Las miniaturas de Slickdeals (300 px), DealNews (250 px) y algunos canales (500 px)
+    # quedaban diminutas en el centro: se amplían hasta llenar el recuadro de 920 × 560.
+    img = png(render_card(C01, validate_photo(photo((250, 250)))))
+    assert region_has_color(img, (265, 420, 275, 440), (30, 120, 220))
+    assert region_has_color(img, (805, 420, 815, 440), (30, 120, 220))
+
+
 def test_card_without_photo_on_corrupt_bytes() -> None:
     assert validate_photo(b"\xff\xd8\xff\xe0 no es una imagen") is None
     assert validate_photo(b"GIF89a" + photo()[6:]) is None
