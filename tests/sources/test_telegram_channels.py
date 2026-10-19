@@ -84,6 +84,8 @@ def caj(post_id: int = 88200, link: str = "https://pccajita.link/abc", **kw: Any
         ("tg_cajitatech", "cajitatech"),
         ("tg_descuentostech", "descuentostech"),
         ("tg_clubgratis", "clubgratis"),
+        ("tg_descuentoshome", "descuentoshome"),
+        ("tg_ofertu", "ofertu"),
     ],
 )
 def test_parse_matches_expected(code: str, name: str) -> None:
@@ -149,6 +151,49 @@ def test_clubgratis_currency_inference(line: str, price: Money, coupon: str | No
     assert [(p.price, p.coupon, p.title) for p in result.posts] == [
         (price, coupon, "Producto de prueba")
     ]
+
+
+def test_descuentoshome_reads_coupon_only_when_it_has_a_code() -> None:
+    text = (
+        "#Hogar ✨Por Solo✨ $1.299✅ Envío gratis con Prime 🚚\n{cupon}\n\n"
+        "Juego de sábanas King\n \n¿Viste una oferta? 👉 ¡Envíamela!📩\n\n"
+        "🛒 Comprar: https://www.facebook.com/permalink.php?id=1&story_fbid=2"
+    )
+    posts = [
+        post("DescuentosHome", 1, text.format(cupon="Aplicando Cupón: AUUCCF58 50% descuento🏷")),
+        post("DescuentosHome", 2, text.format(cupon="Aplicando Cupón 10% descuento🏷")),
+    ]
+    result = parse_channel_page("tg_descuentoshome", page(*posts), NOW)
+    assert [(p.price, p.coupon, p.title) for p in result.posts] == [
+        (Money(129_900, Currency.USD), "AUUCCF58", "Juego de sábanas King"),
+        (Money(129_900, Currency.USD), None, "Juego de sábanas King"),
+    ]
+    assert result.posts[0].link.host == "www.facebook.com"
+
+
+def ofertu(post_id: int, code: str | None) -> str:
+    coupon = f"🔻 Código: {code}🏷️\n" if code else ""
+    text = (
+        f"Luz nocturna de huevo\n💲 $ 38.152💰\n{coupon}"
+        "🚚 ¡Elegible para envío gratis!🚀\n🔗 https://joylink.io/amazon/x"
+    )
+    return post("ofertu", post_id, text)
+
+
+def test_ofertu_sends_only_posts_with_code() -> None:
+    result = parse_channel_page("tg_ofertu", page(ofertu(1, "BOX4WZR6"), ofertu(2, None)), NOW)
+    assert [(p.post_id, p.price, p.coupon, p.title) for p in result.posts] == [
+        (1, Money(38_152, Currency.COP), "BOX4WZR6", "Luz nocturna de huevo")
+    ]
+    assert str(result.posts[0].link) == "https://joylink.io/amazon/x"
+    assert result.skipped == 1
+
+
+def test_ofertu_page_without_codes_is_not_a_format_change() -> None:
+    result = parse_channel_page("tg_ofertu", page(*(ofertu(i, None) for i in range(1, 21))), NOW)
+    assert result.posts == ()
+    assert result.skipped == 20
+    assert result.unparsed == 0
 
 
 def test_non_deals_are_skipped() -> None:
@@ -243,19 +288,23 @@ def test_fetch_posts_url() -> None:
     assert [c[1] for c in fake.calls] == [after, "https://t.me/s/cajitatech"]
 
 
-def test_registry_has_three_channels() -> None:
+def test_registry_has_five_channels() -> None:
     channels = {c for c, s in load_all().items() if s.descriptor.kind == "channel"}
     feeds = {"dealnews", "slickdeals_amazon"}
-    assert channels - feeds == {"tg_descuentostech", "tg_clubgratis", "tg_cajitatech"}
+    assert channels - feeds == set(CHANNELS)
     assert dict(CHANNELS) == {
         "tg_descuentostech": "DescuentosTech",
         "tg_clubgratis": "Clubgratis",
         "tg_cajitatech": "cajitatech",
+        "tg_descuentoshome": "DescuentosHome",
+        "tg_ofertu": "ofertu",
     }
     from discountz.app.render import source_name
 
     assert [source_name(c) for c in sorted(CHANNELS)] == [
         "cajitatech",
         "Clubgratis",
+        "DescuentosHome",
         "DescuentosTech",
+        "OFERTU",
     ]

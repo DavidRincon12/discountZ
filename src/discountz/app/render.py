@@ -44,6 +44,8 @@ SOURCE_NAMES = {
     "tg_descuentostech": "DescuentosTech",
     "tg_clubgratis": "Clubgratis",
     "tg_cajitatech": "cajitatech",
+    "tg_descuentoshome": "DescuentosHome",
+    "tg_ofertu": "OFERTU",
     "dealnews": "DealNews",
     "slickdeals_amazon": "Slickdeals",
     "ebay_us": "eBay",

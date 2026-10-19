@@ -4,18 +4,18 @@
 - v1 en producción desde el 2026-10-14 (Supabase, `DISCOUNTZ_ACTIVO=true`, cron-job.org cada 5 min).
 - Rastreo de catálogo (ADR 0004) en producción desde el 2026-10-17: VTEX ×4, grupo con 14 temas, tarjetas PNG; canales de Telegram (ADR 0005) y feeds de Amazon «sin verificar» (ADR 0006/0007) también.
 - Best Buy y Walmart fuera por decisión de David. Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
-- eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18 (PR #13): `/seguir`, `/buscar` y job `crawl` con bajada de la misma publicación y `MODEL_LOW` (mediana del mismo `epid`). Esquema 5.
+- eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18 (PR #13): `/seguir`, `/buscar` y job `crawl` con bajada de la misma publicación y `MODEL_LOW` (mediana del mismo `epid`). Esquema 6 (migración `0006`: canales DescuentosHome y OFERTU).
 - Canal general de ofertas (opcional, secreto `TELEGRAM_CHANNEL_ID`): copia de cada oferta al canal, sin tema y sin botones de callback.
-- Suite: 889 pruebas (unitarias, integración y e2e) en verde el 2026-10-18.
+- Canales: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 895 pruebas (unitarias, integración y e2e) en verde el 2026-10-19.
 
 ## Último cambio
-- Rama `claude/project-thread-cve3z4`: `deliver` copia las ofertas (`alert` y `digest`) al canal general si `DISCOUNTZ_TELEGRAM_CHANNEL_ID` está puesto; de mejor esfuerzo, sin migración.
+- Rama `claude/project-thread-or2w9l`: agrega los canales `tg_descuentoshome` (Amazon con Prime a Colombia, USD) y `tg_ofertu` (Amazon en COP, solo posts con código); migración `0006`.
 
 ## Siguiente paso
+- David: tras fusionar, *Actions → migrate* con `to = head` (el ciclo se salta hasta que el esquema sea 6).
 - David: crear el canal, hacer admin al bot con «Publicar mensajes» y guardar su id en el secreto `TELEGRAM_CHANNEL_ID` (README, paso 12).
 - Revisar el texto oficial del acuerdo de la API de eBay (6 h de atraso máximo, nada de entrenar IA) antes de dejar el job encendido.
 - Mirar la primera semana: alertas de eBay al día, cuota (`Unavailable quota` en los logs) y peso de la BD (tope 150 mil publicaciones). Si satura: `/fuente off ebay_us`.
-- Opcional: pedir a eBay acceso a `getItems` (Application Growth Check) para releer 20 fichas por llamada en la capa caliente.
 
 ## Decisiones vigentes
 - Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006), DealNews sin tope de antigüedad (ADR 0007) y eBay por la Browse API con comparación por modelo (ADR 0008).

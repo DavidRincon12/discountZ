@@ -117,12 +117,12 @@ Las primeras vueltas solo aprenden precios: un producto necesita su precio estab
 
 ### 10. Canales de ofertas de Telegram
 
-El ciclo de 5 minutos lee también los canales públicos [DescuentosTech](https://t.me/s/DescuentosTech), [Clubgratis](https://t.me/s/Clubgratis) y [cajitatech](https://t.me/s/cajitatech), cada uno como mucho cada 10 minutos y sin usar tu cuenta de Telegram.
+El ciclo de 5 minutos lee también los canales públicos [DescuentosTech](https://t.me/s/DescuentosTech), [DescuentosHome](https://t.me/s/DescuentosHome), [Clubgratis](https://t.me/s/Clubgratis), [cajitatech](https://t.me/s/cajitatech) y [OFERTU](https://t.me/s/ofertu), cada uno como mucho cada 10 minutos y sin usar tu cuenta de Telegram.
 
-1. **Migración `0003`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head`.
+1. **Migraciones `0003` y `0006`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` (la `0006` agrega DescuentosHome y OFERTU).
 2. **Nada más.** La primera lectura de cada canal solo marca el punto de partida: no reenvía ofertas viejas. Desde la siguiente, cada oferta nueva llega como tarjeta con foto al tema de su categoría, con la etiqueta «📣 Visto en <canal> · sin verificar» y los botones «Ver oferta» y «Ver en el canal».
 
-Los precios de los canales no se comparan con el histórico propio: por eso dicen «sin verificar». Si la misma oferta sale en dos canales en menos de 24 h (mismo cupón, o título parecido con precio a ±10 %), llega una sola vez. Para apagar un canal: `/fuente off tg_descuentostech` (o `tg_clubgratis`, `tg_cajitatech`). El resumen diario suma la línea «Canales: N ofertas (M repetidas)».
+Los precios de los canales no se comparan con el histórico propio: por eso dicen «sin verificar». Si la misma oferta sale en dos canales en menos de 24 h (mismo cupón, o título parecido con precio a ±10 %), llega una sola vez. De OFERTU solo llegan los posts con código de descuento: los demás son catálogo de Amazon sin precio anterior. Para apagar un canal: `/fuente off tg_descuentostech` (o `tg_descuentoshome`, `tg_clubgratis`, `tg_cajitatech`, `tg_ofertu`). El resumen diario suma la línea «Canales: N ofertas (M repetidas)».
 
 ### 11. Ofertas de Amazon de DealNews y Slickdeals
 

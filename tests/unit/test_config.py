@@ -53,6 +53,8 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "tg_descuentostech",
         "tg_clubgratis",
         "tg_cajitatech",
+        "tg_descuentoshome",
+        "tg_ofertu",
         "dealnews",
         "slickdeals_amazon",
     }
