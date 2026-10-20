@@ -17,7 +17,13 @@ from typing import Literal, cast
 
 import psycopg
 
-from discountz.app.crawl import CrawlDeps, crawl_max_items, run_crawl_reconnecting
+from discountz.app.crawl import (
+    DB_RECONNECT_PAUSE_S,
+    DB_RECONNECTS,
+    CrawlDeps,
+    crawl_max_items,
+    run_crawl_reconnecting,
+)
 from discountz.app.cycle import CycleDeps, run_cycle
 from discountz.config import Settings, load_canaries, load_params, load_settings, load_topics
 from discountz.domain.commands import BOT_MENU
@@ -158,6 +164,29 @@ def _connect_with_retry(settings: Settings, rnd: random.Random) -> psycopg.Conne
     raise AssertionError("inalcanzable")
 
 
+def _connect_crawl(settings: Settings, rnd: random.Random, source: str) -> psycopg.Connection:
+    """Arranque del rastreo con la misma paciencia que la reconexión a mitad de corrida.
+
+    Con la matriz entera arrancando a la vez, el pooler de Supabase a veces rechaza las
+    conexiones unos segundos (Éxito y eBay salían con código 3 a las 13:00Z).
+    """
+    for attempt in range(1, DB_RECONNECTS + 2):
+        try:
+            return _connect_with_retry(settings, rnd)
+        except psycopg.OperationalError:
+            if attempt > DB_RECONNECTS:
+                raise
+            event(
+                logging.getLogger("discountz"),
+                "db_reconnect",
+                logging.WARNING,
+                source=source,
+                count=attempt,
+            )
+            time.sleep(DB_RECONNECT_PAUSE_S)
+    raise AssertionError("inalcanzable")
+
+
 def _cmd_setup_bot() -> int:
     try:
         settings = load_settings()
@@ -274,7 +303,7 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
         else HttpxClient(args.source, max_body=CATALOG_MAX_BODY_BYTES)
     )
     try:
-        conn = _connect_with_retry(settings, rnd)
+        conn = _connect_crawl(settings, rnd, args.source)
     except psycopg.OperationalError:
         event(logging.getLogger("discountz"), "db_unavailable", logging.ERROR)
         client.close()
