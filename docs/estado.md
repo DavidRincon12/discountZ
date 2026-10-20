@@ -9,6 +9,7 @@
 - Canales: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 924 pruebas (unitarias, integración y e2e) en verde el 2026-10-19.
 
 ## Último cambio
+- Rama `claude/project-thread-y6ijcd`: las tarjetas de VTEX piden la foto en 1000 px (`ids/<id>-1000-1000/`) y sin punto final en el host; la descarga sigue hasta 2 redirecciones a hosts permitidos y registra `photo_missing` (código y status) cuando no hay foto.
 - Rama `claude/precision-categorias-qof49c`: el tema (hashtag) de canales y feeds acertaba el 51 % contra ofertas reales etiquetadas; ahora frases, plurales, hashtags compuestos y peso menor tras «para/con/for» (93 % en ofertas no vistas; prueba con 946 etiquetadas exige ≥ 95 %). Subcategorías de las tiendas CO y los televisores quedan con el mismo tema en todas las fuentes. Clubgratis ya no toma como título «Comprar en Amazon…», «Precio incluye envío» ni «Aplicar cupón», ni un «20 %» como precio.
 
 ## Siguiente paso

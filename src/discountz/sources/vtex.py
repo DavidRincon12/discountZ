@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -54,6 +55,9 @@ _AVAILABLE = ("fq", "isAvailablePerSalesChannel_1:1")
 SEARCH_PER_PRODUCT = 3
 _SKU_RE = re.compile(r"^\d{1,12}$")
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_IMAGE_ID_RE = re.compile(r"^/arquivos/ids/(\d{1,12})(?:-[0-9a-z]{1,6}-[0-9a-z]{1,6})?/")
+# La tarjeta dibuja la foto en 920 × 560: el original de un vendedor puede pasar de 5 MB.
+CARD_IMAGE_SIZE = "1000-1000"
 _HEADERS = {
     "Accept": "application/json",
     "Accept-Language": "es-CO,es;q=0.9",
@@ -521,13 +525,21 @@ class VtexSource:
                 if item.itemId not in ids:
                     continue
                 title = " ".join((item.nameComplete or product.productName).split())
-                image = item.images[0].imageUrl if item.images else None
+                image = card_image(item.images[0].imageUrl) if item.images else None
                 url = f"https://{self.store.host}/{product.linkText}/p"
                 out[item.itemId] = CardFacts(title, url, image)
         return out
 
     def detect_block(self, resp: HttpResponse) -> BlockKind | None:
         return detect_block_common(resp)
+
+
+def card_image(url: str) -> str:
+    """Variante de 1000 px de la foto (`ids/<id>-1000-1000/`), con el host sin punto final."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").rstrip(".")
+    path = _IMAGE_ID_RE.sub(lambda m: f"/arquivos/ids/{m.group(1)}-{CARD_IMAGE_SIZE}/", parts.path)
+    return urlunsplit((parts.scheme, host, path, parts.query, ""))
 
 
 def _parse_partition(partition: str) -> tuple[str, tuple[int, int] | None]:

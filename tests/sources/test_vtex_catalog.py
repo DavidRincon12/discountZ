@@ -23,7 +23,7 @@ from discountz.sources.base import (
     SourceContext,
 )
 from discountz.sources.fixtures import load_fixture
-from discountz.sources.vtex import CATALOG_CAP, STORES, VtexSource
+from discountz.sources.vtex import CATALOG_CAP, STORES, VtexSource, card_image
 
 T = datetime(2026, 10, 16, 12, tzinfo=UTC)
 SEARCH = "catalog_system/pub/products/search"
@@ -181,8 +181,34 @@ def test_card_facts_from_batch() -> None:
     f = facts["101"]
     assert f.title == "Producto 101"
     assert f.url == "https://www.exito.com/producto-101/p"
-    assert f.image_url == "https://exitocol.vteximg.com.br/arquivos/ids/101/a.jpg"
+    # Se pide la variante de 1000 px: el original de un vendedor puede pasar de 5 MB.
+    assert f.image_url == "https://exitocol.vteximg.com.br/arquivos/ids/101-1000-1000/a.jpg"
     assert "fq=skuId%3A101&fq=skuId%3A103&fq=skuId%3A999" in fake.urls[0]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "https://exitocol.vteximg.com.br/arquivos/ids/35184443/a.jpg?v=6392",
+            "https://exitocol.vteximg.com.br/arquivos/ids/35184443-1000-1000/a.jpg?v=6392",
+        ),
+        (
+            "https://exitocol.vteximg.com.br/arquivos/ids/7-500-auto/a.jpg",
+            "https://exitocol.vteximg.com.br/arquivos/ids/7-1000-1000/a.jpg",
+        ),
+        (  # Olímpica publica algunos hosts con punto final
+            "https://olimpica.vteximg.com.br./arquivos/ids/9/a.jpg",
+            "https://olimpica.vteximg.com.br/arquivos/ids/9-1000-1000/a.jpg",
+        ),
+        (
+            "https://exitocol.vteximg.com.br/otra/ruta.jpg",
+            "https://exitocol.vteximg.com.br/otra/ruta.jpg",
+        ),
+    ],
+)
+def test_card_image_asks_for_sized_variant(raw: str, expected: str) -> None:
+    assert card_image(raw) == expected
 
 
 def test_descriptor_declares_catalog_and_image_hosts() -> None:
