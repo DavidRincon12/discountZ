@@ -15,6 +15,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -45,7 +46,8 @@ from discountz.sources.registry import register
 CODE = "alkosto"
 APP_ID = "QX5IPS1B1Q"
 INDEX = "alkostoIndexAlgoliaPRD"
-ALGOLIA = f"https://{APP_ID}-dsn.algolia.net"
+ALGOLIA_HOST = f"{APP_ID.lower()}-dsn.algolia.net"
+ALGOLIA = f"https://{ALGOLIA_HOST}"
 BASE = "https://www.alkosto.com"
 HOSTS = frozenset({"www.alkosto.com", "alkosto.com"})
 IMAGE_HOSTS = frozenset({"cdn.dam.alkosto.com"})
@@ -138,26 +140,46 @@ def _load(body: bytes) -> object:
 
 
 def parse_query(body: bytes) -> tuple[list[AlkostoItem], int]:
-    """Productos válidos de una consulta y su `nbHits`; un hit inválido se descarta solo."""
+    """Productos válidos de una consulta y su `nbHits`.
+
+    Un hit inválido se descarta solo; si había hits y ninguno sirve, el formato cambió y es
+    `ParseError` (cuenta para el breaker en vez de pasar como una página vacía).
+    """
     try:
         page = _Query.model_validate(_load(body))
     except ValidationError as exc:
         raise ParseError("bad_query") from exc
-    items = [item for raw in page.hits if (item := _item(raw)) is not None]
+    parsed = [_item(raw) for raw in page.hits]
+    items = [i for i in parsed if isinstance(i, AlkostoItem)]
+    if parsed and not items:
+        raise ParseError("no_valid_hits")
     return items, page.nbHits
 
 
-def parse_objects(body: bytes) -> dict[str, AlkostoItem]:
-    """Fichas de `getObjects` por id; los ids inexistentes (`null`) se omiten."""
+def parse_objects(body: bytes, ids: Sequence[str]) -> dict[str, AlkostoItem | ParseError]:
+    """Resultado de `getObjects` por id pedido (Algolia responde uno por id, en orden).
+
+    Un id inexistente (`null`) se omite; uno que existe pero no se puede leer queda como
+    `ParseError`, para que no pase por «retirado».
+    """
     try:
         page = _Objects.model_validate(_load(body))
     except ValidationError as exc:
         raise ParseError("bad_objects") from exc
-    items = (_item(raw) for raw in page.results if raw is not None)
-    return {item.external_id: item for item in items if item is not None}
+    if len(page.results) != len(ids):
+        raise ParseError("bad_objects")
+    out: dict[str, AlkostoItem | ParseError] = {}
+    for wanted, raw in zip(ids, page.results, strict=True):
+        if raw is None:
+            continue
+        item = _item(raw)
+        if isinstance(item, AlkostoItem) and item.external_id != wanted:
+            item = ParseError("other_id")
+        out[wanted] = item
+    return out
 
 
-def _item(raw: dict[str, object]) -> AlkostoItem | None:
+def _item(raw: dict[str, object]) -> AlkostoItem | ParseError:
     try:
         return _to_item(_Hit.model_validate(raw))
     except ValidationError:
@@ -167,7 +189,7 @@ def _item(raw: dict[str, object]) -> AlkostoItem | None:
     except ParseError as exc:
         code = exc.code
     event(log, "alkosto_item_skipped", source=CODE, code=code)
-    return None
+    return ParseError(code)
 
 
 def _to_item(hit: _Hit) -> AlkostoItem:
@@ -287,17 +309,23 @@ class AlkostoSource:
         self._key = None
         raise HardBlock(CODE, "api_key", 403)
 
-    def _objects(self, ctx: SourceContext, external_ids: Sequence[str]) -> dict[str, AlkostoItem]:
+    def _objects(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> dict[str, AlkostoItem | ParseError]:
         ids = [i for i in external_ids if EXTERNAL_ID_RE.fullmatch(i)]
-        found: dict[str, AlkostoItem] = {}
+        found: dict[str, AlkostoItem | ParseError] = {}
         for i in range(0, len(ids), MAX_BATCH):
+            batch = ids[i : i + MAX_BATCH]
             requests = [
                 {"indexName": INDEX, "objectID": x, "attributesToRetrieve": list(ATTRIBUTES)}
-                for x in ids[i : i + MAX_BATCH]
+                for x in batch
             ]
-            found |= parse_objects(self._post(ctx, OBJECTS_URL, {"requests": requests}))
-        wanted = set(ids)
-        return {k: v for k, v in found.items() if k in wanted}
+            found |= parse_objects(self._post(ctx, OBJECTS_URL, {"requests": requests}), batch)
+        return found
+
+    def _valid(self, ctx: SourceContext, external_ids: Sequence[str]) -> list[AlkostoItem]:
+        """Las fichas legibles; las rotas ya quedaron registradas como `alkosto_item_skipped`."""
+        return [i for i in self._objects(ctx, external_ids).values() if isinstance(i, AlkostoItem)]
 
     def _query(
         self, ctx: SourceContext, body: Mapping[str, object]
@@ -327,7 +355,12 @@ class AlkostoSource:
                 continue
             for r in batch:
                 item = found.get(r.external_id)
-                out.append(ListingFound(_offer(item, ctx.now)) if item else ListingGone(r))
+                if isinstance(item, ParseError):
+                    out.append(ListingFailed(r, item))
+                elif item is None:
+                    out.append(ListingGone(r))
+                else:
+                    out.append(ListingFound(_offer(item, ctx.now)))
         return out
 
     def fetch_catalog_listings(
@@ -345,6 +378,8 @@ class AlkostoSource:
     def confirm(self, ctx: SourceContext, offer: Offer) -> Offer | None:
         """Relee la ficha por `getObjects`: None si ya no existe o se agotó."""
         item = self._objects(ctx, [offer.ref.external_id]).get(offer.ref.external_id)
+        if isinstance(item, ParseError):
+            raise item
         if item is None or not item.in_stock:
             return None
         return _offer(item, ctx.now)
@@ -354,7 +389,7 @@ class AlkostoSource:
 
     def detect_block(self, resp: HttpResponse) -> BlockKind | None:
         """En Algolia, una clave rechazada o el límite de peticiones no son bloqueos anti-bots."""
-        if resp.url.startswith(ALGOLIA):
+        if (urlsplit(resp.url).hostname or "").lower() == ALGOLIA_HOST:  # httpx lo da en minúsculas
             if resp.status == 429:
                 raise Unavailable(CODE, "rate_limited", 429)
             if resp.status == 403 and _INVALID_KEY in resp.body[:500]:
@@ -389,13 +424,15 @@ class AlkostoSource:
     def fetch_catalog_items(
         self, ctx: SourceContext, external_ids: Sequence[str]
     ) -> list[CatalogObservation]:
-        return list(_observations(self._objects(ctx, external_ids).values()))
+        return list(_observations(self._valid(ctx, external_ids)))
 
     def fetch_card_facts(
         self, ctx: SourceContext, external_ids: Sequence[str]
     ) -> dict[str, CardFacts]:
-        found = self._objects(ctx, external_ids)
-        return {k: CardFacts(i.title, i.url, i.image_url) for k, i in found.items()}
+        return {
+            i.external_id: CardFacts(i.title, i.url, i.image_url)
+            for i in self._valid(ctx, external_ids)
+        }
 
 
 def _parse_partition(partition: str) -> tuple[int, int]:

@@ -254,3 +254,9 @@ def test_channel_term_in_two_topics_is_rejected(tmp_path: Path) -> None:
     path.write_text(src + '\n[[channel_rules]]\ntopic = "moda"\nwords = ["Audífonos"]\n', "utf-8")
     with pytest.raises(ConfigError, match="audifonos"):
         load_topics(path)
+
+
+def test_auto_watch_caps_stay_with_their_source() -> None:
+    b = load_params(PARAMS_PATH).budgets
+    assert b["ebay_us"].max_auto_watches == 100
+    assert b["alkosto"].max_auto_watches == 0  # sin leads que lleven a Alkosto

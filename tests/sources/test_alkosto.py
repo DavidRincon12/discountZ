@@ -24,6 +24,7 @@ from discountz.sources.alkosto import (
     BASE,
     HOSTS,
     INDEX,
+    AlkostoItem,
     AlkostoSource,
     parse_api_key,
     parse_objects,
@@ -31,6 +32,7 @@ from discountz.sources.alkosto import (
 )
 from discountz.sources.base import (
     CatalogPage,
+    ListingFailed,
     ListingFound,
     ListingGone,
     NoCredentials,
@@ -137,10 +139,44 @@ def test_parse_query_ean_only_with_gtin_length() -> None:
 
 
 def test_parse_objects_omits_missing() -> None:
-    found = parse_objects(_body("objects"))
+    found = parse_objects(_body("objects"), ["7705946474559", "6937574879524", "0000000000000"])
     assert len(found) == 2
     assert "0000000000000" not in found
-    assert all(item.external_id == key for key, item in found.items())
+    assert all(
+        isinstance(item, AlkostoItem) and item.external_id == key for key, item in found.items()
+    )
+
+
+def _broken_objects() -> bytes:
+    data = json.loads(_body("objects"))
+    data["results"][1]["lowestprice_double"] = 12.5
+    return json.dumps(data).encode()
+
+
+def test_parse_objects_marks_broken_items() -> None:
+    found = parse_objects(_broken_objects(), [TV, OTHER, MISSING])
+    assert isinstance(found[TV], AlkostoItem)
+    assert isinstance(found[OTHER], ParseError)
+    assert MISSING not in found
+
+
+def test_parse_objects_rejects_a_result_count_mismatch() -> None:
+    with pytest.raises(ParseError):
+        parse_objects(_body("objects"), [TV])
+
+
+def test_parse_query_with_only_broken_hits_is_parse_error() -> None:
+    data = _band()
+    hits = data["hits"]
+    assert isinstance(hits, list)
+    for hit in hits:
+        hit["lowestprice_double"] = 12.5
+    with pytest.raises(ParseError):
+        parse_query(json.dumps(data).encode())
+
+
+def test_parse_query_without_hits_is_empty() -> None:
+    assert parse_query(b'{"hits": [], "nbHits": 0}') == ([], 0)
 
 
 def test_parse_query_rejects_garbage() -> None:
@@ -203,13 +239,24 @@ def routes(**by_url: HttpResponse | list[HttpResponse]) -> Handler:
     def handle(method: str, url: str, body: Mapping[str, object] | None) -> HttpResponse:
         route = table.get(url)
         assert route is not None, f"sin ruta: {method} {url}"
-        if isinstance(route, HttpResponse):
-            return route
-        i = seen.get(url, 0)
-        seen[url] = i + 1
-        return route[min(i, len(route) - 1)]
+        if not isinstance(route, HttpResponse):
+            i = seen.get(url, 0)
+            seen[url] = i + 1
+            route = route[min(i, len(route) - 1)]
+        return _per_request(route, body) if url == OBJECTS else route
 
     return handle
+
+
+def _per_request(route: HttpResponse, body: Mapping[str, object] | None) -> HttpResponse:
+    """Como Algolia, `getObjects` responde un resultado por id pedido, en el mismo orden."""
+    if route.status != 200 or body is None:
+        return route
+    by_id = {r["objectID"]: r for r in json.loads(route.body)["results"] if r is not None}
+    requests = body["requests"]
+    assert isinstance(requests, list)
+    results = [by_id.get(r["objectID"]) for r in requests]
+    return resp(json.dumps({"results": results}).encode(), url=OBJECTS)
 
 
 def paced(api: Api, src: AlkostoSource) -> PacedClient:
@@ -443,3 +490,41 @@ def test_card_facts_from_objects() -> None:
     assert facts[TV].title.startswith("TV KALLEY 60")
     assert facts[TV].url.endswith(f"/p/{TV}")
     assert facts[TV].image_url is not None
+
+
+def test_invalid_key_is_recognized_with_a_lowercase_host() -> None:
+    """httpx pasa el host a minúsculas: la URL real es `https://qx5ips1b1q-dsn.algolia.net/…`."""
+    lower = fx("invalid-key")
+    lower = HttpResponse(lower.status, lower.url.lower(), {}, lower.body, 0)
+    limited = resp(b"<html>too many</html>", 429, url=QUERY.lower())
+    src, api, ctx = run(query=lower)
+    with pytest.raises(HardBlock) as exc:
+        src.search(ctx, SearchSpec("alkosto", "tv", (), None, None, "tecnologia"), 0)
+    assert exc.value.code == "api_key"
+    assert api.count(BASE + "/") == 2
+    src, _, ctx = run(query=limited)
+    with pytest.raises(Unavailable) as unavailable:
+        src.search(ctx, SearchSpec("alkosto", "tv", (), None, None, "tecnologia"), 0)
+    assert unavailable.value.code == "rate_limited"
+
+
+def test_broken_item_is_failed_not_gone() -> None:
+    data = json.loads(fx("objects").body)
+    data["results"][1]["lowestprice_double"] = 12.5
+    src, _, ctx = run(objects=resp(json.dumps(data).encode(), url=OBJECTS))
+    out = src.fetch_listings(ctx, [ListingRef("alkosto", i) for i in (TV, OTHER, MISSING)])
+    assert isinstance(out[0], ListingFound)
+    assert isinstance(out[1], ListingFailed)
+    assert isinstance(out[1].error, ParseError)
+    assert out[2] == ListingGone(ListingRef("alkosto", MISSING))
+
+
+def test_confirm_of_a_broken_item_is_parse_error() -> None:
+    src, _, ctx = run(objects=fx("objects"))
+    found = src.fetch_listings(ctx, [ListingRef("alkosto", OTHER)])[0]
+    assert isinstance(found, ListingFound)
+    data = json.loads(fx("objects").body)
+    data["results"] = [dict(data["results"][1], lowestprice_double=12.5)]
+    src, _, ctx = run(objects=resp(json.dumps(data).encode(), url=OBJECTS))
+    with pytest.raises(ParseError):
+        src.confirm(ctx, found.offer)

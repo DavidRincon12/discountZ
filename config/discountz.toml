@@ -198,6 +198,7 @@ max_per_24h = 1000
 watch_interval_min = 120
 search_interval_min = 360
 max_batch = 1          # `getItems` (lote) da 403 sin acceso especial: una ficha por petición
+max_auto_watches = 100
 
 [sources.alkosto]  # Algolia: /seguir, /buscar y la confirmación; el rastreo tiene su propio presupuesto
 group = "alkosto"
@@ -208,7 +209,6 @@ max_per_24h = 500
 watch_interval_min = 30
 search_interval_min = 180
 max_batch = 100        # `getObjects` lee hasta 100 fichas por petición
-max_auto_watches = 100
 
 [sources.slickdeals]
 group = "slickdeals"

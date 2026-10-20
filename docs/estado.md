@@ -6,7 +6,7 @@
 - Best Buy y Walmart fuera por decisión de David. Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
 - eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18: `/seguir`, `/buscar` y job `crawl` con `MODEL_LOW` (mediana del mismo `epid`).
 - Alkosto (`alkosto`, ADR 0009) listo en la rama: `/seguir`, `/buscar` y `crawl` por su índice de Algolia (franjas de precio de ≤ 1.000). Esquema 7: al fusionar, correr `migrate` con `to = head`.
-- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 827 unitarias y 179 de integración en verde el 2026-10-20.
+- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 835 unitarias y 179 de integración en verde el 2026-10-20.
 
 ## Último cambio
 - Rama `claude/project-thread-rlzaur`: Alkosto como tienda (spec `docs/superpowers/specs/2026-10-20-alkosto-design.md`, plan `docs/superpowers/plans/2026-10-20-alkosto.md`, ejecutado en Native). Antes, el PR #20 (reintento de cortes pasajeros en el rastreo, `CrawlBudget.run_cap`, canales cada 3 min).
