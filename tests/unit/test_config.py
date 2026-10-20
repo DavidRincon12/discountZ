@@ -277,7 +277,7 @@ def test_auto_watch_caps_stay_with_their_source() -> None:
 
 @pytest.mark.parametrize("code", ["amazon_us", "newegg", "ebay_us"])
 def test_auto_watches_leave_half_the_daily_budget_for_the_user(code: str) -> None:
-    """Los automáticos compiten con /seguir y /buscar: con más lecturas que tope, esos se atrasan."""
+    """Los automáticos compiten con /seguir y /buscar: si pasan del tope, esos se atrasan."""
     b = load_params(PARAMS_PATH).budgets[code]
     reads_per_day = b.max_auto_watches * (timedelta(days=1) // b.watch_interval) // b.max_batch
     assert reads_per_day <= b.max_per_24h // 2
