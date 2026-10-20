@@ -1,0 +1,48 @@
+# Temporal: lee términos y robots.txt de tiendas candidatas (la red de la sesión no llega). Se borra al terminar.
+name: tmp-terminos
+on:
+  push:
+    branches: [claude/project-thread-rlzaur]
+    paths: [.github/workflows/tmp-terminos.yml]
+permissions:
+  contents: read
+jobs:
+  leer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Leer páginas
+        shell: python
+        run: |
+          import re, urllib.request, html
+          UA = {"User-Agent": "Mozilla/5.0 (discountZ revision de terminos)"}
+          KW = re.compile(r"robot|spider|araña|scrap|automatizad|extrac|monitore|programa|software|minería|data mining|crawl|copiar|reproduc", re.I)
+          def get(u):
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=30) as r:
+                      return r.status, r.read().decode("utf-8", "replace")
+              except Exception as e:
+                  return getattr(e, "code", "ERR"), ""
+          domains = ["www.tiendasjumbo.co", "www.jumbocolombia.com", "www.tiendasmetro.co", "www.drogueriascolsubsidio.com", "www.colsubsidio.com", "www.decathlon.com.co", "www.pepeganga.com"]
+          for d in domains:
+              s, b = get(f"https://{d}/robots.txt")
+              print(f"\n===== ROBOTS {d} status={s}\n{b[:3000]}")
+              s, b = get(f"https://{d}/")
+              print(f"===== HOME {d} status={s} vtex_marks={len(re.findall('vtex', b, re.I))} prestashop={len(re.findall('prestashop', b, re.I))}")
+          pages = [
+              "https://www.jumbocolombia.com/institucional/terminos-y-condiciones",
+              "https://www.tiendasjumbo.co/institucional/terminos-y-condiciones",
+              "https://www.tiendasmetro.co/institucional/terminos-y-condiciones",
+              "https://www.tiendasmetro.co/terminos-y-condiciones",
+              "https://www.drogueriascolsubsidio.com/terminos-y-condiciones-pagina-web",
+              "https://www.decathlon.com.co/content/94-consulta-terminos-condiciones",
+              "https://consejosdeportivos.decathlon.com.co/condiciones-generales-de-uso-1",
+              "https://www.pepeganga.com/terminos-y-condiciones",
+          ]
+          for u in pages:
+              s, b = get(u)
+              t = html.unescape(re.sub(r"<[^>]+>", "\n", re.sub(r"(?s)<(script|style)[^>]*>.*?</\1>", " ", b)))
+              paras = [p.strip() for p in re.split(r"\n\s*\n|\n", t) if len(p.strip()) > 40]
+              hits = [p for p in paras if KW.search(p)]
+              print(f"\n===== TERMS {u} status={s} parrafos={len(paras)} coincidencias={len(hits)}")
+              for p in hits[:25]:
+                  print("-", p[:600])
