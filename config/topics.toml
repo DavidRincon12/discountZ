@@ -11,6 +11,8 @@ intentional_otros = [
   "panamericana:/impuestos iva(no utilizar)/",
   "ebay_us:/musical instruments & gear/",
   "alkosto:/servicios/", "alkosto:/pines/", "alkosto:/instrumentos musicales/",
+  "jumbo:/bolsa/", "jumbo:/tarjeta regalo/", "jumbo:/logistica/",
+  "pepeganga:/gift card/", "pepeganga:/entretenimiento/",
 ]
 
 [topics.errores]
@@ -95,7 +97,10 @@ category = "otros"
 
 # ───────────── Comodín: nombres que comparten varias tiendas
 [[rules]]
-prefixes = ["/tecnologia/", "/consolas y videojuegos/", "/electrodomesticos y tecnologia/"]
+prefixes = [
+  "/tecnologia/", "/consolas y videojuegos/", "/electrodomesticos y tecnologia/",
+  "/televisores y audio/", "/celulares/", "/videojuegos consolas/", "/gaming/",
+]
 topic = "tecnologia"
 
 [[rules]]
@@ -106,18 +111,22 @@ topic = "electro"
 prefixes = [
   "/hogar/", "/hogar y decoracion/", "/hogar y lenceria/", "/hogar cocina/", "/decoracion/",
   "/muebles/", "/navidad/", "/celebracion/", "/eventos y temporadas/", "/eventos/", "/fiesta/",
-  "/jardin y aire libre/",
+  "/jardin y aire libre/", "/jardin/", "/pisos y paredes/", "/banos/", "/habitacion y colchones/",
+  "/mundo parrilla/", "/especiales/",
 ]
 topic = "hogar"
 
 [[rules]]
-prefixes = ["/moda/", "/moda y accesorios/", "/marroquineria/", "/un mundo de regalos/"]
+prefixes = [
+  "/moda/", "/moda y accesorios/", "/marroquineria/", "/un mundo de regalos/", "/ropa y accesorios/",
+  "/zapatos/", "/maletas y morrales/",
+]
 topic = "moda"
 
 [[rules]]
 prefixes = [
   "/cuidado personal/", "/belleza/", "/salud y belleza/", "/bienestar y belleza/", "/medicamentos/",
-  "/suministros medicos/", "/bioseguridad/",
+  "/suministros medicos/", "/bioseguridad/", "/salud y bienestar/", "/belleza y cuidado personal/",
 ]
 topic = "belleza"
 
@@ -131,15 +140,24 @@ prefixes = [
 topic = "mercado"
 
 [[rules]]
-prefixes = ["/deportes/", "/deportes y fitness/", "/entrenamiento/", "/movilidad electrica/"]
+prefixes = [
+  "/deportes/", "/deportes y fitness/", "/entrenamiento/", "/movilidad electrica/",
+  "/deportes y tiempo libre/",
+]
 topic = "deportes"
 
 [[rules]]
-prefixes = ["/bebes/", "/mundo del bebe/", "/juguetes y juegos/", "/jugueteria/", "/juegos y juguetes/"]
+prefixes = [
+  "/bebes/", "/mundo del bebe/", "/juguetes y juegos/", "/jugueteria/", "/juegos y juguetes/",
+  "/mundo bebes/",
+]
 topic = "bebes"
 
 [[rules]]
-prefixes = ["/herramientas y ferreteria/", "/ferreteria/", "/vehiculos/", "/automotores/"]
+prefixes = [
+  "/herramientas y ferreteria/", "/ferreteria/", "/vehiculos/", "/automotores/", "/automovil/",
+  "/pinturas/", "/llantas/", "/ferreteria maquinas y herramientas/",
+]
 topic = "ferreteria"
 
 [[rules]]
@@ -149,7 +167,8 @@ topic = "mascotas"
 [[rules]]
 prefixes = [
   "/libros/", "/papeleria/", "/papeleria y libros/", "/utiles y papeleria/", "/oficina/", "/escolar/",
-  "/arte y manualidades/", "/panamericana editorial/",
+  "/arte y manualidades/", "/panamericana editorial/", "/libros y papeleria/",
+  "/escolar arte y manualidades/",
 ]
 topic = "libros"
 
@@ -224,6 +243,18 @@ topic = "mascotas"
 [[rules]]
 source = "olimpica"
 prefixes = ["/supermercado/para tu bebe/"]
+topic = "bebes"
+
+[[rules]]
+source = "jumbo"
+prefixes = [
+  "/supermercado/cuidado personal/", "/supermercado/belleza/", "/electrodomesticos/cuidado personal/",
+]
+topic = "belleza"
+
+[[rules]]
+source = "jumbo"
+prefixes = ["/supermercado/cuidado del bebe/"]
 topic = "bebes"
 
 # Best Buy (API oficial): categorías de primer nivel en inglés. Se revisan con el árbol real.

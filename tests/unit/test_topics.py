@@ -21,7 +21,7 @@ from discountz.domain.topics import (
 from discountz.domain.urls import SafeUrl
 from discountz.sources.fixtures import load_fixture
 
-STORES = ("exito", "carulla", "olimpica", "panamericana")
+STORES = ("exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga")
 
 
 def rule(source: str, prefix: str, topic: str) -> TopicRule:
@@ -264,3 +264,13 @@ def test_alkosto_topics(path: str, topic: str) -> None:
 def test_alkosto_intentional_otros(name: str) -> None:
     topics = load_topics()
     assert f"alkosto:{normalize_path(f'/{name}/')}" in topics.intentional_otros
+
+
+def test_jumbo_and_pepeganga_keep_the_same_hashtag_as_other_stores() -> None:
+    rules = load_topics().rules
+    assert assign_topic(rules, "jumbo", "/Supermercado/Belleza/Maquillaje/") == "belleza"
+    assert assign_topic(rules, "jumbo", "/Supermercado/Cuidado Del Bebé/Pañales/") == "bebes"
+    assert assign_topic(rules, "jumbo", "/Televisores Y Audio/Televisión/") == "tecnologia"
+    assert assign_topic(rules, "jumbo", "/Automóvil/Llantas/") == "ferreteria"
+    assert assign_topic(rules, "pepeganga", "/Gaming/Monitores/") == "tecnologia"
+    assert assign_topic(rules, "pepeganga", "/Habitacion y Colchones/Colchones/") == "hogar"
