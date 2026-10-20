@@ -200,6 +200,16 @@ search_interval_min = 360
 max_batch = 1          # `getItems` (lote) da 403 sin acceso especial: una ficha por petición
 max_auto_watches = 100
 
+[sources.alkosto]  # Algolia: /seguir, /buscar y la confirmación; el rastreo tiene su propio presupuesto
+group = "alkosto"
+min_pause_s = 2
+jitter_s = 1
+max_per_run = 10
+max_per_24h = 500
+watch_interval_min = 30
+search_interval_min = 180
+max_batch = 100        # `getObjects` lee hasta 100 fichas por petición
+
 [sources.slickdeals]
 group = "slickdeals"
 min_pause_s = 0
@@ -374,6 +384,13 @@ jitter_s = 0.5
 max_per_run = 170
 max_per_24h = 4000  # + 1.000 del ciclo = la cuota diaria de 5.000
 hot_share_bp = 3000
+
+[crawl.alkosto]  # Algolia: ~20 franjas de ≤ 1.000 productos por vuelta, una vuelta por hora (ADR 0009)
+min_pause_s = 2
+jitter_s = 1
+max_per_run = 60
+max_per_24h = 1000
+hot_share_bp = 2500
 
 [ebay]  # spec de eBay §2 y §3
 ship_to_zip = "33166"          # casillero en Miami: solo publicaciones que envían ahí

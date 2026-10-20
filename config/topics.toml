@@ -10,6 +10,7 @@ intentional_otros = [
   "olimpica:/donaciones/", "olimpica:/otras categorias/",
   "panamericana:/impuestos iva(no utilizar)/",
   "ebay_us:/musical instruments & gear/",
+  "alkosto:/servicios/", "alkosto:/pines/", "alkosto:/instrumentos musicales/",
 ]
 
 [topics.errores]
@@ -486,3 +487,54 @@ topic = "mascotas"
 source = "ebay_us"
 prefixes = ["/books & magazines/", "/crafts/", "/movies & tv/", "/music/"]
 topic = "libros"
+
+# Alkosto (Algolia): sus 25 categorías de primer nivel (spec de Alkosto §3; faceta lvl0 del
+# 2026-10-20). La ruta del producto es su nivel 1 (`/tv/smart tv/`).
+[[rules]]
+source = "alkosto"
+prefixes = [
+  "/accesorios de electronica/", "/audio/", "/camaras/", "/casa inteligente - domotica/",
+  "/celulares/", "/computadores y tablet/", "/relojes y anillos inteligentes/", "/tv/",
+  "/videojuegos/",
+]
+topic = "tecnologia"
+
+[[rules]]
+source = "alkosto"
+prefixes = ["/electrodomesticos/"]
+topic = "electro"
+
+[[rules]]
+source = "alkosto"
+prefixes = ["/colchones/", "/hogar/", "/mesa y cocina/", "/muebles/", "/navidad/", "/ropa hogar/"]
+topic = "hogar"
+
+[[rules]]
+source = "alkosto"
+prefixes = ["/vestuario-ropa/"]
+topic = "moda"
+
+[[rules]]
+source = "alkosto"
+prefixes = ["/deportes/"]
+topic = "deportes"
+
+[[rules]]
+source = "alkosto"
+prefixes = ["/consumo/"]
+topic = "mercado"
+
+[[rules]]
+source = "alkosto"
+prefixes = ["/juguetes/", "/consumo/bebe/"]
+topic = "bebes"
+
+[[rules]]
+source = "alkosto"
+prefixes = ["/consumo/mascotas/"]
+topic = "mascotas"
+
+[[rules]]
+source = "alkosto"
+prefixes = ["/accesorios automotores/", "/llantas/"]
+topic = "ferreteria"

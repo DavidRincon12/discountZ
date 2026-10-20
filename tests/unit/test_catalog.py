@@ -16,6 +16,7 @@ from discountz.domain.catalog import (
     median_low,
     model_candidate,
     observe,
+    split_price_band,
 )
 from discountz.domain.model import AlertKind, SellerClass
 from discountz.domain.money import Currency, Money
@@ -253,3 +254,19 @@ def test_cycle_quota_does_not_trip_breaker() -> None:
     assert run.stopped
     c.on_error(run, Unavailable("ebay_us", "http_error", 500))
     assert run.breaker.consecutive_unavailable == 1
+
+
+def test_alkosto_pauses_with_the_db_near_full() -> None:
+    from discountz.app.crawl import PAUSED_AT_450
+
+    assert "alkosto" in PAUSED_AT_450
+
+
+def test_split_price_band_at_the_geometric_midpoint() -> None:
+    assert split_price_band(1, 999_999_999) == [(1, 31_622), (31_623, 999_999_999)]
+    assert split_price_band(100, 10_000) == [(100, 1_000), (1_001, 10_000)]
+    assert split_price_band(5, 6) == [(5, 5), (6, 6)]
+
+
+def test_split_price_band_does_not_split_a_single_price() -> None:
+    assert split_price_band(5, 5) == []

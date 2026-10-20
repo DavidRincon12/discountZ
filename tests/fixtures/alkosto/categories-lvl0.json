@@ -1,0 +1,30 @@
+{
+  "nota": "Las 25 categorías de primer nivel (faceta hierarchicalcategory_string_mv.lvl0 de Algolia), medidas el 2026-10-20.",
+  "categorias": [
+    "Accesorios Automotores",
+    "Accesorios de Electrónica",
+    "Audio",
+    "Cámaras",
+    "Casa Inteligente - Domótica",
+    "Celulares",
+    "Colchones",
+    "Computadores y Tablet",
+    "Consumo",
+    "Deportes",
+    "Electrodomésticos",
+    "Hogar",
+    "Instrumentos Musicales",
+    "Juguetes",
+    "Llantas",
+    "Mesa y cocina",
+    "Muebles",
+    "Navidad",
+    "Pines",
+    "Relojes y Anillos inteligentes",
+    "Ropa Hogar",
+    "Servicios",
+    "TV",
+    "Vestuario-Ropa",
+    "Videojuegos"
+  ]
+}
