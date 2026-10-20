@@ -29,7 +29,13 @@ from discountz.sources.alkosto import (
     parse_objects,
     parse_query,
 )
-from discountz.sources.base import ListingFound, ListingGone, NoCredentials, SourceContext
+from discountz.sources.base import (
+    CatalogPage,
+    ListingFound,
+    ListingGone,
+    NoCredentials,
+    SourceContext,
+)
 from discountz.sources.fixtures import load_fixture
 
 TV = "7705946474559"
@@ -341,3 +347,99 @@ def test_key_never_logged_nor_in_errors(caplog: pytest.LogCaptureFixture) -> Non
     assert secret not in str(exc.value)
     assert secret not in repr(exc.value)
     assert secret not in repr(src)
+
+
+# --- catálogo ------------------------------------------------------------------------------
+
+
+def _band_with(nb_hits: int) -> HttpResponse:
+    data = json.loads(fx("query-band").body)
+    data["nbHits"] = nb_hits
+    return resp(json.dumps(data).encode())
+
+
+def test_catalog_starts_with_one_band() -> None:
+    src, api, ctx = run()
+    assert list(src.catalog_partitions(ctx)) == ["1-999999999"]
+    assert api.calls == []
+
+
+def test_big_band_splits_without_items() -> None:
+    src, _, ctx = run(query=fx("query-big"))
+    page = src.fetch_catalog_page(ctx, "1-999999999", 0)
+    assert page == CatalogPage((), False, split=["1-31622", "31623-999999999"])
+
+
+def test_band_reads_items_with_numeric_filters() -> None:
+    src, api, ctx = run(query=fx("query-band"))
+    page = src.fetch_catalog_page(ctx, "1500000-1700000", 0)
+    assert page.split == ()
+    assert page.has_more is False
+    assert len(page.items) == 30
+    tv = next(o for o in page.items if o.external_id == TV)
+    assert tv.price == Money(1649900, Currency.COP)
+    assert tv.category_path == "/tv/smart tv/"
+    assert tv.ean == TV
+    assert tv.seller_class is SellerClass.FIRST_PARTY
+    sent = api.calls[-1][2]
+    assert sent is not None
+    assert sent["numericFilters"] == ["lowestprice_double>=1500000", "lowestprice_double<=1700000"]
+    assert sent["hitsPerPage"] == 1000
+    assert sent["page"] == 0
+
+
+def test_band_skips_out_of_stock_items() -> None:
+    data = json.loads(fx("query-band").body)
+    data["hits"][0]["stocklevel_int"] = 0
+    src, _, ctx = run(query=resp(json.dumps(data).encode()))
+    page = src.fetch_catalog_page(ctx, "1500000-1700000", 0)
+    assert TV not in {o.external_id for o in page.items}
+    assert len(page.items) == 29
+
+
+def test_single_price_band_over_limit_is_read_and_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    src, _, ctx = run(query=_band_with(1200))
+    caplog.set_level(logging.INFO)
+    page = src.fetch_catalog_page(ctx, "1649900-1649900", 0)
+    assert page.split == ()
+    assert len(page.items) == 30
+    assert "alkosto_band_truncated" in caplog.text
+
+
+def test_later_pages_are_empty() -> None:
+    src, api, ctx = run(query=fx("query-band"))
+    assert src.fetch_catalog_page(ctx, "1-10", 1) == CatalogPage((), False)
+    assert api.calls == []
+
+
+@pytest.mark.parametrize("partition", ["abc", "10-5", "1-2-3", "-1-5", "0-5", ""])
+def test_bad_partition_is_parse_error(partition: str) -> None:
+    src, _, ctx = run(query=fx("query-band"))
+    with pytest.raises(ParseError):
+        src.fetch_catalog_page(ctx, partition, 0)
+
+
+def test_changed_is_not_supported() -> None:
+    src, api, ctx = run()
+    assert src.fetch_changed(ctx, T, 0) == CatalogPage((), False)
+    assert src.descriptor.supports_changed is False
+    assert api.calls == []
+
+
+def test_catalog_items_batches_of_100() -> None:
+    src, api, ctx = run(objects=fx("objects"))
+    ids = [TV, OTHER] + [f"{n:013d}" for n in range(148)]
+    found = src.fetch_catalog_items(ctx, ids)
+    assert {o.external_id for o in found} == {TV, OTHER}
+    assert api.count(OBJECTS) == 2
+
+
+def test_card_facts_from_objects() -> None:
+    src, _, ctx = run(objects=fx("objects"))
+    facts = src.fetch_card_facts(ctx, [TV, MISSING])
+    assert set(facts) == {TV}
+    assert facts[TV].title.startswith("TV KALLEY 60")
+    assert facts[TV].url.endswith(f"/p/{TV}")
+    assert facts[TV].image_url is not None

@@ -11,13 +11,14 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from discountz.domain.catalog import CatalogObservation, split_price_band
 from discountz.domain.errors import HardBlock, ParseError, SourceError, Unavailable, UnsafeUrl
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money
@@ -26,6 +27,8 @@ from discountz.infra.http import BlockKind, HttpResponse
 from discountz.infra.log import event
 from discountz.sources.base import (
     Capability,
+    CardFacts,
+    CatalogPage,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -71,6 +74,11 @@ MAX_BATCH = 100
 SEARCH_HITS = 20
 BAD_KEY = "bad_key"
 _INVALID_KEY = b"Invalid Application-ID or API key"
+# Algolia no pagina más allá de 1.000 resultados por consulta: el barrido parte el catálogo en
+# franjas de precio de ≤ 1.000 productos, cada una leída en una sola página.
+MAX_HITS = 1000
+PRICE_MAX = 999_999_999
+_PARTITION = re.compile(r"^([1-9]\d{0,11})-([1-9]\d{0,11})$")
 
 log = logging.getLogger(__name__)
 
@@ -243,7 +251,9 @@ class AlkostoSource:
             currency=Currency.COP,
             hosts=HOSTS,
             client="httpx",
-            capabilities=frozenset({Capability.DETAIL, Capability.SEARCH, Capability.CONFIRM}),
+            capabilities=frozenset(
+                {Capability.DETAIL, Capability.SEARCH, Capability.CONFIRM, Capability.CATALOG}
+            ),
             max_batch=MAX_BATCH,
             external_id_re=EXTERNAL_ID_RE,
             image_hosts=IMAGE_HOSTS,
@@ -286,7 +296,8 @@ class AlkostoSource:
                 for x in ids[i : i + MAX_BATCH]
             ]
             found |= parse_objects(self._post(ctx, OBJECTS_URL, {"requests": requests}))
-        return found
+        wanted = set(ids)
+        return {k: v for k, v in found.items() if k in wanted}
 
     def _query(
         self, ctx: SourceContext, body: Mapping[str, object]
@@ -349,6 +360,58 @@ class AlkostoSource:
             if resp.status == 403 and _INVALID_KEY in resp.body[:500]:
                 raise Unavailable(CODE, BAD_KEY, 403)
         return detect_block_common(resp)
+
+    # --- catálogo ---------------------------------------------------------------------------
+
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]:
+        return [f"1-{PRICE_MAX}"]
+
+    def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
+        """Una franja de precio por página; si pasa de 1.000 productos se parte en dos."""
+        lo, hi = _parse_partition(partition)
+        if page > 0:
+            return CatalogPage((), False)
+        filters = [f"lowestprice_double>={lo}", f"lowestprice_double<={hi}"]
+        items, hits = self._query(
+            ctx, {"query": "", "hitsPerPage": MAX_HITS, "page": 0, "numericFilters": filters}
+        )
+        if hits > MAX_HITS:
+            halves = split_price_band(lo, hi)
+            if halves:
+                return CatalogPage((), False, split=[f"{a}-{b}" for a, b in halves])
+            # Un solo precio con más de 1.000 productos: se leen los que llegan.
+            event(log, "alkosto_band_truncated", source=CODE, count=hits)
+        return CatalogPage(_observations(items), False)
+
+    def fetch_changed(self, ctx: SourceContext, since: datetime, page: int) -> CatalogPage:
+        return CatalogPage((), False)  # Algolia no lista cambios: capa caliente por id
+
+    def fetch_catalog_items(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> list[CatalogObservation]:
+        return list(_observations(self._objects(ctx, external_ids).values()))
+
+    def fetch_card_facts(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> dict[str, CardFacts]:
+        found = self._objects(ctx, external_ids)
+        return {k: CardFacts(i.title, i.url, i.image_url) for k, i in found.items()}
+
+
+def _parse_partition(partition: str) -> tuple[int, int]:
+    m = _PARTITION.fullmatch(partition)
+    if m is None or int(m.group(1)) > int(m.group(2)):
+        raise ParseError("bad_partition")
+    return int(m.group(1)), int(m.group(2))
+
+
+def _observations(items: Iterable[AlkostoItem]) -> tuple[CatalogObservation, ...]:
+    """Solo lo que está en stock (y por eso tiene precio)."""
+    return tuple(
+        CatalogObservation(i.external_id, i.price, i.category_path, i.ean, SellerClass.FIRST_PARTY)
+        for i in items
+        if i.in_stock and i.price is not None
+    )
 
 
 register(AlkostoSource())

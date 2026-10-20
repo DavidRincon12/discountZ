@@ -10,7 +10,6 @@ Mini-spikes del 2026-10-13 (desde la sesión de desarrollo):
 from __future__ import annotations
 
 import json
-import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -20,7 +19,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from discountz.domain.catalog import CatalogObservation
+from discountz.domain.catalog import CatalogObservation, split_price_band
 from discountz.domain.errors import NotFound, ParseError, SourceError, Unavailable
 from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money, to_minor
@@ -556,11 +555,7 @@ def _parse_partition(partition: str) -> tuple[str, tuple[int, int] | None]:
 
 def _split_band(band: tuple[int, int]) -> list[str]:
     """Parte la banda en el punto medio geométrico; una banda de un solo precio no se parte."""
-    lo, hi = band
-    if lo >= hi:
-        return []
-    mid = min(max(math.isqrt(max(lo, 1) * hi), lo), hi - 1)
-    return [f"P:[{lo} TO {mid}]", f"P:[{mid + 1} TO {hi}]"]
+    return [f"P:[{lo} TO {hi}]" for lo, hi in split_price_band(*band)]
 
 
 def _sku_params(ids: Sequence[str]) -> list[tuple[str, str]]:

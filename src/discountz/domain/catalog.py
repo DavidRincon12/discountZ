@@ -6,6 +6,7 @@ existe en este modelo (en el marketplace llega inflado: spec §0.3).
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -131,6 +132,18 @@ def _cooling(
         and now - state.last_alert_at < window
         and p * 10_000 > state.last_alert_minor * (10_000 - glob.improve_bp)
     )
+
+
+def split_price_band(lo: int, hi: int) -> list[tuple[int, int]]:
+    """Parte la franja `[lo, hi]` en el punto medio geométrico; un solo precio no se parte.
+
+    Los precios se agolpan en los valores bajos: el punto medio geométrico reparte los productos
+    mejor que el aritmético (VTEX y Alkosto parten así las franjas que pasan su límite).
+    """
+    if lo >= hi:
+        return []
+    mid = min(max(math.isqrt(max(lo, 1) * hi), lo), hi - 1)
+    return [(lo, mid), (mid + 1, hi)]
 
 
 def median_low(values: Sequence[int]) -> int:

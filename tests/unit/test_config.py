@@ -176,7 +176,18 @@ def test_check_config_fails_with_exit_2(
 
 def test_crawl_budgets_match_spec() -> None:
     c = load_params(PARAMS_PATH).crawl
-    assert set(c) == {"exito", "carulla", "olimpica", "panamericana", "bestbuy_us", "ebay_us"}
+    assert set(c) == {
+        "exito",
+        "carulla",
+        "olimpica",
+        "panamericana",
+        "bestbuy_us",
+        "ebay_us",
+        "alkosto",
+    }
+    alkosto = c["alkosto"]
+    assert (alkosto.min_pause_s, alkosto.jitter_s) == (2, 1)
+    assert (alkosto.max_per_run, alkosto.max_per_24h, alkosto.hot_share_bp) == (60, 1000, 2500)
     assert (c["exito"].min_pause_s, c["exito"].jitter_s, c["exito"].max_per_24h) == (1, 1, 24_000)
     assert (c["carulla"].min_pause_s, c["carulla"].max_per_24h) == (1, 12_000)
     assert (c["olimpica"].min_pause_s, c["olimpica"].max_per_24h) == (2, 6_000)
