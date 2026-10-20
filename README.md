@@ -1,6 +1,6 @@
 # discountZ
 
-Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las cuatro tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
+Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana, Alkosto) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las cinco tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
 
 Corre en GitHub Actions con una base de datos Supabase Postgres gratuita: costo operativo $0.
 
@@ -143,6 +143,13 @@ Opcional: un canal de Telegram de solo lectura que recibe una copia de cada ofer
 4. **Secreto.** En *Settings → Secrets and variables → Actions* crea `TELEGRAM_CHANNEL_ID` con ese número. Desde el ciclo siguiente cada oferta llega también al canal.
 
 Al canal solo van las ofertas (no los avisos del sistema ni las respuestas a comandos) y sin los botones «Seguir» y «Silenciar», que solo funcionan en el grupo. Si el bot pierde el permiso de publicar, el grupo sigue recibiendo todo y el log del ciclo dice `channel_off`. Para apagar la copia, borra el secreto.
+
+### 13. Alkosto
+
+Alkosto se lee por el índice de Algolia que usa su propia web para buscar, con la clave pública de solo búsqueda que publica su portada: no hay secretos nuevos. Sus términos («Usos NO permitidos») prohíben los programas que monitorean el sitio; se sumó igual por decisión tuya (ADR 0009). Si Alkosto bloquea o reclama, se apaga con `/fuente off alkosto`.
+
+1. **Migración `0007`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala.
+2. Nada más: el job `crawl` ya trae `alkosto` en su matriz y lee el catálogo entero (~14 mil productos, ~20 peticiones) en cada corrida horaria. Como en las demás tiendas, las tarjetas llegan cuando un producto lleva 24 h con precio estable.
 
 ### Si algo falla
 
