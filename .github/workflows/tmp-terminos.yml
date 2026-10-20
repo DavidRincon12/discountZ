@@ -1,4 +1,4 @@
-# Temporal: lee términos y robots.txt de tiendas candidatas (la red de la sesión no llega). Se borra al terminar.
+# Temporal: mide el catálogo VTEX de tiendas candidatas (la red de la sesión no llega). Se borra al terminar.
 name: tmp-terminos
 on:
   push:
@@ -7,42 +7,43 @@ on:
 permissions:
   contents: read
 jobs:
-  leer:
+  medir:
     runs-on: ubuntu-latest
     steps:
-      - name: Leer páginas
+      - name: Medir catálogos
         shell: python
         run: |
-          import re, urllib.request, html
-          UA = {"User-Agent": "Mozilla/5.0 (discountZ revision de terminos)"}
-          KW = re.compile(r"robot|spider|araña|scrap|automatizad|extrac|monitore|programa|software|minería|data mining|crawl|copiar|reproduc", re.I)
+          import json, time, urllib.request
+          UA = {"User-Agent": "Mozilla/5.0 (discountZ medicion)", "Accept": "application/json"}
           def get(u):
+              t = time.monotonic()
               try:
-                  with urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=30) as r:
-                      return r.status, r.read().decode("utf-8", "replace")
+                  with urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=60) as r:
+                      b = r.read()
+                      return r.status, dict(r.headers), b, time.monotonic() - t
               except Exception as e:
-                  return getattr(e, "code", "ERR"), ""
-          domains = ["www.tiendasjumbo.co", "www.jumbocolombia.com", "www.tiendasmetro.co", "www.drogueriascolsubsidio.com", "www.colsubsidio.com", "www.decathlon.com.co", "www.pepeganga.com"]
-          for d in domains:
-              s, b = get(f"https://{d}/robots.txt")
-              print(f"\n===== ROBOTS {d} status={s}\n{b[:3000]}")
-              s, b = get(f"https://{d}/")
-              print(f"===== HOME {d} status={s} vtex_marks={len(re.findall('vtex', b, re.I))} prestashop={len(re.findall('prestashop', b, re.I))}")
-          pages = [
-              "https://www.jumbocolombia.com/institucional/terminos-y-condiciones",
-              "https://www.tiendasjumbo.co/institucional/terminos-y-condiciones",
-              "https://www.tiendasmetro.co/institucional/terminos-y-condiciones",
-              "https://www.tiendasmetro.co/terminos-y-condiciones",
-              "https://www.drogueriascolsubsidio.com/terminos-y-condiciones-pagina-web",
-              "https://www.decathlon.com.co/content/94-consulta-terminos-condiciones",
-              "https://consejosdeportivos.decathlon.com.co/condiciones-generales-de-uso-1",
-              "https://www.pepeganga.com/terminos-y-condiciones",
-          ]
-          for u in pages:
-              s, b = get(u)
-              t = html.unescape(re.sub(r"<[^>]+>", "\n", re.sub(r"(?s)<(script|style)[^>]*>.*?</\1>", " ", b)))
-              paras = [p.strip() for p in re.split(r"\n\s*\n|\n", t) if len(p.strip()) > 40]
-              hits = [p for p in paras if KW.search(p)]
-              print(f"\n===== TERMS {u} status={s} parrafos={len(paras)} coincidencias={len(hits)}")
-              for p in hits[:25]:
-                  print("-", p[:600])
+                  return getattr(e, "code", "ERR"), {}, b"", time.monotonic() - t
+          for host in ["www.jumbocolombia.com", "www.pepeganga.com"]:
+              api = f"https://{host}/api/catalog_system/pub"
+              s, h, b, dt = get(f"{api}/category/tree/1")
+              print(f"\n===== {host} tree status={s} {dt:.1f}s")
+              cats = json.loads(b) if s == 200 else []
+              print("raices:", len(cats), [c["name"] for c in cats][:30])
+              for q, name in [("", "todo"), ("&fq=isAvailablePerSalesChannel_1:1", "con_stock")]:
+                  s, h, b, dt = get(f"{api}/products/search?_from=0&_to=49{q}")
+                  res = {k.lower(): v for k, v in h.items()}.get("resources")
+                  print(f"{name}: status={s} resources={res} bytes={len(b)} {dt:.1f}s")
+                  time.sleep(2)
+              if s == 200 and b:
+                  d = json.loads(b)
+                  conl = sum(1 for p in d if p["items"] and p["items"][0]["sellers"] and p["items"][0]["sellers"][0]["commertialOffer"]["ListPrice"] > p["items"][0]["sellers"][0]["commertialOffer"]["Price"])
+                  sellers = {s2["sellerName"] for p in d for it in p["items"] for s2 in it["sellers"]}
+                  print("muestra:", len(d), "con ListPrice>Price:", conl, "vendedores:", sorted(sellers)[:10])
+                  for p in d[:3]:
+                      o = p["items"][0]["sellers"][0]["commertialOffer"]
+                      print(" -", p["productName"][:50], o["Price"], o["ListPrice"], o.get("AvailableQuantity"))
+              for c in cats[:40]:
+                  s, h, b, dt = get(f"{api}/products/search?fq=C:/{c['id']}/&fq=isAvailablePerSalesChannel_1:1&_from=0&_to=0")
+                  res = {k.lower(): v for k, v in h.items()}.get("resources")
+                  print(f"  cat {c['name'][:30]}: status={s} resources={res}")
+                  time.sleep(1)
