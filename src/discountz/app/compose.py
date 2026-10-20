@@ -17,6 +17,7 @@ from discountz.app.render import (
     RenderedMessage,
     local,
     render_alert,
+    render_storm,
     render_summary,
     reply_markup,
 )
@@ -91,14 +92,23 @@ def compose_alerts(
 ) -> int:
     """Encola las alertas pendientes; devuelve cuántos mensajes creó."""
     rows = {a.id: a for a in db.unqueued_alerts(conn)}
-    pending = [PendingAlert(a.id, a.listing_id, a.kind, a.category) for a in rows.values()]
+    pending = [
+        PendingAlert(a.id, a.listing_id, a.kind, a.category, a.source, Flag.STORM in a.flags)
+        for a in rows.values()
+    ]
     quiet = is_quiet(now, params.quiet_start, params.quiet_end)
     created = 0
     for group in group_summaries(pending):
         ids = [p.alert_id for p in group]
         items = [views.get(i) or reduced_view(rows[i]) for i in ids]
-        msg: RenderedMessage = render_alert(items[0]) if len(items) == 1 else render_summary(items)
         kind = group[0].kind
+        msg: RenderedMessage
+        if len(items) == 1:
+            msg = render_alert(items[0])
+        elif kind is AlertKind.PRICE_ERROR:
+            msg = render_storm(items)
+        else:
+            msg = render_summary(items)
         silent = msg.silent or (quiet and kind is not AlertKind.PRICE_ERROR)
         key = f"alert:{ids[0]}" if len(ids) == 1 else f"digest:{ids[0]}:{len(ids)}"
         with conn.transaction():

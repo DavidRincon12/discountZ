@@ -153,3 +153,19 @@ def test_summary_groups_have_at_most_ten_items() -> None:
     items = [pending(i, AlertKind.GOOD_DEAL, "otros") for i in range(23)]
     sizes = sorted(len(g) for g in group_summaries(items))
     assert sizes == [3, 10, 10]
+
+
+def test_storm_price_errors_of_one_store_go_in_one_message() -> None:
+    def err(i: int, source: str, storm: bool = True) -> PendingAlert:
+        return PendingAlert(i, 100 + i, AlertKind.PRICE_ERROR, "hogar", source, storm)
+
+    groups = [
+        [p.alert_id for p in g]
+        for g in group_summaries([err(1, "olimpica"), err(2, "exito"), err(3, "olimpica")])
+    ]
+    assert [1, 3] in groups
+    assert [2] in groups  # una sola de la tienda: va sola
+    assert [
+        [p.alert_id for p in g]
+        for g in group_summaries([err(4, "olimpica", False), err(5, "olimpica", False)])
+    ] == [[4], [5]]

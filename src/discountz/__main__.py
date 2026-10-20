@@ -20,7 +20,8 @@ import psycopg
 from discountz.app.crawl import CrawlDeps, crawl_max_items, run_crawl_reconnecting
 from discountz.app.cycle import CycleDeps, run_cycle
 from discountz.config import Settings, load_canaries, load_params, load_settings, load_topics
-from discountz.domain.errors import ConfigError, LeaseBusy
+from discountz.domain.commands import BOT_MENU
+from discountz.domain.errors import ConfigError, LeaseBusy, TelegramError
 from discountz.infra.credentials import EnvCredentials
 from discountz.infra.db import connect
 from discountz.infra.healthchecks import Healthchecks
@@ -65,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     crawl.add_argument("--source", required=True, help="Código de la tienda (p. ej. exito).")
     crawl.add_argument("--minutes", type=int, default=45, help="Minutos máximos de la corrida.")
     sub.add_parser("check-config", help="Valida la configuración y las variables de entorno.")
+    sub.add_parser("setup-bot", help="Quita el webhook y pone el menú de comandos del bot.")
     rec = sub.add_parser("record-fixture", help="Graba una respuesta real como fixture (local).")
     rec.add_argument("source", help="Código de la fuente (p. ej. exito).")
     rec.add_argument("name", help="Nombre de la fixture (p. ej. busqueda_ssd).")
@@ -154,6 +156,26 @@ def _connect_with_retry(settings: Settings, rnd: random.Random) -> psycopg.Conne
                 raise
             time.sleep(rnd.uniform(0, 2 * 2**attempt))
     raise AssertionError("inalcanzable")
+
+
+def _cmd_setup_bot() -> int:
+    try:
+        settings = load_settings()
+    except ConfigError as exc:
+        print(f"setup-bot: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    api = HttpxClient("telegram")
+    try:
+        telegram = TelegramClient(settings.telegram_bot_token, api)
+        telegram.delete_webhook()
+        telegram.set_my_commands(settings.telegram_chat_id, BOT_MENU)
+    except TelegramError as exc:
+        print(f"setup-bot: Telegram respondió {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    finally:
+        api.close()
+    print(f"setup-bot: menú con {len(BOT_MENU)} comandos")
+    return EXIT_OK
 
 
 def _cmd_run() -> int:
@@ -301,6 +323,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_crawl(args)
     if args.command == "check-config":
         return _cmd_check_config()
+    if args.command == "setup-bot":
+        return _cmd_setup_bot()
     if args.command == "record-fixture":
         return _cmd_record_fixture(args)
     print(f"{args.command}: no implementado", file=sys.stderr)

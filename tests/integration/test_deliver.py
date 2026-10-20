@@ -305,3 +305,29 @@ def test_channel_mirror_uses_plain_text_when_html_was_rejected(db: psycopg.Conne
     mirror = http.calls[-1][2]
     assert mirror is not None and mirror["chat_id"] == CHANNEL
     assert mirror["text"] == "alert:1" and "parse_mode" not in mirror
+
+
+def test_compose_sends_storm_price_errors_of_a_store_in_one_message(
+    db: psycopg.Connection,
+) -> None:
+    for ext in ("1", "2"):
+        db.execute(
+            """INSERT INTO discountz.listing (source, external_id, canonical_url, title, category,
+                   first_seen_at, last_seen_at, last_in_stock, last_seller_class)
+               VALUES ('olimpica', %s, 'https://www.olimpica.com/x/p', 't', 'hogar', now(),
+                   now(), true, 'f')""",
+            (ext,),
+        )
+        db.execute(
+            """INSERT INTO discountz.alert (listing_id, kind, maturity, price_minor, observed_at,
+                   flags)
+               SELECT id, 'price_error', 'warm', 189900, now(), '{storm}'
+                 FROM discountz.listing WHERE external_id = %s""",
+            (ext,),
+        )
+    assert compose_alerts(db, {}, T, load_params()) == 1
+    row = db.execute("SELECT purpose, body_html, silent FROM discountz.outbox").fetchone()
+    assert row is not None
+    kind, text, silent = row
+    assert (kind, silent) == ("digest", False)
+    assert "2 errores de precio a la vez" in text

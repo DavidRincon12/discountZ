@@ -290,3 +290,27 @@ def test_auto_watches_leave_half_the_daily_budget_for_the_user(code: str) -> Non
     b = load_params(PARAMS_PATH).budgets[code]
     reads_per_day = b.max_auto_watches * (timedelta(days=1) // b.watch_interval) // b.max_batch
     assert reads_per_day <= b.max_per_24h // 2
+
+
+def test_setup_bot_sets_the_menu_for_the_group(env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, object]] = []
+
+    class FakeTelegram:
+        def __init__(self, token: object, http: object) -> None:
+            pass
+
+        def delete_webhook(self) -> None:
+            calls.append(("deleteWebhook", None))
+
+        def set_my_commands(self, chat_id: int, commands: object) -> None:
+            calls.append(("setMyCommands", chat_id))
+
+    monkeypatch.setattr("discountz.__main__.TelegramClient", FakeTelegram)
+    assert main(["setup-bot"]) == 0
+    assert calls == [("deleteWebhook", None), ("setMyCommands", 42)]
+
+
+def test_setup_bot_without_settings_exits_2(monkeypatch: pytest.MonkeyPatch) -> None:
+    for k in ENV:
+        monkeypatch.delenv(k, raising=False)
+    assert main(["setup-bot"]) == 2

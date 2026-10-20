@@ -24,6 +24,7 @@ from discountz.app.render import (
     render_daily,
     render_health,
     render_list,
+    render_storm,
     render_summary,
     reply_markup,
     visible_length,
@@ -659,3 +660,13 @@ def test_health_columns_stay_aligned_with_long_codes() -> None:
     table = [line for line in lines if line.startswith(("Fuente", "exito", "slick", "tg_"))]
     assert len(table) == 4
     assert {line.find(line.split()[1]) for line in table} == {18}
+
+
+def test_storm_message_lists_the_errors_of_one_store_and_is_loud() -> None:
+    second = dataclasses.replace(PRICE_ERROR, title="Nevera & congelador", listing_id=99)
+    msg = render_storm([PRICE_ERROR, second])
+    assert "2 errores de precio a la vez" in msg.html
+    assert "verifica" in msg.html
+    assert "Nevera &amp; congelador" in msg.html
+    assert not msg.silent
+    assert visible_length(msg.html) <= MAX_VISIBLE

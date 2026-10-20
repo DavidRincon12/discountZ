@@ -1,0 +1,28 @@
+name: setup-bot
+# Manual: pone el menú de comandos del bot en el grupo (se corre una vez y al cambiar los comandos).
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  setup-bot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          version-file: pyproject.toml
+          python-version: '3.13'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --no-dev
+      - name: Menú del bot
+        run: uv run --no-sync python -m discountz setup-bot
+        env:
+          DISCOUNTZ_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DISCOUNTZ_TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          DISCOUNTZ_TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCOUNTZ_TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}

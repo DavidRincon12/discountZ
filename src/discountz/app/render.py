@@ -398,6 +398,28 @@ def render_summary(items: Sequence[AlertView]) -> RenderedMessage:
     return RenderedMessage("\n".join(lines), [], silent=True)
 
 
+def render_storm(items: Sequence[AlertView]) -> RenderedMessage:
+    """Errores de precio confirmados de una tienda en una tormenta (G12): un mensaje, con sonido."""
+    if not items:
+        raise ValueError("tormenta vacía")
+    store = esc(source_name(items[0].source))
+    lines = [
+        f"<b>{len(items)} errores de precio a la vez</b> · {store}",
+        "<i>Varios errores juntos en la misma tienda: verifica antes de comprar.</i>",
+    ]
+    reserve = len("\n… y 999 más")
+    for i, a in enumerate(items, start=1):
+        link = f'<a href="{esc(a.url)}">{esc(truncate(a.title, MAX_TITLE))}</a>'
+        line = f"{i}. {link} · <b>{format_money(a.price)}</b>"
+        if a.before is not None and a.before != a.price:
+            line += f" antes <s>{format_money(a.before)}</s>"
+        if visible_length("\n".join([*lines, line])) + reserve > MAX_VISIBLE:
+            lines.append(f"… y {len(items) - i + 1} más")
+            break
+        lines.append(line)
+    return RenderedMessage("\n".join(lines), [])
+
+
 def render_list(
     watches: Sequence[WatchItem], searches: Sequence[SearchItem]
 ) -> list[RenderedMessage]:

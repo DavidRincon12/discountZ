@@ -1,8 +1,10 @@
+import re
 from datetime import date
 
 import pytest
 
 from discountz.domain.commands import (
+    BOT_MENU,
     Category,
     CommandRejected,
     Drop,
@@ -104,3 +106,16 @@ def test_bot_suffix_is_ignored() -> None:
 @pytest.mark.parametrize("text", ["/peso 4200", "/hola", "hola", "", "/seguir@"])
 def test_unknown_or_removed_commands_are_rejected(text: str) -> None:
     assert isinstance(parse_command(text), CommandRejected)
+
+
+def test_bot_menu_lists_every_command_but_temas() -> None:
+    names = [name for name, _ in BOT_MENU]
+    assert len(names) == len(set(names))
+    for name, description in BOT_MENU:
+        assert re.fullmatch(r"[a-z0-9_]{1,32}", name)
+        assert 3 <= len(description) <= 256
+        parsed = parse_command(f"/{name}")
+        assert not (isinstance(parsed, CommandRejected) and "desconocido" in parsed.reason)
+    # /temas recrearía los temas que David apagó: no va en el menú.
+    assert "temas" not in names
+    assert {"seguir", "buscar", "lista", "estado", "ayuda", "fuente"} <= set(names)
