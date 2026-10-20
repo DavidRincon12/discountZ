@@ -7,10 +7,10 @@
 - eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18: `/seguir`, `/buscar` y job `crawl` con `MODEL_LOW` (mediana del mismo `epid`).
 - Alkosto (`alkosto`, ADR 0009) en producción desde el 2026-10-20 (PR #21, esquema 7).
 - Jumbo y Pepe Ganga (VTEX, migración 0008) en producción desde el 2026-10-20 (PR #22, esquema 8): `/seguir`, `/buscar`, canario y `crawl`.
-- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 851 unitarias y 182 de integración en verde el 2026-10-20.
+- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 860 unitarias y 187 de integración en verde el 2026-10-20.
 
 ## Último cambio
-- Rama `claude/project-thread-rlzaur`: el rastreo reconecta la BD si se cae a mitad de corrida (`run_crawl_reconnecting`: hasta 2 veces, pausa de 30 s, sigue desde el cursor con el mismo lease). Antes, el PR #22 (Jumbo, Pepe Ganga y ADR 0010).
+- Rama `claude/project-thread-rlzaur` (esquema 9: al fusionar, `migrate` con `to = head`): mínimo del catálogo con ventana de 90 d (`min_seen_at`), borrado de lo no visto según la última corrida de su tienda y por lotes, seguimientos automáticos dentro de la mitad del tope, `crawl` con `skipped_schema`, exit 4 para rastreo bloqueado, un `count(*)` por corrida en eBay, `/estado` alineado, «Jardín» y «Especiales» solo de Jumbo y log de Alkosto agrupado. Antes, el PR #23 (reconexión de la BD en el rastreo).
 
 ## Siguiente paso
 - Mirar la primera vuelta de Jumbo y Pepe Ganga en Actions (Jumbo ~910 peticiones por vuelta completa, Pepe Ganga ~260) y el peso de la BD.
@@ -33,8 +33,8 @@
 - DealNews da 406 desde Actions desde el 18-oct (breaker abierto; el código del bloqueo dice `vtex_406`, nombre engañoso). Vuelve a destacar ofertas viejas y vigentes (ADR 0007).
 - Ofertas con el tema equivocado: agregar el término a `channel_rules` y la oferta a `tests/fixtures/topics/ofertas-etiquetadas.jsonl` (cada término nombra un solo tema; se mide con `tests/unit/test_topic_precision.py`). Las fixtures de `t.me` llevan los usuarios cambiados por «Usuario».
 - Fechas del calendario de eventos 2026-2027 estimadas: David debe confirmarlas (Hot Sale y Cyber Lunes de Colombia).
-- Falta: `setup-bot`, `pg_terminate_backend` tras 3 `skipped_locked`, descarte G10 contra `R_listing`, mensaje agrupado de tormenta y `config/supabase-ca.crt` para `verify-full`. En `/estado`, los códigos de más de 14 letras descuadran la columna.
+- Falta: `setup-bot` (el menú de comandos), `pg_terminate_backend` tras 3 `skipped_locked` (antes separar el `application_name` del ciclo y del rastreo, que hoy comparten `discountz-<run_id>`), descarte G10 contra `R_listing` en `/buscar` (hoy el lote constante no alerta pero entra al histórico), mensaje agrupado de tormenta y `config/supabase-ca.crt` para `verify-full` (lo baja David del panel de Supabase).
 - VTEX: el WAF rechaza `+` como espacio (`infra/http` usa `%20`); una página de 50 productos pesa hasta ~43 MB (se pide por mitades sobre 24 MB); `products/search` con varios `skuId` devuelve 10 sin `_from`/`_to`.
-- Pendientes menores del rastreo: reloj fijo por corrida, `min_seen` sin ventana de 90 d, tope diario por día UTC, orden del barrido VTEX, C07 sin unir tiendas, `crawl` sin verificar `SCHEMA_VERSION`, código 3 compartido, borrado del catálogo tras 30 d sin rastreo.
-- eBay, pendientes menores: `count(*)` del tope por página, parámetros leídos del TOML al importar el adaptador, 100 auto-seguimientos cada 2 h no caben en 1.000 al día. Vigilar la cuota (`Unavailable quota`) y el peso de la BD; si satura: `/fuente off ebay_us`.
+- Pendientes menores del rastreo: reloj fijo por corrida, tope diario por día UTC, orden del barrido VTEX (sin `O=`: sin medir si salta productos), C07 sin unir tiendas. Códigos de salida: 3 BD, 4 rastreo bloqueado.
+- eBay, pendientes menores: parámetros leídos del TOML al importar el adaptador. Los seguimientos automáticos usan como mucho la mitad del tope diario (`test_auto_watches_leave_half_the_daily_budget_for_the_user`). Vigilar la cuota (`Unavailable quota`) y el peso de la BD; si satura: `/fuente off ebay_us`.
 - ruff 0.17 formatea Markdown: `docs/` está excluido. La imagen `postgres:17` del CI no tiene digest fijado.
