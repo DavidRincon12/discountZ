@@ -5,14 +5,20 @@ from __future__ import annotations
 import logging
 import random
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
 
-from discountz.app.crawl import CrawlDeps, CrawlResult, run_crawl
+from discountz.app.crawl import (
+    DB_RECONNECTS,
+    CrawlDeps,
+    CrawlResult,
+    run_crawl,
+    run_crawl_reconnecting,
+)
 from discountz.config import load_params, load_topics
 from discountz.domain.catalog import CatalogObservation, CatalogState
 from discountz.domain.errors import ParseError, Unavailable
@@ -843,3 +849,62 @@ def test_quota_stops_without_tripping_breaker(db: psycopg.Connection) -> None:
     assert run_crawl(d, T, minutes=60).status == "partial"
     b = repo.load_breakers(db)[EBAY]
     assert (b.state, b.consecutive_unavailable) == ("closed", 0)
+
+
+def _drop_on_fetch(
+    src: FakeCatalog, admin: psycopg.Connection, pages: set[int], *, once: bool = True
+) -> list[psycopg.Connection]:
+    """Corta desde el servidor la conexión del rastreo al pedir esas páginas (caída del pooler)."""
+    victims: list[psycopg.Connection] = []
+    fetch = src.fetch_catalog_page
+
+    def dropping(ctx: SourceContext, partition: str, page: int) -> CatalogPage:
+        result = fetch(ctx, partition, page)
+        if page in pages:
+            admin.execute("SELECT pg_terminate_backend(%s)", (victims[-1].info.backend_pid,))
+            if once:
+                pages.discard(page)
+        return result
+
+    src.fetch_catalog_page = dropping  # type: ignore[method-assign]
+    return victims
+
+
+def test_crawl_reconnects_when_the_db_drops_mid_run(
+    db: psycopg.Connection,
+    connect_extra: Callable[[], psycopg.Connection],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """18-oct 20:42: una caída del pooler cortaba la corrida; ahora reconecta y sigue."""
+    src = FakeCatalog({"C:/1/": [page_of(2, 0), page_of(2, 2), page_of(2, 4), page_of(2, 6)]})
+    victims = _drop_on_fetch(src, db, {2})
+
+    def reconnect() -> psycopg.Connection:
+        victims.append(connect_extra())
+        return victims[-1]
+
+    d, transport = deps(reconnect(), src, Clock(step=20))
+    with caplog.at_level(logging.INFO, logger="discountz"):
+        result = run_crawl_reconnecting(d, T, 10, reconnect)
+    assert result.status == "ok"
+    assert count(db, "catalog_item") == 8
+    assert transport.kinds() == ["partitions", "page", "page", "page", "page", "page"]
+    assert "db_reconnect source=exito count=1" in caplog.text
+    assert count(db, "crawl_lease") == 0
+    assert repo.get_cursor(db, "exito").partitions == ()
+
+
+def test_crawl_gives_up_after_the_reconnects(
+    db: psycopg.Connection, connect_extra: Callable[[], psycopg.Connection]
+) -> None:
+    src = FakeCatalog({"C:/1/": [page_of(2, 0), page_of(2, 2)]})
+    victims = _drop_on_fetch(src, db, {0}, once=False)
+
+    def reconnect() -> psycopg.Connection:
+        victims.append(connect_extra())
+        return victims[-1]
+
+    d, _ = deps(reconnect(), src, Clock(step=20))
+    with pytest.raises(psycopg.OperationalError):
+        run_crawl_reconnecting(d, T, 60, reconnect)
+    assert len(victims) == DB_RECONNECTS + 1
