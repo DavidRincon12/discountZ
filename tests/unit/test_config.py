@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, time
+from datetime import UTC, time, timedelta
 from pathlib import Path
 
 import pytest
@@ -271,5 +271,13 @@ def test_channel_term_in_two_topics_is_rejected(tmp_path: Path) -> None:
 
 def test_auto_watch_caps_stay_with_their_source() -> None:
     b = load_params(PARAMS_PATH).budgets
-    assert b["ebay_us"].max_auto_watches == 100
+    assert b["ebay_us"].max_auto_watches == 40
     assert b["alkosto"].max_auto_watches == 0  # sin leads que lleven a Alkosto
+
+
+@pytest.mark.parametrize("code", ["amazon_us", "newegg", "ebay_us"])
+def test_auto_watches_leave_half_the_daily_budget_for_the_user(code: str) -> None:
+    """Los automáticos compiten con /seguir y /buscar: con más lecturas que tope, esos se atrasan."""
+    b = load_params(PARAMS_PATH).budgets[code]
+    reads_per_day = b.max_auto_watches * (timedelta(days=1) // b.watch_interval) // b.max_batch
+    assert reads_per_day <= b.max_per_24h // 2
