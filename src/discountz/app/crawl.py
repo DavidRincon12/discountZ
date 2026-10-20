@@ -78,7 +78,7 @@ ERRORS_TOPIC = "errores"
 # Con la BD en ≥ 450 MB el mantenimiento pausa el descubrimiento: también el rastreo de las
 # tiendas más grandes (spec del rastreo §7.2).
 PAUSED_AT_450 = frozenset({"exito", "carulla", "ebay_us", "alkosto", "jumbo"})
-CrawlStatus = Literal["ok", "partial", "blocked", "skipped_locked", "disabled"]
+CrawlStatus = Literal["ok", "partial", "blocked", "skipped_locked", "skipped_schema", "disabled"]
 
 
 @dataclass(frozen=True)
@@ -665,6 +665,8 @@ def run_crawl_reconnecting(
 
 def _run_crawl(deps: CrawlDeps, now: datetime, end: float) -> CrawlResult:
     code = deps.source.descriptor.code
+    if db.schema_version(deps.conn) != db.SCHEMA_VERSION:  # el ciclo ya avisa de la migración
+        return _skipped(code, "skipped_schema")
     breaker = db.load_breakers(deps.conn).get(code)
     if breaker is None or (code in PAUSED_AT_450 and db.bot_state(deps.conn).discovery_paused):
         return _skipped(code, "disabled")

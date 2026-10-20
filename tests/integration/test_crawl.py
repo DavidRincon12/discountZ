@@ -908,3 +908,14 @@ def test_crawl_gives_up_after_the_reconnects(
     with pytest.raises(psycopg.OperationalError):
         run_crawl_reconnecting(d, T, 60, reconnect)
     assert len(victims) == DB_RECONNECTS + 1
+
+
+def test_crawl_skips_when_the_schema_does_not_match(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Con una migración pendiente el rastreo no escribe sobre un esquema que no conoce."""
+    monkeypatch.setattr(repo, "SCHEMA_VERSION", repo.SCHEMA_VERSION + 1)
+    d, transport = deps(db, FakeCatalog({"C:/1/": [page_of(2)]}), Clock())
+    assert run_crawl(d, T, minutes=60).status == "skipped_schema"
+    assert transport.urls == []
+    assert count(db, "crawl_lease") == 0
