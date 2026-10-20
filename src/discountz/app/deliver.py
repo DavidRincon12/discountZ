@@ -62,6 +62,8 @@ TOPICS_NOTICE = (
 CHANNEL_PURPOSES = frozenset({"alert", "digest"})
 
 MAX_PHOTO_REDIRECTS = 2
+PHOTO_ATTEMPTS = 3  # el CDN de Telegram (telesco.pe) da 502 pasajeros
+PHOTO_RETRY_S = 1.0
 REDIRECTS = frozenset({301, 302, 303, 307, 308})
 PhotoFetcher = Callable[[str, str], bytes | None]  # (fuente, URL de la foto) → bytes o None
 
@@ -76,11 +78,17 @@ def plain_text(body: str) -> str:
     return html.unescape(_TAG_RE.sub("", body))
 
 
-def make_photo_fetcher(http: HttpClient, sources: Mapping[str, Source]) -> PhotoFetcher:
+def make_photo_fetcher(
+    http: HttpClient,
+    sources: Mapping[str, Source],
+    *,
+    sleep: Callable[[float], None] = lambda _: None,
+) -> PhotoFetcher:
     """Descarga la foto solo por https y desde los `image_hosts` de la fuente; valida la imagen.
 
     Sigue hasta `MAX_PHOTO_REDIRECTS` redirecciones, cada una a un host permitido (el CDN de
-    VTEX puede mandar de `vteximg.com.br` a `vtexassets.com`). Sin foto, registra el porqué.
+    VTEX puede mandar de `vteximg.com.br` a `vtexassets.com`). Un 5xx o un error de red se
+    reintenta hasta `PHOTO_ATTEMPTS` veces con pausa creciente. Sin foto, registra el porqué.
     """
 
     def allowed(src: Source, url: str) -> bool:
@@ -96,29 +104,42 @@ def make_photo_fetcher(http: HttpClient, sources: Mapping[str, Source]) -> Photo
         src = sources.get(source)
         if src is None or not allowed(src, url):
             return None
+        for attempt in range(1, PHOTO_ATTEMPTS + 1):
+            photo, retry = download(src, source, url, last=attempt == PHOTO_ATTEMPTS)
+            if not retry:
+                return photo
+            sleep(PHOTO_RETRY_S * attempt)
+        return None
+
+    def download(src: Source, source: str, url: str, *, last: bool) -> tuple[bytes | None, bool]:
+        """(foto, reintentar): solo un 5xx o un error de red merecen otro intento."""
         for _ in range(MAX_PHOTO_REDIRECTS + 1):
             try:
                 resp = http.request("GET", url)
             except DiscountzError as exc:
+                if not last:
+                    return None, True
                 missing(source, exc.code if isinstance(exc, SourceError) else "network")
-                return None
+                return None, False
             if resp.status not in REDIRECTS:
                 break
             target = {k.lower(): v for k, v in resp.headers.items()}.get("location", "")
             url = urljoin(url, target)
             if not allowed(src, url):
                 missing(source, "redirect", resp.status)
-                return None
+                return None, False
         else:
             missing(source, "redirect_loop")
-            return None
+            return None, False
+        if resp.status >= 500 and not last:
+            return None, True
         if resp.status != 200:
             missing(source, "status", resp.status)
-            return None
+            return None, False
         photo = validate_photo(resp.body)
         if photo is None:
             missing(source, "invalid")
-        return photo
+        return photo, False
 
     return fetch
 

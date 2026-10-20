@@ -8,7 +8,7 @@ import logging
 import pytest
 from PIL import Image
 
-from discountz.app.deliver import make_photo_fetcher
+from discountz.app.deliver import PHOTO_ATTEMPTS, PHOTO_RETRY_S, make_photo_fetcher
 from discountz.infra.http import FakeHttp, HttpResponse
 from discountz.sources.registry import load_all
 
@@ -49,3 +49,26 @@ def test_photo_fetcher_logs_why_photo_is_missing(caplog: pytest.LogCaptureFixtur
         assert make_photo_fetcher(net, load_all())("exito", IMG) is None
     assert "photo_missing source=exito code=status http_status=404" in caplog.text
     assert "vteximg" not in caplog.text  # nunca la URL
+
+
+def test_photo_fetcher_retries_server_errors() -> None:
+    # telesco.pe (fotos de los canales) responde 502 pasajeros: se reintenta con pausa.
+    net = FakeHttp(
+        {IMG: [HttpResponse(502, IMG, {}, b"", 1), HttpResponse(200, IMG, {}, jpeg(), 1)]}
+    )
+    waits: list[float] = []
+    assert make_photo_fetcher(net, load_all(), sleep=waits.append)("exito", IMG) is not None
+    assert len(net.calls) == 2
+    assert waits == [PHOTO_RETRY_S]
+
+
+def test_photo_fetcher_gives_up_after_attempts() -> None:
+    net = FakeHttp({IMG: HttpResponse(503, IMG, {}, b"", 1)})
+    assert make_photo_fetcher(net, load_all(), sleep=lambda _: None)("exito", IMG) is None
+    assert len(net.calls) == PHOTO_ATTEMPTS
+
+
+def test_photo_fetcher_does_not_retry_client_errors() -> None:
+    net = FakeHttp({IMG: HttpResponse(404, IMG, {}, b"", 1)})
+    assert make_photo_fetcher(net, load_all(), sleep=lambda _: None)("exito", IMG) is None
+    assert len(net.calls) == 1
