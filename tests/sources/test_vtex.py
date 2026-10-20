@@ -225,10 +225,25 @@ def test_resolve_slug_with_sku() -> None:
     assert ref == ListingRef("panamericana", "659232")
 
 
-def test_registered_four_stores() -> None:
+def test_registered_six_stores() -> None:
     from discountz.sources.registry import load_all
 
-    assert {"exito", "carulla", "olimpica", "panamericana"} <= set(load_all())
+    assert set(STORES) <= set(load_all())
+    assert set(STORES) == {"exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga"}
+
+
+def test_new_stores_point_to_their_vtex_accounts() -> None:
+    assert (STORES["jumbo"].host, STORES["jumbo"].api_base, STORES["jumbo"].account) == (
+        "www.jumbocolombia.com",
+        "https://www.jumbocolombia.com/api",
+        "jumbocolombiaio",
+    )
+    assert (STORES["pepeganga"].host, STORES["pepeganga"].account) == (
+        "www.pepeganga.com",
+        "pepeganga",
+    )
+    hosts = VtexSource(STORES["jumbo"]).descriptor.image_hosts
+    assert "jumbocolombiaio.vteximg.com.br" in hosts
 
 
 def test_expected_files_exist_for_every_detail() -> None:

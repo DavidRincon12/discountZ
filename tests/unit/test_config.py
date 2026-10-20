@@ -85,6 +85,13 @@ def test_event_times_are_bogota_converted_to_utc() -> None:
     assert bf.starts_at.astimezone(UTC).hour == 5  # 00:00 de Bogotá
 
 
+def test_co_events_include_the_new_vtex_stores() -> None:
+    events = load_params(PARAMS_PATH).events
+    for name in ("Black Days", "Cyber Lunes", "Hot Sale"):
+        event = next(e for e in events if e.name == name)
+        assert {"jumbo", "pepeganga"} <= set(event.sources)
+
+
 def _bad_toml(tmp_path: Path, old: str, new: str) -> Path:
     text = PARAMS_PATH.read_text(encoding="utf-8")
     assert old in text
@@ -151,7 +158,7 @@ def test_missing_setting_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_canaries_cover_vtex_stores() -> None:
     canaries = load_canaries(CANARIES_PATH)
-    assert {"exito", "carulla", "olimpica", "panamericana"} <= set(canaries)
+    assert {"exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga"} <= set(canaries)
     for items in canaries.values():
         assert 1 <= len(items) <= 2
         for c in items:
@@ -184,6 +191,8 @@ def test_crawl_budgets_match_spec() -> None:
         "bestbuy_us",
         "ebay_us",
         "alkosto",
+        "jumbo",
+        "pepeganga",
     }
     alkosto = c["alkosto"]
     assert (alkosto.min_pause_s, alkosto.jitter_s) == (2, 1)
@@ -192,6 +201,8 @@ def test_crawl_budgets_match_spec() -> None:
     assert (c["carulla"].min_pause_s, c["carulla"].max_per_24h) == (1, 12_000)
     assert (c["olimpica"].min_pause_s, c["olimpica"].max_per_24h) == (2, 6_000)
     assert (c["panamericana"].min_pause_s, c["panamericana"].max_per_24h) == (2, 6_000)
+    for code in ("jumbo", "pepeganga"):
+        assert (c[code].min_pause_s, c[code].max_per_run, c[code].max_per_24h) == (2, 250, 6_000)
     assert (c["bestbuy_us"].min_pause_s, c["bestbuy_us"].max_per_24h) == (0.25, 40_000)
     ebay = c.pop("ebay_us") if isinstance(c, dict) else c["ebay_us"]
     assert (ebay.max_per_run, ebay.max_per_24h, ebay.hot_share_bp) == (170, 4000, 3000)

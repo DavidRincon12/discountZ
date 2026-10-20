@@ -210,3 +210,8 @@ def test_model_low_card_draws_label_and_note() -> None:
 
 def test_ebay_has_its_own_color() -> None:
     assert STORE_COLORS["ebay_us"] == "#0064D2"
+
+
+def test_new_vtex_stores_have_their_own_colors() -> None:
+    assert STORE_COLORS["jumbo"] == "#00A650"
+    assert STORE_COLORS["pepeganga"] == "#F97316"

@@ -150,6 +150,13 @@ STORES: dict[str, VtexStore] = {
         "https://www.panamericana.com.co/api",
         "panamericana",
     ),
+    # Jumbo vive en jumbocolombia.com (tiendasjumbo.co ya no responde); un solo canal (sc=1).
+    "jumbo": VtexStore(
+        "jumbo", "www.jumbocolombia.com", "https://www.jumbocolombia.com/api", "jumbocolombiaio"
+    ),
+    "pepeganga": VtexStore(
+        "pepeganga", "www.pepeganga.com", "https://www.pepeganga.com/api", "pepeganga"
+    ),
 }
 
 

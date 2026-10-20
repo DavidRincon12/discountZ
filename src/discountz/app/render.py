@@ -36,6 +36,8 @@ SOURCE_NAMES = {
     "carulla": "Carulla",
     "olimpica": "Olímpica",
     "panamericana": "Panamericana",
+    "jumbo": "Jumbo",
+    "pepeganga": "Pepe Ganga",
     "amazon_us": "Amazon US",
     "newegg": "Newegg",
     "walmart_us": "Walmart US",
