@@ -1,4 +1,4 @@
-# Temporal: graba las fixtures de Jumbo y Pepe Ganga (la red de la sesión no llega). Se borra en el siguiente commit.
+# Temporal: graba las fixtures de Jumbo y Pepe Ganga (la red de la sesión no llega). Imprime el tgz en base64 por partes; se borra después.
 name: tmp-fixtures
 on:
   push:
@@ -37,4 +37,7 @@ jobs:
             sleep 2
           done
           ls -la tests/fixtures/vtex/ | grep -E "jumbo|pepeganga"
-          echo "==TAR=="; tar czf - tests/fixtures/vtex/jumbo* tests/fixtures/vtex/pepeganga* | base64 -w0; echo; echo "==FIN=="
+          tar czf fx.tgz tests/fixtures/vtex/jumbo* tests/fixtures/vtex/pepeganga*
+          echo "tgz bytes: $(wc -c < fx.tgz)"
+          base64 -w 60000 fx.tgz | nl -ba | sed 's/^/==B64== /'
+          echo "==FIN=="
