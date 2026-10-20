@@ -66,6 +66,9 @@ PARSE_STOP = 3  # errores de parseo seguidos que detienen la corrida
 # `retries_exhausted` en sus primeros minutos, 2026-10-18 y 19).
 UNAVAILABLE_TRIES = 3
 UNAVAILABLE_PAUSE_S = 60.0
+# Caída de la BD a mitad de corrida (pooler, 18-oct 20:42 y 19-oct 11:00): reconexiones y pausa.
+DB_RECONNECTS = 2
+DB_RECONNECT_PAUSE_S = 30.0
 # Lo único que una pausa puede arreglar: red, descarga lenta y 5xx o 429 tras los reintentos.
 TRANSIENT_CODES = frozenset({"network", "timeout", "deadline", "retries_exhausted"})
 CONFIRM_TOL_PCT = 1  # la relectura debe quedar a ±1 % del precio visto
@@ -623,6 +626,44 @@ def crawl_max_items(code: str, params: AppParams) -> int | None:
 
 
 def run_crawl(deps: CrawlDeps, now: datetime, minutes: int) -> CrawlResult:
+    return _run_crawl(deps, now, deps.monotonic() + minutes * 60)
+
+
+def run_crawl_reconnecting(
+    deps: CrawlDeps, now: datetime, minutes: int, reconnect: Callable[[], psycopg.Connection]
+) -> CrawlResult:
+    """Corrida que sobrevive a una caída de la BD (el pooler de Supabase corta conexiones).
+
+    Tras la caída espera, abre otra conexión y sigue desde el cursor guardado, con el mismo
+    holder del lease y el mismo límite de tiempo; a la tercera caída la corrida se rinde.
+    Cierra las conexiones que abre; la primera es de quien llama.
+    """
+    end = deps.monotonic() + minutes * 60
+    opened: list[psycopg.Connection] = []
+    try:
+        for attempt in range(1, DB_RECONNECTS + 2):
+            try:
+                return _run_crawl(deps, now, end)
+            except psycopg.OperationalError:
+                if attempt > DB_RECONNECTS or deps.monotonic() + DB_RECONNECT_PAUSE_S >= end:
+                    raise
+                event(
+                    log,
+                    "db_reconnect",
+                    logging.WARNING,
+                    source=deps.source.descriptor.code,
+                    count=attempt,
+                )
+                deps.sleep(DB_RECONNECT_PAUSE_S)
+                opened.append(reconnect())
+                deps = replace(deps, conn=opened[-1])
+        raise AssertionError("inalcanzable")
+    finally:
+        for conn in opened:
+            conn.close()
+
+
+def _run_crawl(deps: CrawlDeps, now: datetime, end: float) -> CrawlResult:
     code = deps.source.descriptor.code
     breaker = db.load_breakers(deps.conn).get(code)
     if breaker is None or (code in PAUSED_AT_450 and db.bot_state(deps.conn).discovery_paused):
@@ -631,7 +672,7 @@ def run_crawl(deps: CrawlDeps, now: datetime, minutes: int) -> CrawlResult:
         return _skipped(code, "blocked")
     if not db.acquire_crawl_lease(deps.conn, code, deps.holder, now, LEASE_TTL):
         return _skipped(code, "skipped_locked")
-    run = _Run(deps, now, deps.monotonic() + minutes * 60, breaker)
+    run = _Run(deps, now, end, breaker)
     try:
         try:
             status = run.run()

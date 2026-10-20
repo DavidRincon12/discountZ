@@ -6,16 +6,16 @@
 - Best Buy y Walmart fuera por decisión de David. Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
 - eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18: `/seguir`, `/buscar` y job `crawl` con `MODEL_LOW` (mediana del mismo `epid`).
 - Alkosto (`alkosto`, ADR 0009) en producción desde el 2026-10-20 (PR #21, esquema 7).
-- Jumbo y Pepe Ganga (VTEX, migración 0008) listos en la rama: `/seguir`, `/buscar`, canario y `crawl`. Esquema 8: al fusionar, correr `migrate` con `to = head`.
-- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 850 unitarias y 180 de integración en verde el 2026-10-20.
+- Jumbo y Pepe Ganga (VTEX, migración 0008) en producción desde el 2026-10-20 (PR #22, esquema 8): `/seguir`, `/buscar`, canario y `crawl`.
+- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 851 unitarias y 182 de integración en verde el 2026-10-20.
 
 ## Último cambio
-- Rama `claude/project-thread-rlzaur`: Jumbo y Pepe Ganga (spec `docs/superpowers/specs/2026-10-20-jumbo-pepeganga-design.md`, plan `docs/superpowers/plans/2026-10-20-jumbo-pepeganga.md`, Native) y ADR 0010 (carril «más descuento primero» descartado). Antes, el PR #21 (Alkosto).
+- Rama `claude/project-thread-rlzaur`: el rastreo reconecta la BD si se cae a mitad de corrida (`run_crawl_reconnecting`: hasta 2 veces, pausa de 30 s, sigue desde el cursor con el mismo lease). Antes, el PR #22 (Jumbo, Pepe Ganga y ADR 0010).
 
 ## Siguiente paso
-- Fusionar Jumbo y Pepe Ganga, correr `migrate` y mirar su primera vuelta en Actions (Jumbo ~910 peticiones por vuelta completa, Pepe Ganga ~260) y el peso de la BD.
+- Mirar la primera vuelta de Jumbo y Pepe Ganga en Actions (Jumbo ~910 peticiones por vuelta completa, Pepe Ganga ~260) y el peso de la BD.
 - Descartadas: Droguerías Colsubsidio (robots bloquea `/api/`), Decathlon (no es VTEX, 403, robots bloquea `/api/`) y Metro (no responde).
-- David: `/fuente off dealnews` mientras siga bloqueado; revisar el acuerdo de la API de eBay.
+- David: revisar el acuerdo de la API de eBay. DealNews encendido de nuevo el 2026-10-20 para probar si sigue con 406.
 
 ## Decisiones vigentes
 - Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006), DealNews sin tope de antigüedad (ADR 0007) eBay por la Browse API con comparación por modelo (ADR 0008) y Alkosto por su índice de Algolia, asumiendo el riesgo de sus términos (ADR 0009); sin carril por descuento en VTEX porque ordena por el `ListPrice` inflado (ADR 0010).
@@ -27,7 +27,7 @@
 - No se sortea ningún CAPTCHA ni detección de bots (camelcamelcamel descartado por Cloudflare; Keepa en pausa por costo; Falabella y Homecenter detrás de Cloudflare).
 
 ## Pendientes y gotchas
-- BD: una caída del pooler a mitad del rastreo termina la corrida con `db_unavailable` (18-oct 20:42 en las 4 VTEX; 19-oct 11:00 eBay) y la siguiente sigue desde el cursor; falta reconectar dentro de la misma corrida. Supabase: el migrador necesita `GRANT CREATE ON DATABASE postgres TO discountz_owner`. Postgres en la nube: `service postgresql start` y `ALTER USER postgres PASSWORD 'postgres'`.
+- BD: una caída del pooler a mitad del rastreo reconecta (log `db_reconnect`); a la tercera caída la corrida termina con `db_unavailable` y la siguiente sigue desde el cursor. El ciclo (`run`) no reconecta: dura ~1 min y el siguiente arranca a los 2. Supabase: el migrador necesita `GRANT CREATE ON DATABASE postgres TO discountz_owner`. Postgres en la nube: `service postgresql start` y `ALTER USER postgres PASSWORD 'postgres'`.
 - `bestbuy_us` sigue en la matriz de `crawl.yml` (lo exige `tests/arch/test_smoke.py`); sin clave sale al instante. El `schedule` de respaldo suma 8 corridas al día: `run_cap` las reparte.
 - Desde la nube de la sesión: Newegg da 403 CAPTCHA, Best Buy 502/timeout y Amazon el intersticial de Akamai; `*.vtexassets.com` y los dominios de Jumbo y Pepe Ganga están bloqueados por el proxy (no desde Actions): sus fixtures se graban con un workflow temporal que las sube a la rama. `record-fixture` no sigue redirecciones y en Windows escribe el `.meta.json` con CRLF.
 - DealNews da 406 desde Actions desde el 18-oct (breaker abierto; el código del bloqueo dice `vtex_406`, nombre engañoso). Vuelve a destacar ofertas viejas y vigentes (ADR 0007).

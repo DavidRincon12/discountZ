@@ -17,7 +17,7 @@ from typing import Literal, cast
 
 import psycopg
 
-from discountz.app.crawl import CrawlDeps, crawl_max_items, run_crawl
+from discountz.app.crawl import CrawlDeps, crawl_max_items, run_crawl_reconnecting
 from discountz.app.cycle import CycleDeps, run_cycle
 from discountz.config import Settings, load_canaries, load_params, load_settings, load_topics
 from discountz.domain.errors import ConfigError, LeaseBusy
@@ -264,7 +264,7 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
     )
     try:
         with conn:
-            result = run_crawl(
+            result = run_crawl_reconnecting(
                 CrawlDeps(
                     conn=conn,
                     source=cast(CrawlSource, source),  # CATALOG ⇒ implementa CatalogSource
@@ -281,6 +281,7 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
                 ),
                 now,
                 args.minutes,
+                lambda: _connect_with_retry(settings, rnd),
             )
     except psycopg.OperationalError:
         event(logging.getLogger("discountz"), "db_unavailable", logging.ERROR)
