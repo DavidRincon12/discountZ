@@ -145,6 +145,36 @@ def test_new_posts_are_queued_in_their_topic(db: psycopg.Connection) -> None:
     assert row == (9, True)
 
 
+def test_new_posts_go_out_with_the_resolved_link(db: psycopg.Connection) -> None:
+    repo.save_channel_cursor(db, "tg_clubgratis", 100, T - timedelta(hours=1))
+    store = SafeUrl.parse("https://www.amazon.com/dp/B0FT9S8KLR", frozenset({"www.amazon.com"}))
+    seen: list[str] = []
+
+    def resolve(link: SafeUrl) -> SafeUrl:
+        seen.append(str(link))
+        return store
+
+    fake = FakeChannel("tg_clubgratis", [page(deal("tg_clubgratis", 101))])
+    run_channels(db, [run_for(fake)], T, PARAMS, TOPICS, random.Random(1), 1e9, resolve=resolve)
+    row = db.execute("SELECT card->>'url', reply_markup::text FROM discountz.outbox").fetchone()
+    assert row is not None
+    assert row[0] == str(store)
+    assert str(store) in row[1]
+    assert seen == ["https://t.me/x/101"]
+
+
+def test_first_read_does_not_resolve_links(db: psycopg.Connection) -> None:
+    seen: list[SafeUrl] = []
+
+    def resolve(link: SafeUrl) -> SafeUrl:
+        seen.append(link)
+        return link
+
+    fake = FakeChannel("tg_clubgratis", [page(deal("tg_clubgratis", 1))])
+    run_channels(db, [run_for(fake)], T, PARAMS, TOPICS, random.Random(1), 1e9, resolve=resolve)
+    assert seen == []
+
+
 def test_pages_follow_after_until_three(db: psycopg.Connection) -> None:
     repo.save_channel_cursor(db, "tg_cajitatech", 100, T - timedelta(hours=1))
     pages: list[ChannelPage | Exception] = [

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
@@ -51,6 +52,20 @@ class SafeUrl:
     def __str__(self) -> str:
         suffix = f"?{urlencode(self.query)}" if self.query else ""
         return f"https://{self.host}{self.path}{suffix}"
+
+
+_AMAZON_HOST_RE = re.compile(
+    r"(?:www\.)?amazon\.(?:com|ca|co\.uk|co\.jp|de|es|fr|it|com\.mx|com\.br)"
+)
+_ASIN_RE = re.compile(r"/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})(?:/|$)")
+
+
+def amazon_product_url(url: SafeUrl) -> SafeUrl | None:
+    """La ficha de Amazon como `https://<host>/dp/<ASIN>`, sin referido ni rastreo, o None."""
+    if not _AMAZON_HOST_RE.fullmatch(url.host):
+        return None
+    m = _ASIN_RE.search(url.path)
+    return SafeUrl(host=url.host, path=f"/dp/{m.group(1)}", query=()) if m else None
 
 
 def _normalize_host(hostname: str) -> str:

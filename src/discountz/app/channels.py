@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import random
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import cast
 
@@ -24,6 +24,7 @@ import psycopg
 
 from discountz.app.collect import SourceRun
 from discountz.app.compose import ALERT_TTL, is_quiet
+from discountz.app.links import LinkResolver
 from discountz.app.render import channel_card, render_channel_deal, reply_markup
 from discountz.config import AppParams, Topics
 from discountz.domain.community import ChannelPost, assign_channel_topic, find_duplicate
@@ -94,8 +95,13 @@ def run_channels(
     topics: Topics,
     rnd: random.Random,
     deadline: float,
+    *,
+    resolve: LinkResolver | None = None,
 ) -> ChannelsResult:
-    """Lee cada canal de `runs` y encola sus ofertas nuevas; actualiza breaker y contadores."""
+    """Lee cada canal de `runs` y encola sus ofertas nuevas; actualiza breaker y contadores.
+
+    `resolve` cambia el enlace de cada oferta nueva por el de la tienda (`app.links`).
+    """
     recent = list(db.recent_channel_posts(conn, now - RECENT_WINDOW))
     silent = is_quiet(now, params.quiet_start, params.quiet_end)
     total = _Tally()
@@ -104,7 +110,7 @@ def run_channels(
         before = r.http.used
         tally = _Tally()
         try:
-            _run_one(conn, r, now, topics, rnd, deadline, recent, silent, tally)
+            _run_one(conn, r, now, topics, rnd, deadline, recent, silent, tally, resolve)
         except Exception as exc:  # aislamiento por canal: el ciclo sigue
             r.failed = True
             event(log, "channel_failed", logging.ERROR, source=r.code, error=type(exc).__name__)
@@ -136,6 +142,7 @@ def _run_one(
     recent: list[db.RecentPost],
     silent: bool,
     tally: _Tally,
+    resolve: LinkResolver | None,
 ) -> None:
     source = cast(ChannelSource, r.source)
     ordered = source.descriptor.ordered_ids
@@ -161,6 +168,8 @@ def _run_one(
             with conn.transaction():
                 db.save_channel_cursor(conn, r.code, top, now, unparsed_streak=streak)
     else:
+        if resolve is not None:  # antes de abrir la transacción: no hay HTTP dentro de ella
+            pages = [_resolved(page, resolve) for page in pages]
         last_id = cursor.last_id
         for page in pages:
             with conn.transaction():
@@ -175,6 +184,11 @@ def _run_one(
         _on_error(r, ParseError("format", loc=r.code), now, rnd)
     elif clean:
         r.breaker = breaker_transition(r.breaker, BreakerEvent.OK, now, rnd)
+
+
+def _resolved(page: ChannelPage, resolve: LinkResolver) -> ChannelPage:
+    posts = tuple(replace(p, link=resolve(p.link)) for p in page.posts)
+    return replace(page, posts=posts)
 
 
 def _read_unordered(

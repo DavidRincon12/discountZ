@@ -1,7 +1,7 @@
 import pytest
 
 from discountz.domain.errors import UnsafeUrl
-from discountz.domain.urls import SafeUrl
+from discountz.domain.urls import SafeUrl, amazon_product_url
 
 EXITO = frozenset({"www.exito.com"})
 
@@ -50,3 +50,46 @@ def test_safe_url_idna_host_matches_exactly() -> None:
     assert u.host == idna_host
     with pytest.raises(UnsafeUrl):
         SafeUrl.parse("https://www.\u00e9xito.com/x", EXITO)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "https://www.amazon.com/dp/B0FT9S8KLR?tag=clubgratis203-20",
+            "https://www.amazon.com/dp/B0FT9S8KLR",
+        ),
+        (
+            "https://www.amazon.com/dp/B0F3WX9DQZ?maas=maas_adg_api_5809&ref_=aa_maas&tag=maas"
+            "&aa_campaignid=lv_C&aa_adgroupid=lv_q&aa_creativeid=lv_B&m=A22LQ2Y41ZRFI0",
+            "https://www.amazon.com/dp/B0F3WX9DQZ",
+        ),
+        (
+            "https://www.amazon.co.jp/-/en/gp/product/B084HPMVNN?tag=promocajita-22&linkId=1",
+            "https://www.amazon.co.jp/dp/B084HPMVNN",
+        ),
+        (
+            "https://amazon.com/Nautica-Sneakers/dp/B0FT9S8KLR/ref=sr_1_1",
+            "https://amazon.com/dp/B0FT9S8KLR",
+        ),
+    ],
+)
+def test_amazon_product_url_keeps_only_the_asin(raw: str, expected: str) -> None:
+    hosts = frozenset({"www.amazon.com", "amazon.com", "www.amazon.co.jp"})
+    url = amazon_product_url(SafeUrl.parse(raw, hosts))
+    assert url is not None
+    assert str(url) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://www.amazon.com/s?k=tv",  # búsqueda, no ficha
+        "https://www.amazon.com/dp/short",
+        "https://www.ebay.com/itm/123456789012",
+        "https://amazon.com.evil.com/dp/B0FT9S8KLR",
+    ],
+)
+def test_amazon_product_url_ignores_other_pages(raw: str) -> None:
+    hosts = frozenset({"www.amazon.com", "www.ebay.com", "amazon.com.evil.com"})
+    assert amazon_product_url(SafeUrl.parse(raw, hosts)) is None
