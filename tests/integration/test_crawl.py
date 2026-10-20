@@ -120,6 +120,9 @@ class FakeCatalog:
     hot: dict[str, CatalogObservation] = field(default_factory=dict)
     changed: list[list[CatalogObservation]] = field(default_factory=list)
     errors: set[tuple[str, int]] = field(default_factory=set)
+    # Página → lecturas que fallan por red (5xx tras los reintentos) antes de responder.
+    transient: dict[tuple[str, int], int] = field(default_factory=dict)
+    items_failures: int = 0  # relecturas de la capa caliente que fallan por red
     code: str = "exito"
     supports_changed: bool = False
     max_batch: int = 50
@@ -151,6 +154,9 @@ class FakeCatalog:
         ctx.http.request("GET", f"https://fake/page/{partition}/{page}")
         if (partition, page) in self.errors:
             raise ParseError("schema")
+        if self.transient.get((partition, page), 0) > 0:
+            self.transient[(partition, page)] -= 1
+            raise Unavailable(self.code, "retries_exhausted", 503)
         pages = self.pages[partition]
         items = pages[page] if page < len(pages) else []
         return CatalogPage(items, has_more=page + 1 < len(pages))
@@ -165,6 +171,9 @@ class FakeCatalog:
         self, ctx: SourceContext, external_ids: Sequence[str]
     ) -> Sequence[CatalogObservation]:
         ctx.http.request("GET", "https://fake/items")
+        if self.items_failures > 0:
+            self.items_failures -= 1
+            raise Unavailable(self.code, "retries_exhausted")
         return [self.hot[i] for i in external_ids if i in self.hot]
 
     def fetch_card_facts(
@@ -406,6 +415,58 @@ def test_crawl_single_parse_error_is_skipped(db: psycopg.Connection) -> None:
     d, _ = deps(db, src, Clock())
     run_crawl(d, T, minutes=60)
     assert set(repo.load_catalog_states(db, "exito", ["1000", "1001", "1002"])) == {"1000", "1002"}
+
+
+def test_crawl_retries_a_page_after_a_transient_error(db: psycopg.Connection) -> None:
+    """Un corte de segundos en la tienda cortaba la hora entera: el 2026-10-18 y 19 pararon así
+    al menos 16 corridas (10 de Olímpica, 5 de Éxito y 1 de Panamericana)."""
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(3)]}, transient={("C:/1/", 1): 1})
+    clock = Clock()
+    d, transport = deps(db, src, clock)
+    result = run_crawl(d, T, minutes=60)
+    assert (result.status, result.items) == ("ok", 3)
+    assert transport.kinds() == ["partitions", "page", "page", "page", "page"]
+    assert clock.t >= 60  # esperó un minuto antes de pedirla otra vez
+    assert repo.load_breakers(db)["exito"].consecutive_unavailable == 0
+
+
+def test_crawl_stops_after_three_transient_errors_on_the_same_page(db: psycopg.Connection) -> None:
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(3)]}, transient={("C:/1/", 1): 9})
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.status == "partial"
+    assert transport.kinds() == ["partitions", "page", "page", "page", "page"]
+    assert repo.get_cursor(db, "exito").page == 1  # la próxima corrida la vuelve a pedir
+    assert repo.load_breakers(db)["exito"].consecutive_unavailable == 3
+
+
+def test_crawl_hot_tier_survives_a_transient_error(db: psycopg.Connection) -> None:
+    state = CatalogState(10_000, None, None, T, T, 1, T - timedelta(hours=1), None, None)
+    row = CatalogRow("7", None, "tecnologia", "COP", state, False)
+    repo.save_catalog_page(db, "exito", [row], T - timedelta(hours=1))
+    src = FakeCatalog({"C:/1/": [page_of(1)]}, hot={"7": obs("7", 10_000)}, items_failures=1)
+    d, transport = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).status == "ok"
+    assert transport.kinds() == ["items", "items", "partitions", "page"]
+
+
+def test_crawl_does_not_wait_past_its_deadline(db: psycopg.Connection) -> None:
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(3)]}, transient={("C:/1/", 1): 1})
+    clock = Clock()
+    d, _ = deps(db, src, clock)
+    assert run_crawl(d, T, minutes=1).status == "partial"
+    assert clock.t < 60
+
+
+def test_crawl_logs_the_http_status_of_a_source_error(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Sin el status no se sabe si el corte fue un 5xx, un 429 o la red (2026-10-20)."""
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(3)]}, transient={("C:/1/", 1): 9})
+    d, _ = deps(db, src, Clock())
+    with caplog.at_level(logging.INFO, logger="discountz"):
+        run_crawl(d, T, minutes=60)
+    assert "source_error source=exito code=retries_exhausted http_status=503" in caplog.text
 
 
 def test_crawl_confirmation_mismatch_drops_candidate(db: psycopg.Connection) -> None:

@@ -26,7 +26,13 @@ from discountz.domain.catalog import (
     model_candidate,
     observe,
 )
-from discountz.domain.errors import BudgetExhausted, HardBlock, ParseError, SourceError
+from discountz.domain.errors import (
+    BudgetExhausted,
+    HardBlock,
+    ParseError,
+    SourceError,
+    Unavailable,
+)
 from discountz.domain.guards import check_offer
 from discountz.domain.health import BreakerEvent, BreakerState, breaker_transition, effective_state
 from discountz.domain.model import AlertKind, ListingRef, Maturity, Offer, SellerClass
@@ -55,6 +61,11 @@ MODEL_WINDOW = timedelta(days=7)  # pares del mismo modelo (spec de eBay §4.2)
 QUOTA = "quota"  # cuota diaria de una API agotada: no es una falla de la fuente
 ALERT_TTL = timedelta(hours=24)
 PARSE_STOP = 3  # errores de parseo seguidos que detienen la corrida
+# Un corte de la tienda puede durar más que los reintentos del cliente HTTP (~6 s): antes de
+# rendirse, la misma petición se repite tras una pausa (corridas VTEX cortadas por
+# `retries_exhausted` en sus primeros minutos, 2026-10-18 y 19).
+UNAVAILABLE_TRIES = 3
+UNAVAILABLE_PAUSE_S = 60.0
 CONFIRM_TOL_PCT = 1  # la relectura debe quedar a ±1 % del precio visto
 SAMPLE_GAP = gap_h(timedelta(hours=6))
 ERRORS_TOPIC = "errores"
@@ -231,34 +242,61 @@ class _Run:
         self.save_cursor()
 
     def guarded[R](self, call: Callable[[], R]) -> R | None:
-        """Ejecuta una petición de la fuente; `None` si la página no se pudo leer."""
-        try:
-            result = call()
-        except ParseError as exc:
-            self.log_error(exc)
-            self.parse_streak += 1
-            self.breaker_event(BreakerEvent.PARSE_ERROR)
-            if self.parse_streak >= PARSE_STOP:
-                self.cursor = replace(self.cursor, page=self.cursor.page + 1)
-                raise _Stop("partial") from None
-            return None
-        except BudgetExhausted:
-            raise _Stop("ok") from None
-        except HardBlock as exc:
-            self.log_error(exc)
-            self.breaker_event(BreakerEvent.HARD_BLOCK)
-            raise _Stop("blocked") from None
-        except SourceError as exc:
-            self.log_error(exc)
-            if exc.code != QUOTA:  # la cuota vuelve sola mañana: no cuenta para el breaker
-                self.breaker_event(BreakerEvent.UNAVAILABLE)
-            raise _Stop("partial") from None
-        self.parse_streak = 0
-        self.ok_pages += 1
-        return result
+        """Ejecuta una petición de la fuente; `None` si la página no se pudo leer.
+
+        Un error pasajero (red, 5xx) repite la misma petición tras una pausa, hasta
+        `UNAVAILABLE_TRIES` veces; después la corrida para y la próxima sigue desde esa página.
+        """
+        for attempt in range(1, UNAVAILABLE_TRIES + 1):
+            try:
+                result = call()
+            except ParseError as exc:
+                self.log_error(exc)
+                self.parse_streak += 1
+                self.breaker_event(BreakerEvent.PARSE_ERROR)
+                if self.parse_streak >= PARSE_STOP:
+                    self.cursor = replace(self.cursor, page=self.cursor.page + 1)
+                    raise _Stop("partial") from None
+                return None
+            except BudgetExhausted:
+                raise _Stop("ok") from None
+            except HardBlock as exc:
+                self.log_error(exc)
+                self.breaker_event(BreakerEvent.HARD_BLOCK)
+                raise _Stop("blocked") from None
+            except SourceError as exc:
+                self.log_error(exc)
+                if exc.code != QUOTA:  # la cuota vuelve sola mañana: no cuenta para el breaker
+                    self.breaker_event(BreakerEvent.UNAVAILABLE)
+                if not self.can_retry(exc, attempt):
+                    raise _Stop("partial") from None
+                self.deps.sleep(UNAVAILABLE_PAUSE_S)
+                continue
+            self.parse_streak = 0
+            self.ok_pages += 1
+            return result
+        raise AssertionError("inalcanzable")  # el último intento retorna o para la corrida
+
+    def can_retry(self, exc: SourceError, attempt: int) -> bool:
+        """Solo un corte pasajero, con intentos, breaker cerrado y tiempo para la pausa."""
+        return (
+            isinstance(exc, Unavailable)
+            and exc.code not in (QUOTA, "too_large")  # ninguna se arregla esperando un minuto
+            and attempt < UNAVAILABLE_TRIES
+            and effective_state(self.breaker, self.now) != "open"
+            and self.deps.monotonic() + UNAVAILABLE_PAUSE_S < self.end
+        )
 
     def log_error(self, exc: ParseError | SourceError) -> None:
-        event(log, "source_error", logging.WARNING, source=self.code, code=exc.code)
+        status = exc.http_status if isinstance(exc, SourceError) else None
+        event(
+            log,
+            "source_error",
+            logging.WARNING,
+            source=self.code,
+            code=exc.code,
+            http_status=status,
+        )
 
     def breaker_event(self, ev: BreakerEvent) -> None:
         """Transición atómica sobre la fila de la BD: el ciclo de la v1 escribe la misma fila."""
