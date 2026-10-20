@@ -253,3 +253,9 @@ def test_cycle_quota_does_not_trip_breaker() -> None:
     assert run.stopped
     c.on_error(run, Unavailable("ebay_us", "http_error", 500))
     assert run.breaker.consecutive_unavailable == 1
+
+
+def test_alkosto_pauses_with_the_db_near_full() -> None:
+    from discountz.app.crawl import PAUSED_AT_450
+
+    assert "alkosto" in PAUSED_AT_450

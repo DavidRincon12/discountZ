@@ -74,7 +74,7 @@ ERRORS_TOPIC = "errores"
 
 # Con la BD en ≥ 450 MB el mantenimiento pausa el descubrimiento: también el rastreo de las
 # tiendas más grandes (spec del rastreo §7.2).
-PAUSED_AT_450 = frozenset({"exito", "carulla", "ebay_us"})
+PAUSED_AT_450 = frozenset({"exito", "carulla", "ebay_us", "alkosto"})
 CrawlStatus = Literal["ok", "partial", "blocked", "skipped_locked", "disabled"]
 
 
