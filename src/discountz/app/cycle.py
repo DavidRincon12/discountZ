@@ -22,6 +22,7 @@ from discountz.app.compose import compose_alerts
 from discountz.app.confirm import confirm_candidates
 from discountz.app.deliver import deliver, make_photo_fetcher
 from discountz.app.inbox import process_inbox
+from discountz.app.links import make_link_resolver
 from discountz.app.maintenance import (
     maintenance_due,
     run_maintenance,
@@ -39,6 +40,7 @@ from discountz.infra.http import HttpClient, PacedClient
 from discountz.infra.log import event
 from discountz.infra.telegram import TelegramClient
 from discountz.sources.base import CredentialStore, NoCredentials, Source
+from discountz.sources.telegram_channels import channel_link_hosts
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +75,8 @@ class CycleDeps:
     rnd: random.Random
     healthchecks: Healthchecks
     credentials: CredentialStore = field(default_factory=NoCredentials)
-    photos: HttpClient | None = None  # transporte para las fotos de las tarjetas
+    # Transporte sin redirecciones para las fotos de las tarjetas y el enlace real de los canales.
+    photos: HttpClient | None = None
     topics: Topics = field(default_factory=load_topics)  # tema de las ofertas de canales
 
 
@@ -208,7 +211,8 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
         _close_source(conn, r, now)
     compose_alerts(conn, collector.views, now, params)
     channel_runs = _channel_runs(deps, inp, now, deadline)
-    run_channels(conn, channel_runs, now, params, deps.topics, deps.rnd, deadline)
+    resolve = make_link_resolver(deps.photos, channel_link_hosts()) if deps.photos else None
+    run_channels(conn, channel_runs, now, params, deps.topics, deps.rnd, deadline, resolve=resolve)
     for r in channel_runs:
         _close_source(conn, r, now)
     runs += channel_runs

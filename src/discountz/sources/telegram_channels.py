@@ -61,6 +61,12 @@ LINK_HOSTS = frozenset(
     }
 )
 
+
+def channel_link_hosts() -> frozenset[str]:
+    """Hosts que valen para «Ver oferta»: `LINK_HOSTS` y los de las fuentes registradas."""
+    return LINK_HOSTS | {h for s in SOURCES.values() for h in s.descriptor.hosts}
+
+
 _NO_MESSAGES = "tme_no_messages_found"
 _HISTORY = "tgme_channel_history"
 _BG_URL_RE = re.compile(r"background-image:url\('([^']+)'\)")
@@ -349,7 +355,7 @@ def parse_channel_page(code: str, body: bytes, now: datetime) -> ChannelPage:
         if _NO_MESSAGES in head or (_HISTORY in head and "tgme_widget_message" not in head):
             return ChannelPage((), None, False, 0)
         raise ParseError("format", loc=code)
-    link_hosts = LINK_HOSTS | {h for s in SOURCES.values() for h in s.descriptor.hosts}
+    link_hosts = channel_link_hosts()
     post_url_hosts = frozenset({"t.me"})
     deals: list[ChannelPost] = []
     priced = parsed = 0

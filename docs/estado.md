@@ -7,17 +7,17 @@
 - eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18: `/seguir`, `/buscar` y job `crawl` con `MODEL_LOW` (mediana del mismo `epid`).
 - Alkosto (`alkosto`, ADR 0009) en producción desde el 2026-10-20 (PR #21, esquema 7).
 - Jumbo y Pepe Ganga (VTEX, migración 0008) en producción desde el 2026-10-20 (PR #22, esquema 8): `/seguir`, `/buscar`, canario y `crawl`.
-- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 869 unitarias y 188 de integración en verde el 2026-10-20.
+- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 891 unitarias y 190 de integración en verde el 2026-10-20.
 
 ## Último cambio
-- Rama `claude/project-thread-y6ijcd`: la foto de la tarjeta se reintenta hasta 3 veces (pausa de 1 s y 2 s) ante un 5xx o un error de red; telesco.pe dio 502 a dos ofertas de Clubgratis el 2026-10-20 y salieron sin foto.
+- Rama `claude/project-thread-1f42zs` (ADR 0011): las ofertas de Clubgratis y OFERTU salen con el enlace de la tienda (`amazon.com/dp/<ASIN>` sin referido) en vez de `joylink.io`; si no se puede, con el del canal (`link_unresolved`).
 
 ## Siguiente paso
 - David: correr una vez *Actions → setup-bot* (PR #26 ya fusionado); bajar el certificado de Supabase (`config/supabase-ca.crt`) y revocar el token de GitHub de cron-job.org. DealNews queda apagado.
 - Vigilar el peso de la BD con Jumbo (≈4 vueltas de 250 peticiones) y Pepe Ganga. Descartadas: Colsubsidio y Decathlon (robots bloquea `/api/`), Metro (no responde).
 
 ## Decisiones vigentes
-- Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006), DealNews sin tope de antigüedad (ADR 0007) eBay por la Browse API con comparación por modelo (ADR 0008) y Alkosto por su índice de Algolia, asumiendo el riesgo de sus términos (ADR 0009); sin carril por descuento en VTEX porque ordena por el `ListPrice` inflado (ADR 0010).
+- Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006), DealNews sin tope de antigüedad (ADR 0007) eBay por la Browse API con comparación por modelo (ADR 0008) y Alkosto por su índice de Algolia, asumiendo el riesgo de sus términos (ADR 0009); sin carril por descuento en VTEX porque ordena por el `ListPrice` inflado (ADR 0010); enlace de la tienda sin referido en los canales con `joylink.io` (ADR 0011; cajitatech, DescuentosTech y DescuentosHome no se pueden).
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero». Si spec y plan difieren, manda spec §0.2 y luego el plan.
 - La confirmación exige ±1 %, stock, misma variante y mismo vendedor; en búsquedas sin vendedor visible (Amazon, Newegg) la ficha decide.
 - Rastreo: descuento solo contra precios observados (nunca `ListPrice`); la alerta exige «antes» estable 24 h y 2 lecturas, confirmación en la ficha y que otra tienda no haya alertado el mismo EAN en 6 h.
