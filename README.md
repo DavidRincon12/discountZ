@@ -117,7 +117,7 @@ Las primeras vueltas solo aprenden precios: un producto necesita su precio estab
 
 ### 10. Canales de ofertas de Telegram
 
-El ciclo de 5 minutos lee también los canales públicos [DescuentosTech](https://t.me/s/DescuentosTech), [DescuentosHome](https://t.me/s/DescuentosHome), [Clubgratis](https://t.me/s/Clubgratis), [cajitatech](https://t.me/s/cajitatech) y [OFERTU](https://t.me/s/ofertu), cada uno como mucho cada 10 minutos y sin usar tu cuenta de Telegram.
+El ciclo de 5 minutos lee también los canales públicos [DescuentosTech](https://t.me/s/DescuentosTech), [DescuentosHome](https://t.me/s/DescuentosHome), [Clubgratis](https://t.me/s/Clubgratis), [cajitatech](https://t.me/s/cajitatech) y [OFERTU](https://t.me/s/ofertu), cada uno como mucho cada 3 minutos y sin usar tu cuenta de Telegram.
 
 1. **Migraciones `0003` y `0006`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` (la `0006` agrega DescuentosHome y OFERTU).
 2. **Nada más.** La primera lectura de cada canal solo marca el punto de partida: no reenvía ofertas viejas. Desde la siguiente, cada oferta nueva llega como tarjeta con foto al tema de su categoría, con la etiqueta «📣 Visto en <canal> · sin verificar» y los botones «Ver oferta» y «Ver en el canal».

@@ -11,7 +11,7 @@ flowchart LR
   cron[[cron-job.org]] -->|workflow_dispatch cada 5 min| gha[GitHub Actions<br/>python -m discountz run]
   sched[[schedule 7,37 * * * *]] --> gha
   gha -->|HTTPS con ritmo y presupuesto| stores[[Tiendas y RSS]]
-  gha -->|t.me/s/canal cada 10 min| chan[[Canales públicos de ofertas]]
+  gha -->|t.me/s/canal cada 3 min| chan[[Canales públicos de ofertas]]
   gha -->|RSS cada 10 y 30 min| feeds[[DealNews y Slickdeals<br/>ofertas de Amazon]]
   gha -->|psycopg, modo sesión, verify-full| db[(Supabase Postgres<br/>esquema discountz)]
   gha -->|getUpdates / sendMessage| tg[[Telegram Bot API]]
@@ -97,7 +97,7 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
    5. La alerta entra a `outbox` con su tema y su tarjeta; el ciclo la entrega como foto (`sendPhoto`) en ese tema.
 4. **Feed de Slickdeals**: una tarea `feed` baja el RSS una vez para todas las búsquedas `source='slickdeals'` vencidas → cada lead que coincide y apunta a una tienda activa (sin red: `href`, `u2=` o `data-aps-asin`) encola en memoria una lectura de ficha en esa tienda, antes que sus demás tareas → `evaluate(origin="lead")` puede dar `COMMUNITY_DEAL`. Los leads no se guardan, pero todo lead que lleva a una ficha crea un seguimiento automático (`aNN`, 30 días sin alerta, tope por tienda).
 
-5. **Canales de Telegram** (`app/channels.py`, dentro del ciclo): cada canal que toca (10 min) baja hasta 3 páginas `t.me/s/<canal>?after=<cursor>` con `sources/telegram_channels.py` → `domain/community.py` descarta duplicados (mismo cupón, o precio a ±10 % y títulos parecidos, 24 h) y asigna el tema → por página, en una transacción: guarda las publicaciones, encola la tarjeta «sin verificar» en `outbox` y avanza el cursor. La primera lectura solo fija el cursor. Los feeds de Amazon (`sources/dealnews.py` cada 10 min y `slickdeals_amazon` cada 30) son canales con `ordered_ids=False`: se releen enteros, se saltan los ids ya guardados y su primera lectura marca lo que hay con `baseline` (ADR 0006).
+5. **Canales de Telegram** (`app/channels.py`, dentro del ciclo): cada canal que toca (3 min) baja hasta 3 páginas `t.me/s/<canal>?after=<cursor>` con `sources/telegram_channels.py` → `domain/community.py` descarta duplicados (mismo cupón, o precio a ±10 % y títulos parecidos, 24 h) y asigna el tema → por página, en una transacción: guarda las publicaciones, encola la tarjeta «sin verificar» en `outbox` y avanza el cursor. La primera lectura solo fija el cursor. Los feeds de Amazon (`sources/dealnews.py` cada 10 min y `slickdeals_amazon` cada 30) son canales con `ordered_ids=False`: se releen enteros, se saltan los ids ya guardados y su primera lectura marca lo que hay con `baseline` (ADR 0006).
 
 ## Atributos de calidad
 1. **Corrección de alertas**: ninguna alerta por un error de parseo o un descuento inflado (guardas G1-G14, confirmación independiente, tabla U01-U37).

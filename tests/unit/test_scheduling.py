@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from discountz.domain.health import BreakerState
 from discountz.domain.scheduling import (
+    CrawlBudget,
     Event,
     PlanInput,
     SearchDue,
@@ -194,3 +195,19 @@ def test_feed_searches_share_one_request_without_reserve() -> None:
         T,
     )
     assert plan["slickdeals"] == [Task("feed", "slickdeals", (2, 1))]
+
+
+def test_crawl_run_cap_spreads_what_is_left_of_the_day() -> None:
+    """Con más corridas que horas (respaldo cada 3 h, disparos a mano), Carulla, Panamericana y
+    eBay gastaban el tope antes de terminar el día UTC (18 y 19-oct, desde las 22:00)."""
+    carulla = CrawlBudget(1, 1, 500, 12_000)
+    assert carulla.run_cap(used_today=0, hour=0) == 500
+    assert carulla.run_cap(used_today=11_000, hour=20) == 250  # 1.000 en 4 horas
+    assert carulla.run_cap(used_today=11_900, hour=23) == 100  # la última hora usa lo que queda
+    assert carulla.run_cap(used_today=11_999, hour=1) == 1  # redondea hacia arriba
+
+
+def test_crawl_run_cap_is_zero_when_the_day_is_spent() -> None:
+    carulla = CrawlBudget(1, 1, 500, 12_000)
+    assert carulla.run_cap(used_today=12_000, hour=10) == 0
+    assert carulla.run_cap(used_today=12_500, hour=10) == 0

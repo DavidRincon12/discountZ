@@ -210,54 +210,54 @@ watch_interval_min = 30
 search_interval_min = 30
 max_batch = 1
 
-[sources.tg_descuentostech]  # hasta 3 páginas por lectura; ~144 lecturas al día
+[sources.tg_descuentostech]  # hasta 3 páginas por lectura; como mucho 480 lecturas al día
 group = "tg_descuentostech"
 min_pause_s = 1
 jitter_s = 1
 max_per_run = 3
-max_per_24h = 600
-watch_interval_min = 10
-search_interval_min = 10
+max_per_24h = 1500
+watch_interval_min = 3
+search_interval_min = 3
 max_batch = 1
 
-[sources.tg_clubgratis]  # hasta 3 páginas por lectura; ~144 lecturas al día
+[sources.tg_clubgratis]  # hasta 3 páginas por lectura; como mucho 480 lecturas al día
 group = "tg_clubgratis"
 min_pause_s = 1
 jitter_s = 1
 max_per_run = 3
-max_per_24h = 600
-watch_interval_min = 10
-search_interval_min = 10
+max_per_24h = 1500
+watch_interval_min = 3
+search_interval_min = 3
 max_batch = 1
 
-[sources.tg_cajitatech]  # hasta 3 páginas por lectura; ~144 lecturas al día
+[sources.tg_cajitatech]  # hasta 3 páginas por lectura; como mucho 480 lecturas al día
 group = "tg_cajitatech"
 min_pause_s = 1
 jitter_s = 1
 max_per_run = 3
-max_per_24h = 600
-watch_interval_min = 10
-search_interval_min = 10
+max_per_24h = 1500
+watch_interval_min = 3
+search_interval_min = 3
 max_batch = 1
 
-[sources.tg_descuentoshome]  # hasta 3 páginas por lectura; ~144 lecturas al día
+[sources.tg_descuentoshome]  # hasta 3 páginas por lectura; como mucho 480 lecturas al día
 group = "tg_descuentoshome"
 min_pause_s = 1
 jitter_s = 1
 max_per_run = 3
-max_per_24h = 600
-watch_interval_min = 10
-search_interval_min = 10
+max_per_24h = 1500
+watch_interval_min = 3
+search_interval_min = 3
 max_batch = 1
 
-[sources.tg_ofertu]  # hasta 3 páginas por lectura; ~144 lecturas al día
+[sources.tg_ofertu]  # hasta 3 páginas por lectura; como mucho 480 lecturas al día
 group = "tg_ofertu"
 min_pause_s = 1
 jitter_s = 1
 max_per_run = 3
-max_per_24h = 600
-watch_interval_min = 10
-search_interval_min = 10
+max_per_24h = 1500
+watch_interval_min = 3
+search_interval_min = 3
 max_batch = 1
 
 [sources.dealnews]  # RSS de Amazon: 1 petición por lectura; robots.txt pide 2 s entre peticiones
@@ -282,7 +282,7 @@ max_batch = 1
 
 # Canales de ofertas de Telegram (spec de canales §2): cada canal como máximo cada N minutos.
 [channels]
-interval_min = 10
+interval_min = 3
 
 # Rastreo de catálogo (spec del rastreo §2.3): separado del presupuesto de /seguir. Una corrida
 # por hora; `max_per_run` ≈ tope de 24 h / 24. `hot_share_bp`: parte para la capa caliente.
