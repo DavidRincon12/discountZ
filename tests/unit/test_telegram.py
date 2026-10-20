@@ -221,3 +221,19 @@ def test_thread_not_found_error() -> None:
         tg.send_message(1, "x", None, silent=False, thread_id=4)
     assert isinstance(info.value, TelegramBadRequest)
     assert "thread" in str(info.value)
+
+
+def test_setup_bot_menu_deletes_webhook_and_sets_chat_commands() -> None:
+    tg, http = client(
+        {
+            f"{API}/deleteWebhook": resp({"ok": True, "result": True}),
+            f"{API}/setMyCommands": resp({"ok": True, "result": True}),
+        }
+    )
+    tg.delete_webhook()
+    tg.set_my_commands(-1001, (("estado", "Salud de las fuentes"),))
+    assert http.calls[0][2] == {"drop_pending_updates": False}
+    assert http.calls[1][2] == {
+        "commands": [{"command": "estado", "description": "Salud de las fuentes"}],
+        "scope": {"type": "chat", "chat_id": -1001},
+    }

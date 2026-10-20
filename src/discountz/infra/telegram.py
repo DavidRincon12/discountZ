@@ -7,7 +7,7 @@ solo llevan códigos cortos (`str(exc)` nunca incluye la descripción que devuel
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -215,6 +215,18 @@ class TelegramClient:
         if not isinstance(thread_id, int):
             raise TelegramError("bad_response")
         return thread_id
+
+    def delete_webhook(self) -> None:
+        """Sin webhook: `getUpdates` da 409 mientras haya uno (spec §7.1)."""
+        self._call("deleteWebhook", {"drop_pending_updates": False})
+
+    def set_my_commands(self, chat_id: int, commands: Sequence[tuple[str, str]]) -> None:
+        """Menú de comandos solo para el chat del bot (`BotCommandScopeChat`)."""
+        payload = {
+            "commands": [{"command": c, "description": d} for c, d in commands],
+            "scope": {"type": "chat", "chat_id": chat_id},
+        }
+        self._call("setMyCommands", payload)
 
     def edit_message(
         self, chat_id: int, message_id: int, html: str, reply_markup: Mapping[str, Any] | None

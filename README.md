@@ -144,14 +144,18 @@ Opcional: un canal de Telegram de solo lectura que recibe una copia de cada ofer
 
 Al canal solo van las ofertas (no los avisos del sistema ni las respuestas a comandos) y sin los botones «Seguir» y «Silenciar», que solo funcionan en el grupo. Si el bot pierde el permiso de publicar, el grupo sigue recibiendo todo y el log del ciclo dice `channel_off`. Para apagar la copia, borra el secreto.
 
-### 13. Alkosto
+### 13. Menú de comandos del bot
+
+*Actions → setup-bot → Run workflow*. Al escribir `/` en el grupo, Telegram muestra la lista de comandos con su sintaxis (sin `/temas`). Se corre una vez, y otra si cambian los comandos.
+
+### 14. Alkosto
 
 Alkosto se lee por el índice de Algolia que usa su propia web para buscar, con la clave pública de solo búsqueda que publica su portada: no hay secretos nuevos. Sus términos («Usos NO permitidos») prohíben los programas que monitorean el sitio; se sumó igual por decisión tuya (ADR 0009). Si Alkosto bloquea o reclama, se apaga con `/fuente off alkosto`.
 
 1. **Migración `0007`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala.
 2. Nada más: el job `crawl` ya trae `alkosto` en su matriz y lee el catálogo entero (~14 mil productos, ~20 peticiones) en cada corrida horaria. Como en las demás tiendas, las tarjetas llegan cuando un producto lleva 24 h con precio estable.
 
-### 14. Jumbo y Pepe Ganga
+### 15. Jumbo y Pepe Ganga
 
 Las dos están en VTEX, como Éxito y Olímpica, y se leen igual (sin secretos nuevos). Sus términos no dicen nada de robots y su robots.txt no bloquea la API; si alguna bloquea o reclama, se apaga con `/fuente off jumbo` o `/fuente off pepeganga`.
 

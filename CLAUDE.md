@@ -13,7 +13,7 @@ Monitor personal de ofertas para David (Colombia): rastrea tiendas CO (COP) y de
 - Verificación completa (debe quedar en verde): `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run lint-imports && uv run pytest -q`
 - Una prueba: `uv run pytest tests/unit/test_money.py -q -k regional`
 - Integración (Postgres): `DISCOUNTZ_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres uv run pytest -q -m integration`
-- CLI: `uv run python -m discountz {run,crawl,migrate,check-config,record-fixture}` (`crawl --source exito [--minutes 45]`)
+- CLI: `uv run python -m discountz {run,crawl,migrate,check-config,setup-bot,record-fixture}` (`crawl --source exito [--minutes 45]`)
 
 ## Estructura
 - `src/discountz/domain/`: núcleo puro (dinero, modelo, segmentos, estadísticos, guardas, evaluación, comandos, planificador, salud)

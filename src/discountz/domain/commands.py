@@ -281,3 +281,19 @@ _PARSERS: dict[str, _Parser] = {
     "ayuda": _no_args(Help()),
     "temas": _no_args(Topics()),
 }
+
+# Menú que Telegram muestra al escribir «/» en el grupo (`setup-bot`). Sin /temas: el grupo
+# tiene los temas apagados y el comando los recrearía.
+BOT_MENU: tuple[tuple[str, str], ...] = (
+    ("seguir", "Seguir hasta 20 URLs: /seguir <url…> [objetivo] [#cat]"),
+    ("buscar", "Buscar en una tienda: /buscar <fuente> <consulta> [min:] [max:]"),
+    ("lista", "Ver los seguimientos: /lista [#cat|fuente]"),
+    ("dejar", "Dejar de seguir: /dejar <p12|a12|b3|auto>"),
+    ("objetivo", "Precio objetivo: /objetivo <p12> <precio|no>"),
+    ("categoria", "Cambiar la categoría: /categoria <p12|L1234> <cat>"),
+    ("silenciar", "Silenciar avisos: /silenciar <p12|L1234|todo> <días>"),
+    ("fuente", "Encender o apagar una fuente: /fuente <on|off> <codigo>"),
+    ("estado", "Salud de las fuentes y del bot"),
+    ("token_vence", "Fecha en que vence el token: /token_vence AAAA-MM-DD"),
+    ("ayuda", "Todos los comandos y su sintaxis"),
+)
