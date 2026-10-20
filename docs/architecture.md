@@ -74,6 +74,8 @@ Migración `0004_feeds_web` (feeds de Amazon, ADR 0006): fuentes `dealnews` y `s
 
 Migración `0005_ebay` (ADR 0008): fuente `ebay_us`, `catalog_item.model_key` (el `epid` de eBay, con índice parcial) y `alert.kind = 'model_low'`.
 
+Migración `0007_alkosto` (ADR 0009): fuente `alkosto` (`sources/alkosto.py`), que lee el índice público de Algolia de la tienda.
+
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
 ## Flujos clave
