@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
 import pytest
@@ -89,9 +89,18 @@ def test_event_times_are_bogota_converted_to_utc() -> None:
 
 def test_co_events_include_the_new_vtex_stores() -> None:
     events = load_params(PARAMS_PATH).events
-    for name in ("Black Days", "Cyber Lunes", "Hot Sale"):
+    for name in ("Black Days", "Hot Sale"):
         event = next(e for e in events if e.name == name)
-        assert {"jumbo", "pepeganga"} <= set(event.sources)
+        assert {"jumbo", "pepeganga", "alkosto"} <= set(event.sources)
+
+
+def test_hot_sale_october_2026_is_on_the_calendar() -> None:
+    # CCCE: Drops del 16 al 18 y Hot Sale del 19 al 23 de octubre de 2026; Cyberlunes ya no existe.
+    events = load_params(PARAMS_PATH).events
+    names = {e.name for e in events}
+    assert "Cyber Lunes" not in names
+    middle = datetime(2026, 10, 21, 17, 0, tzinfo=UTC)
+    assert any(e.name == "Hot Sale" and e.active("exito", middle) for e in events)
 
 
 def _bad_toml(tmp_path: Path, old: str, new: str) -> Path:
