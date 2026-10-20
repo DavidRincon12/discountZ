@@ -77,7 +77,7 @@ def run_maintenance(
     with conn.transaction():
         retention += db.expire_auto_watches(conn, now)
     retention += db.delete_old_catalog_changes(conn, now - CATALOG_CHANGES_KEEP)
-    retention += db.delete_unseen_catalog_items(conn, now - CATALOG_UNSEEN)
+    retention += db.delete_unseen_catalog_items(conn, CATALOG_UNSEEN)
     retention += db.delete_old_channel_posts(conn, now - CHANNEL_POSTS_KEEP)
     size = db.db_size(conn) if db_bytes is None else db_bytes
     week = local(now).strftime("%G-W%V")

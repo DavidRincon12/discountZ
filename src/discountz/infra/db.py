@@ -2028,11 +2028,20 @@ def delete_old_catalog_changes(conn: psycopg.Connection, cutoff: datetime) -> in
     ).rowcount
 
 
-def delete_unseen_catalog_items(conn: psycopg.Connection, cutoff: datetime) -> int:
-    """Productos que el rastreo dejó de ver (sin stock o retirados); sus cambios caen en cascada."""
-    return conn.execute(
-        "DELETE FROM discountz.catalog_item WHERE last_seen_at < %s", (cutoff,)
-    ).rowcount
+def delete_unseen_catalog_items(conn: psycopg.Connection, unseen: timedelta) -> int:
+    """Productos que el rastreo dejó de ver (sin stock o retirados); sus cambios caen en cascada.
+
+    El plazo cuenta desde la última corrida de su tienda, no desde hoy: una tienda pausada
+    (450 MB, breaker, rastreo apagado) conserva su catálogo. Por lotes: con el de eBay
+    (~150 mil filas) un solo `DELETE` pasaba del `statement_timeout`.
+    """
+    return _delete_batched(
+        conn,
+        "catalog_item",
+        """last_seen_at < (SELECT cc.last_run_at FROM discountz.crawl_cursor cc
+                             WHERE cc.source = catalog_item.source) - %s""",
+        (unseen,),
+    )
 
 
 @dataclass(frozen=True, slots=True)
