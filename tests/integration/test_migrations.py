@@ -255,6 +255,10 @@ def test_0007_up_down(db: psycopg.Connection) -> None:
            VALUES ('alkosto', '7705946474559', 'https://www.alkosto.com/tv/p/7705946474559',
                    't', now(), now(), true, 'f')"""
     )
+    db.execute(
+        """INSERT INTO discountz.watch (source, pending_ref, next_check_at)
+           VALUES ('alkosto', 'slug:tv', now())"""
+    )
     assert migrate(db, 6) == [8, 7]
     assert _scalar(db, code) == 0
     assert _scalar(db, "SELECT count(*) FROM discountz.catalog_item") == 0
@@ -278,9 +282,14 @@ def test_0008_up_down(db: psycopg.Connection) -> None:
            VALUES ('pepeganga', '455', 'https://www.pepeganga.com/mordedor-455/p',
                    't', now(), now(), true, 'f')"""
     )
+    db.execute(
+        """INSERT INTO discountz.watch (source, pending_ref, next_check_at)
+           VALUES ('jumbo', 'slug:tv', now())"""
+    )
     assert migrate(db, 7) == [8]
     assert _scalar(db, codes) == 0
     assert _scalar(db, "SELECT count(*) FROM discountz.catalog_item") == 0
     assert _scalar(db, "SELECT count(*) FROM discountz.listing") == 0
+    assert _scalar(db, "SELECT count(*) FROM discountz.watch") == 0
     assert migrate(db, "head") == [8]
     assert _scalar(db, codes) == 2
