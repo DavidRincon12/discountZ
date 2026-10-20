@@ -25,6 +25,18 @@ title = "Datáfono Bold Plus"
 min_minor = 59600
 max_minor = 238400
 
+[[jumbo]]
+external_id = "436375"
+title = "Televisor Challenger 75"
+min_minor = 1239960
+max_minor = 4959840
+
+[[pepeganga]]
+external_id = "325550"
+title = "LEGO Casco Lewis Hamilton"
+min_minor = 179960
+max_minor = 719840
+
 [[amazon_us]]
 external_id = "B0BHJF2VRN"
 title = "SSD Samsung 990 PRO 1 TB"

@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)

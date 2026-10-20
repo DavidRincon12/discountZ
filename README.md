@@ -1,6 +1,6 @@
 # discountZ
 
-Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana, Alkosto) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las cinco tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
+Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana, Jumbo, Pepe Ganga, Alkosto) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las siete tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
 
 Corre en GitHub Actions con una base de datos Supabase Postgres gratuita: costo operativo $0.
 
@@ -150,6 +150,13 @@ Alkosto se lee por el índice de Algolia que usa su propia web para buscar, con 
 
 1. **Migración `0007`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala.
 2. Nada más: el job `crawl` ya trae `alkosto` en su matriz y lee el catálogo entero (~14 mil productos, ~20 peticiones) en cada corrida horaria. Como en las demás tiendas, las tarjetas llegan cuando un producto lleva 24 h con precio estable.
+
+### 14. Jumbo y Pepe Ganga
+
+Las dos están en VTEX, como Éxito y Olímpica, y se leen igual (sin secretos nuevos). Sus términos no dicen nada de robots y su robots.txt no bloquea la API; si alguna bloquea o reclama, se apaga con `/fuente off jumbo` o `/fuente off pepeganga`.
+
+1. **Migración `0008`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala.
+2. Nada más: el job `crawl` ya trae las dos en su matriz. Jumbo (~45 mil productos con stock, 38 % de supermercado) da unas 6 vueltas al día y Pepe Ganga (~13 mil) una por hora. Las tarjetas llegan cuando un producto lleva 24 h con precio estable.
 
 ### Si algo falla
 

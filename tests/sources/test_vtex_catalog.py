@@ -94,6 +94,18 @@ def test_catalog_page_parses_real_fixture(code: str) -> None:
         assert obs.ean is None or obs.ean.isdigit()
 
 
+def test_pepeganga_marketplace_product_is_marked_as_marketplace() -> None:
+    # SKU real con vendedor `homesale` con stock y la tienda (vendedor 1) sin stock.
+    fixture = load_fixture("vtex", "pepeganga-catalog")
+    fake = _Router(
+        lambda q: HttpResponse(206, fixture.url, {"resources": "0-49/10"}, fixture.body, 0)
+    )
+    page = VtexSource(STORES["pepeganga"]).fetch_catalog_page(ctx(fake), "C:/1/", 0)
+    by_id = {o.external_id: o for o in page.items}
+    assert by_id["289855"].seller_class is SellerClass.MARKETPLACE
+    assert by_id["289855"].price == Money(194_900, Currency.COP)
+
+
 def test_catalog_page_takes_cheapest_seller_in_stock() -> None:
     body = [
         product(

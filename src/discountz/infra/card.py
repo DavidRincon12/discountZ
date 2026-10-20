@@ -43,6 +43,8 @@ STORE_COLORS: Mapping[str, str] = MappingProxyType(
         "carulla": "#1E7B3A",
         "olimpica": "#D7182A",
         "panamericana": "#E11D48",
+        "jumbo": "#00A650",
+        "pepeganga": "#F97316",
         "bestbuy_us": "#0046BE",
         "walmart_us": "#0071DC",
         "amazon_us": "#FF9900",

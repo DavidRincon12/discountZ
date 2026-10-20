@@ -5,30 +5,31 @@
 - Rastreo de catálogo (ADR 0004) en producción desde el 2026-10-17: VTEX ×4, tarjetas PNG; canales de Telegram (ADR 0005) y feeds de Amazon «sin verificar» (ADR 0006/0007) también.
 - Best Buy y Walmart fuera por decisión de David. Amazon da CAPTCHA desde Actions: su breaker sigue abierto.
 - eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18: `/seguir`, `/buscar` y job `crawl` con `MODEL_LOW` (mediana del mismo `epid`).
-- Alkosto (`alkosto`, ADR 0009) listo en la rama: `/seguir`, `/buscar` y `crawl` por su índice de Algolia (franjas de precio de ≤ 1.000). Esquema 7: al fusionar, correr `migrate` con `to = head`.
-- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 835 unitarias y 179 de integración en verde el 2026-10-20.
+- Alkosto (`alkosto`, ADR 0009) en producción desde el 2026-10-20 (PR #21, esquema 7).
+- Jumbo y Pepe Ganga (VTEX, migración 0008) listos en la rama: `/seguir`, `/buscar`, canario y `crawl`. Esquema 8: al fusionar, correr `migrate` con `to = head`.
+- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 850 unitarias y 180 de integración en verde el 2026-10-20.
 
 ## Último cambio
-- Rama `claude/project-thread-rlzaur`: Alkosto como tienda (spec `docs/superpowers/specs/2026-10-20-alkosto-design.md`, plan `docs/superpowers/plans/2026-10-20-alkosto.md`, ejecutado en Native). Antes, el PR #20 (reintento de cortes pasajeros en el rastreo, `CrawlBudget.run_cap`, canales cada 3 min).
+- Rama `claude/project-thread-rlzaur`: Jumbo y Pepe Ganga (spec `docs/superpowers/specs/2026-10-20-jumbo-pepeganga-design.md`, plan `docs/superpowers/plans/2026-10-20-jumbo-pepeganga.md`, Native) y ADR 0010 (carril «más descuento primero» descartado). Antes, el PR #21 (Alkosto).
 
 ## Siguiente paso
-- Fusionar Alkosto, correr `migrate` y mirar la primera vuelta en Actions (~20 peticiones, ~14 mil productos; `alkosto_band_truncated` si una franja de un solo precio pasa de 1.000).
-- Spike del carril «más descuento primero» en VTEX (`O=OrderByBestDiscountDESC`, ordenado contra el `ListPrice` inflado: solo elige qué leer). Luego, confirmar tiendas VTEX nuevas (Jumbo, Metro, Colsubsidio, Decathlon, Pepe Ganga) desde Actions, leyendo antes sus términos, y el peso de la BD.
+- Fusionar Jumbo y Pepe Ganga, correr `migrate` y mirar su primera vuelta en Actions (Jumbo ~910 peticiones por vuelta completa, Pepe Ganga ~260) y el peso de la BD.
+- Descartadas: Droguerías Colsubsidio (robots bloquea `/api/`), Decathlon (no es VTEX, 403, robots bloquea `/api/`) y Metro (no responde).
 - David: `/fuente off dealnews` mientras siga bloqueado; revisar el acuerdo de la API de eBay.
 
 ## Decisiones vigentes
-- Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006), DealNews sin tope de antigüedad (ADR 0007) eBay por la Browse API con comparación por modelo (ADR 0008) y Alkosto por su índice de Algolia, asumiendo el riesgo de sus términos (ADR 0009).
+- Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006), DealNews sin tope de antigüedad (ADR 0007) eBay por la Browse API con comparación por modelo (ADR 0008) y Alkosto por su índice de Algolia, asumiendo el riesgo de sus términos (ADR 0009); sin carril por descuento en VTEX porque ordena por el `ListPrice` inflado (ADR 0010).
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero». Si spec y plan difieren, manda spec §0.2 y luego el plan.
 - La confirmación exige ±1 %, stock, misma variante y mismo vendedor; en búsquedas sin vendedor visible (Amazon, Newegg) la ficha decide.
 - Rastreo: descuento solo contra precios observados (nunca `ListPrice`); la alerta exige «antes» estable 24 h y 2 lecturas, confirmación en la ficha y que otra tienda no haya alertado el mismo EAN en 6 h.
-- Sin temas guardados todo va a *General* sin aviso. Con la BD en ≥ 450 MB se pausan las búsquedas y el rastreo de Éxito, Carulla, eBay y Alkosto.
+- Sin temas guardados todo va a *General* sin aviso. Con la BD en ≥ 450 MB se pausan las búsquedas y el rastreo de Éxito, Carulla, eBay, Alkosto y Jumbo.
 - Slickdeals: un solo task `feed` por ciclo; sus leads a Amazon se descartan con el breaker abierto: los cubre `slickdeals_amazon`.
 - No se sortea ningún CAPTCHA ni detección de bots (camelcamelcamel descartado por Cloudflare; Keepa en pausa por costo; Falabella y Homecenter detrás de Cloudflare).
 
 ## Pendientes y gotchas
 - BD: una caída del pooler a mitad del rastreo termina la corrida con `db_unavailable` (18-oct 20:42 en las 4 VTEX; 19-oct 11:00 eBay) y la siguiente sigue desde el cursor; falta reconectar dentro de la misma corrida. Supabase: el migrador necesita `GRANT CREATE ON DATABASE postgres TO discountz_owner`. Postgres en la nube: `service postgresql start` y `ALTER USER postgres PASSWORD 'postgres'`.
 - `bestbuy_us` sigue en la matriz de `crawl.yml` (lo exige `tests/arch/test_smoke.py`); sin clave sale al instante. El `schedule` de respaldo suma 8 corridas al día: `run_cap` las reparte.
-- Desde la nube de la sesión: Newegg da 403 CAPTCHA, Best Buy 502/timeout y Amazon el intersticial de Akamai; `*.vtexassets.com` y los dominios de Jumbo, Metro, Colsubsidio, Decathlon y Pepe Ganga están bloqueados por el proxy (no desde Actions). `record-fixture` no sigue redirecciones y en Windows escribe el `.meta.json` con CRLF.
+- Desde la nube de la sesión: Newegg da 403 CAPTCHA, Best Buy 502/timeout y Amazon el intersticial de Akamai; `*.vtexassets.com` y los dominios de Jumbo y Pepe Ganga están bloqueados por el proxy (no desde Actions): sus fixtures se graban con un workflow temporal que las sube a la rama. `record-fixture` no sigue redirecciones y en Windows escribe el `.meta.json` con CRLF.
 - DealNews da 406 desde Actions desde el 18-oct (breaker abierto; el código del bloqueo dice `vtex_406`, nombre engañoso). Vuelve a destacar ofertas viejas y vigentes (ADR 0007).
 - Ofertas con el tema equivocado: agregar el término a `channel_rules` y la oferta a `tests/fixtures/topics/ofertas-etiquetadas.jsonl` (cada término nombra un solo tema; se mide con `tests/unit/test_topic_precision.py`). Las fixtures de `t.me` llevan los usuarios cambiados por «Usuario».
 - Fechas del calendario de eventos 2026-2027 estimadas: David debe confirmarlas (Hot Sale y Cyber Lunes de Colombia).

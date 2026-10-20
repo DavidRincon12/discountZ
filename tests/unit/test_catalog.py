@@ -262,6 +262,13 @@ def test_alkosto_pauses_with_the_db_near_full() -> None:
     assert "alkosto" in PAUSED_AT_450
 
 
+def test_jumbo_pauses_with_the_db_near_full_but_not_pepeganga() -> None:
+    from discountz.app.crawl import PAUSED_AT_450
+
+    assert "jumbo" in PAUSED_AT_450
+    assert "pepeganga" not in PAUSED_AT_450
+
+
 def test_split_price_band_at_the_geometric_midpoint() -> None:
     assert split_price_band(1, 999_999_999) == [(1, 31_622), (31_623, 999_999_999)]
     assert split_price_band(100, 10_000) == [(100, 1_000), (1_001, 10_000)]
