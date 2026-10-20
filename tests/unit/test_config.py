@@ -44,6 +44,8 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "carulla",
         "olimpica",
         "panamericana",
+        "jumbo",
+        "pepeganga",
         "amazon_us",
         "newegg",
         "walmart_us",

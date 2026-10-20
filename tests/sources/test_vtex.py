@@ -35,6 +35,8 @@ FICHAS = [
     ("carulla", "715872"),
     ("olimpica", "1100253933"),
     ("panamericana", "659232"),
+    ("jumbo", "436375"),
+    ("pepeganga", "325550"),
 ]
 
 
@@ -92,6 +94,8 @@ def test_simulation_fixture_matches_expected(code: str, sku: str) -> None:
         "carulla_busqueda_cafe",
         "olimpica_busqueda_televisor",
         "panamericana_busqueda_portatil",
+        "jumbo_busqueda_televisor",
+        "pepeganga_busqueda_lego",
     ],
 )
 def test_search_fixtures_parse_every_product(name: str) -> None:
@@ -242,8 +246,10 @@ def test_new_stores_point_to_their_vtex_accounts() -> None:
         "www.pepeganga.com",
         "pepeganga",
     )
-    hosts = VtexSource(STORES["jumbo"]).descriptor.image_hosts
-    assert "jumbocolombiaio.vteximg.com.br" in hosts
+    for code, sku in (("jumbo", "436375"), ("pepeganga", "325550")):
+        product = raw(f"{code}_ficha_{sku}")[0]
+        host = product["items"][0]["images"][0]["imageUrl"].split("/")[2]
+        assert host in VtexSource(STORES[code]).descriptor.image_hosts
 
 
 def test_expected_files_exist_for_every_detail() -> None:
