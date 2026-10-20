@@ -919,3 +919,23 @@ def test_crawl_skips_when_the_schema_does_not_match(
     assert run_crawl(d, T, minutes=60).status == "skipped_schema"
     assert transport.urls == []
     assert count(db, "crawl_lease") == 0
+
+
+def test_max_items_counts_the_catalog_once_per_run(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Con ~150 mil filas de eBay, un `count(*)` por página costaba ~170 por corrida."""
+    calls: list[str] = []
+    real = repo.count_catalog_items
+
+    def counting(conn: psycopg.Connection, source: str) -> int:
+        calls.append(source)
+        return real(conn, source)
+
+    monkeypatch.setattr(repo, "count_catalog_items", counting)
+    pages = [[eobs(f"90000000{p}00{i}", 5_000, None) for i in range(2)] for p in range(3)]
+    src = FakeCatalog({"293": pages}, code=EBAY, currency=Currency.USD, max_batch=1)
+    d, _ = deps(db, src, Clock(), max_items=3)
+    run_crawl(d, T, minutes=60)
+    assert calls == [EBAY]
+    assert count(db, "catalog_item", "source = 'ebay_us'") == 4  # el tope se mira por página

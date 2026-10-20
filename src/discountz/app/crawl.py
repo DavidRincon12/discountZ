@@ -151,6 +151,7 @@ class _Run:
         self.pages = self.items = self.changes = self.alerts = 0
         self.parse_streak = 0
         self.ok_pages = 0
+        self.stored: int | None = None  # publicaciones guardadas, para el tope de eBay
 
     # ───────────── Bucle
 
@@ -368,11 +369,19 @@ class _Run:
     def within_cap(
         self, items: Sequence[CatalogObservation], states: Mapping[str, CatalogState]
     ) -> Sequence[CatalogObservation]:
-        """Con el tope alcanzado solo se actualizan las publicaciones ya guardadas."""
+        """Con el tope alcanzado solo se actualizan las publicaciones ya guardadas.
+
+        Se cuenta una vez por corrida y se suman las nuevas de cada página.
+        """
         cap = self.deps.max_items
-        if cap is None or db.count_catalog_items(self.conn, self.code) < cap:
+        if cap is None:
             return items
-        return [o for o in items if o.external_id in states]
+        if self.stored is None:
+            self.stored = db.count_catalog_items(self.conn, self.code)
+        if self.stored >= cap:
+            return [o for o in items if o.external_id in states]
+        self.stored += sum(1 for o in items if o.external_id not in states)
+        return items
 
     def model_peers(self, items: Sequence[CatalogObservation]) -> dict[str, list[tuple[str, int]]]:
         """Pares guardados más los de esta misma página, con el precio de la página: las
