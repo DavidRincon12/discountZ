@@ -29,10 +29,10 @@ def _scalar(conn: psycopg.Connection, query: str) -> object:
 
 def test_up_down_up(empty_db_url: str) -> None:
     with connect(empty_db_url) as conn:
-        assert migrate(conn, "head") == [1, 2, 3, 4, 5, 6, 7, 8]
-        assert current_version(conn) == SCHEMA_VERSION == 8
+        assert migrate(conn, "head") == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        assert current_version(conn) == SCHEMA_VERSION == 9
         assert _scalar(conn, "SELECT count(*) FROM discountz.source") == 20
-        assert migrate(conn, 3) == [8, 7, 6, 5, 4]
+        assert migrate(conn, 3) == [9, 8, 7, 6, 5, 4]
         assert _scalar(conn, "SELECT count(*) FROM discountz.source WHERE kind = 'channel'") == 3
         assert migrate(conn, 1) == [3, 2]
         assert _scalar(conn, "SELECT to_regclass('discountz.catalog_item')") is None
@@ -40,7 +40,7 @@ def test_up_down_up(empty_db_url: str) -> None:
         assert migrate(conn, 0) == [1]
         assert current_version(conn) == 0
         assert _scalar(conn, "SELECT to_regclass('discountz.listing')") is None
-        assert migrate(conn, "head") == [1, 2, 3, 4, 5, 6, 7, 8]
+        assert migrate(conn, "head") == [1, 2, 3, 4, 5, 6, 7, 8, 9]
         assert migrate(conn, "head") == []
 
 
@@ -56,7 +56,7 @@ def test_down_0004_removes_feeds_and_the_baseline_flag(db: psycopg.Connection) -
                   ('tg_cajitatech', 88168, now(), 'oled tv', 4499, 'USD', 'electro', now())"""
     )
     assert _scalar(db, "SELECT bool_or(baseline) FROM discountz.channel_post") is False
-    assert migrate(db, 3) == [8, 7, 6, 5, 4]
+    assert migrate(db, 3) == [9, 8, 7, 6, 5, 4]
     assert _scalar(db, "SELECT channel FROM discountz.channel_post") == "tg_cajitatech"
     assert _scalar(db, "SELECT count(*) FROM discountz.channel_cursor") == 0
     flag = """SELECT count(*) FROM information_schema.columns
@@ -171,10 +171,10 @@ def test_migrate_waits_for_lease_then_gives_up(db: psycopg.Connection) -> None:
 def test_migrate_with_free_lease_releases_it(db: psycopg.Connection) -> None:
     assert migrate_with_lease(
         db, 0, holder="migrate:9", wait_s=1, sleep=lambda s: None, monotonic=lambda: 0.0
-    ) == [8, 7, 6, 5, 4, 3, 2, 1]
+    ) == [9, 8, 7, 6, 5, 4, 3, 2, 1]
     assert migrate_with_lease(
         db, "head", holder="migrate:9", wait_s=1, sleep=lambda s: None, monotonic=lambda: 0.0
-    ) == [1, 2, 3, 4, 5, 6, 7, 8]
+    ) == [1, 2, 3, 4, 5, 6, 7, 8, 9]
     assert _scalar(db, "SELECT holder FROM discountz.run_lease") is None
 
 
@@ -206,7 +206,7 @@ def test_0005_up_down(db: psycopg.Connection) -> None:
         """INSERT INTO discountz.alert (listing_id, kind, maturity, price_minor, observed_at)
            SELECT id, 'model_low', 'cold', 8999, now() FROM discountz.listing"""
     )
-    assert migrate(db, 4) == [8, 7, 6, 5]
+    assert migrate(db, 4) == [9, 8, 7, 6, 5]
     assert _scalar(db, "SELECT count(*) FROM discountz.source WHERE code = 'ebay_us'") == 0
     assert _scalar(db, "SELECT count(*) FROM discountz.alert") == 0
     assert (
@@ -217,7 +217,7 @@ def test_0005_up_down(db: psycopg.Connection) -> None:
         )
         == 0
     )
-    assert migrate(db, "head") == [5, 6, 7, 8]
+    assert migrate(db, "head") == [5, 6, 7, 8, 9]
 
 
 def test_0006_up_down(db: psycopg.Connection) -> None:
@@ -230,11 +230,11 @@ def test_0006_up_down(db: psycopg.Connection) -> None:
                currency, topic, published_at)
            VALUES ('tg_descuentoshome', 26814, now(), 'bandeja', 1400, 'USD', 'hogar', now())"""
     )
-    assert migrate(db, 5) == [8, 7, 6]
+    assert migrate(db, 5) == [9, 8, 7, 6]
     codes = "SELECT count(*) FROM discountz.source WHERE code IN ('tg_descuentoshome','tg_ofertu')"
     assert _scalar(db, codes) == 0
     assert _scalar(db, "SELECT count(*) FROM discountz.channel_post") == 0
-    assert migrate(db, "head") == [6, 7, 8]
+    assert migrate(db, "head") == [6, 7, 8, 9]
     assert _scalar(db, codes) == 2
 
 
@@ -255,10 +255,14 @@ def test_0007_up_down(db: psycopg.Connection) -> None:
            VALUES ('alkosto', '7705946474559', 'https://www.alkosto.com/tv/p/7705946474559',
                    't', now(), now(), true, 'f')"""
     )
-    assert migrate(db, 6) == [8, 7]
+    db.execute(
+        """INSERT INTO discountz.watch (source, pending_ref, next_check_at)
+           VALUES ('alkosto', 'slug:tv', now())"""
+    )
+    assert migrate(db, 6) == [9, 8, 7]
     assert _scalar(db, code) == 0
     assert _scalar(db, "SELECT count(*) FROM discountz.catalog_item") == 0
-    assert migrate(db, "head") == [7, 8]
+    assert migrate(db, "head") == [7, 8, 9]
     assert _scalar(db, code) == 1
 
 
@@ -278,9 +282,25 @@ def test_0008_up_down(db: psycopg.Connection) -> None:
            VALUES ('pepeganga', '455', 'https://www.pepeganga.com/mordedor-455/p',
                    't', now(), now(), true, 'f')"""
     )
-    assert migrate(db, 7) == [8]
+    db.execute(
+        """INSERT INTO discountz.watch (source, pending_ref, next_check_at)
+           VALUES ('jumbo', 'slug:tv', now())"""
+    )
+    assert migrate(db, 7) == [9, 8]
     assert _scalar(db, codes) == 0
     assert _scalar(db, "SELECT count(*) FROM discountz.catalog_item") == 0
     assert _scalar(db, "SELECT count(*) FROM discountz.listing") == 0
-    assert migrate(db, "head") == [8]
+    assert _scalar(db, "SELECT count(*) FROM discountz.watch") == 0
+    assert migrate(db, "head") == [8, 9]
     assert _scalar(db, codes) == 2
+
+
+def test_0009_up_down(db: psycopg.Connection) -> None:
+    has = """SELECT count(*) FROM information_schema.columns
+              WHERE table_schema = 'discountz' AND table_name = 'catalog_item'
+                AND column_name = 'min_seen_at'"""
+    assert _scalar(db, has) == 1
+    assert migrate(db, 8) == [9]
+    assert _scalar(db, has) == 0
+    assert migrate(db, "head") == [9]
+    assert _scalar(db, has) == 1

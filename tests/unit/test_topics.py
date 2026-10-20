@@ -274,3 +274,12 @@ def test_jumbo_and_pepeganga_keep_the_same_hashtag_as_other_stores() -> None:
     assert assign_topic(rules, "jumbo", "/Automóvil/Llantas/") == "ferreteria"
     assert assign_topic(rules, "pepeganga", "/Gaming/Monitores/") == "tecnologia"
     assert assign_topic(rules, "pepeganga", "/Habitacion y Colchones/Colchones/") == "hogar"
+
+
+def test_jumbo_only_roots_do_not_leak_to_other_stores() -> None:
+    """«Especiales» y «Jardín» son raíces de Jumbo: en otra tienda pueden ser otra cosa."""
+    rules = load_topics().rules
+    assert assign_topic(rules, "jumbo", "/Especiales/Ollas/") == "hogar"
+    assert assign_topic(rules, "jumbo", "/Jardín/Matas/") == "hogar"
+    assert assign_topic(rules, "exito", "/Especiales/Ollas/") == "otros"
+    assert assign_topic(rules, "pepeganga", "/Jardín/Matas/") == "otros"

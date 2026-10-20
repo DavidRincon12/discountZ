@@ -116,6 +116,25 @@ def test_drop_must_beat_min_seen() -> None:
     assert cand is None
 
 
+def test_min_seen_older_than_90_days_no_longer_blocks_a_drop() -> None:
+    """El mínimo es de 90 días (spec del rastreo §3.1): uno de hace meses no tapa la bajada."""
+    state, t = history(59_900, 4)
+    for i in range(1, 6):
+        state, _, _ = observe(state, obs(99_900), t + timedelta(hours=6 * i), TECH, GLOB)
+    later = t + timedelta(days=95)
+    state, _, _ = observe(state, obs(99_900), later, TECH, GLOB)
+    assert state.min_seen_minor == 99_900
+    _, cand, _ = observe(state, obs(69_900), later + timedelta(hours=6), TECH, GLOB)
+    assert cand is not None
+    assert cand.kind is AlertKind.CATALOG_DROP
+
+
+def test_min_seen_is_refreshed_while_the_price_stays_there() -> None:
+    state, t = history(59_900, 100)  # 100 días estable al mínimo: sigue vigente
+    assert state.min_seen_minor == 59_900
+    assert state.min_seen_at == t
+
+
 def test_absolute_saving_floor() -> None:
     state, t = history(50_000, 5)  # 15 % de 50.000 = 7.500 < 10.000
     _, cand, _ = observe(state, obs(42_500), t + timedelta(hours=6), TECH, GLOB)

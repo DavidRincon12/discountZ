@@ -217,7 +217,15 @@ def _changes(conn: psycopg.Connection) -> int:
     return int(row[0])
 
 
+def _crawled(conn: psycopg.Connection, source: str, days_ago: int) -> None:
+    conn.execute(
+        "INSERT INTO discountz.crawl_cursor (source, last_run_at) VALUES (%s, %s)",
+        (source, T - days_ago * DAY),
+    )
+
+
 def test_catalog_retention_90d_and_unseen_30d(db: psycopg.Connection) -> None:
+    _crawled(db, "exito", 0)
     fresh = _item(db, "1", 0)
     _item(db, "2", 31)
     for days in (1, 60, 91):
@@ -226,6 +234,17 @@ def test_catalog_retention_90d_and_unseen_30d(db: psycopg.Connection) -> None:
     items = db.execute("SELECT external_id FROM discountz.catalog_item").fetchall()
     assert items == [("1",)]
     assert _changes(db) == 2
+
+
+def test_unseen_items_of_a_paused_crawl_are_kept(db: psycopg.Connection) -> None:
+    """Una tienda pausada (450 MB, breaker, rastreo apagado) no pierde su histórico a los 30 d."""
+    _crawled(db, "carulla", 20)
+    _item(db, "1", 31, "carulla")  # la tienda dejó de rastrearse antes de que pasaran 30 d
+    _item(db, "2", 51, "carulla")  # 30 d sin verse mientras la tienda se rastreaba
+    _item(db, "3", 31, "olimpica")  # nunca se rastreó: sin cursor
+    run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    items = db.execute("SELECT external_id FROM discountz.catalog_item ORDER BY 1").fetchall()
+    assert items == [("1",), ("3",)]
 
 
 def test_size_guard_400_shortens_retention_to_45d(db: psycopg.Connection) -> None:

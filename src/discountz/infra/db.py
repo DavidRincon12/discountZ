@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -1735,7 +1735,7 @@ def is_unique_violation(exc: BaseException) -> bool:
 
 _CAT_COLS = (
     "price_minor, usual_minor, min_seen_minor, first_seen_at, stable_since, reads_at_price,"
-    " last_changed_at, last_alert_at, last_alert_minor"
+    " last_changed_at, last_alert_at, last_alert_minor, min_seen_at"
 )
 
 
@@ -1786,12 +1786,13 @@ def save_catalog_page(
         cur.executemany(
             f"""INSERT INTO discountz.catalog_item (source, external_id, ean, topic, currency,
                     {_CAT_COLS}, last_seen_at, model_key)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (source, external_id) DO UPDATE SET
                     ean = coalesce(EXCLUDED.ean, catalog_item.ean), topic = EXCLUDED.topic,
                     model_key = coalesce(EXCLUDED.model_key, catalog_item.model_key),
                     price_minor = EXCLUDED.price_minor, usual_minor = EXCLUDED.usual_minor,
                     min_seen_minor = EXCLUDED.min_seen_minor,
+                    min_seen_at = EXCLUDED.min_seen_at,
                     stable_since = EXCLUDED.stable_since,
                     reads_at_price = EXCLUDED.reads_at_price,
                     last_changed_at = EXCLUDED.last_changed_at,
@@ -1812,6 +1813,7 @@ def save_catalog_page(
                     r.state.last_changed_at,
                     r.state.last_alert_at,
                     r.state.last_alert_minor,
+                    r.state.min_seen_at,
                     now,
                     r.model_key,
                 )
@@ -2028,11 +2030,20 @@ def delete_old_catalog_changes(conn: psycopg.Connection, cutoff: datetime) -> in
     ).rowcount
 
 
-def delete_unseen_catalog_items(conn: psycopg.Connection, cutoff: datetime) -> int:
-    """Productos que el rastreo dejó de ver (sin stock o retirados); sus cambios caen en cascada."""
-    return conn.execute(
-        "DELETE FROM discountz.catalog_item WHERE last_seen_at < %s", (cutoff,)
-    ).rowcount
+def delete_unseen_catalog_items(conn: psycopg.Connection, unseen: timedelta) -> int:
+    """Productos que el rastreo dejó de ver (sin stock o retirados); sus cambios caen en cascada.
+
+    El plazo cuenta desde la última corrida de su tienda, no desde hoy: una tienda pausada
+    (450 MB, breaker, rastreo apagado) conserva su catálogo. Por lotes: con el de eBay
+    (~150 mil filas) un solo `DELETE` pasaba del `statement_timeout`.
+    """
+    return _delete_batched(
+        conn,
+        "catalog_item",
+        """last_seen_at < (SELECT cc.last_run_at FROM discountz.crawl_cursor cc
+                             WHERE cc.source = catalog_item.source) - %s""",
+        (unseen,),
+    )
 
 
 @dataclass(frozen=True, slots=True)

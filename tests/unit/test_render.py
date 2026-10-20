@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import html as html_lib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -644,3 +645,17 @@ def test_feed_card_badge_names_the_source() -> None:
 def test_model_low_has_header_in_text_alerts() -> None:
     view = dataclasses.replace(GOOD, kind=AlertKind.MODEL_LOW)
     assert render_alert(view).html.startswith("<b>MÁS BARATO QUE SU MODELO</b>")
+
+
+def test_health_columns_stay_aligned_with_long_codes() -> None:
+    """`slickdeals_amazon` y `tg_descuentoshome` (17 letras) corrían la columna de Salud."""
+    sources = [
+        SourceStatus("exito", True, "healthy", "closed", None, 0, 212, 214),
+        SourceStatus("slickdeals_amazon", True, "healthy", "closed", None, 0, 9, 9),
+        SourceStatus("tg_descuentoshome", False, "healthy", "closed", None, 0, 0, 0),
+    ]
+    snap = StatusSnapshot(None, None, None, None, None, sources, 0, 0)
+    lines = html_lib.unescape(render_health(snap, NOW).html).splitlines()
+    table = [line for line in lines if line.startswith(("Fuente", "exito", "slick", "tg_"))]
+    assert len(table) == 4
+    assert {line.find(line.split()[1]) for line in table} == {18}

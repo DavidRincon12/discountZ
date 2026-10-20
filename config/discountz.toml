@@ -175,7 +175,7 @@ max_per_24h = 400
 watch_interval_min = 180
 search_interval_min = 360
 max_batch = 1
-max_auto_watches = 300
+max_auto_watches = 25  # 25 × 8 lecturas al día: la mitad del tope queda para /seguir y /buscar
 
 [sources.newegg]
 group = "newegg"
@@ -186,7 +186,7 @@ max_per_24h = 400
 watch_interval_min = 180
 search_interval_min = 360
 max_batch = 1
-max_auto_watches = 100
+max_auto_watches = 25  # 25 × 8 lecturas al día: la mitad del tope queda para /seguir y /buscar
 
 [sources.walmart_us]
 group = "walmart_us"
@@ -218,7 +218,7 @@ max_per_24h = 1000
 watch_interval_min = 120
 search_interval_min = 360
 max_batch = 1          # `getItems` (lote) da 403 sin acceso especial: una ficha por petición
-max_auto_watches = 100
+max_auto_watches = 40  # 40 × 12 lecturas al día: la mitad del tope queda para /seguir y /buscar
 
 [sources.alkosto]  # Algolia: /seguir, /buscar y la confirmación; el rastreo tiene su propio presupuesto
 group = "alkosto"

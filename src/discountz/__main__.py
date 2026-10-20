@@ -33,7 +33,7 @@ from discountz.sources.fixtures import FIXTURES_DIR, save_fixture
 from discountz.sources.registry import load_all
 
 EXIT_OK, EXIT_BUG, EXIT_CONFIG, EXIT_DB = 0, 1, 2, 3
-EXIT_BLOCKED = 3  # rastreo bloqueado: rojo en Actions, sin reintentos
+EXIT_BLOCKED = 4  # rastreo bloqueado: rojo en Actions, sin reintentos (3 es la BD)
 _DURATION_RE = re.compile(r"^(\d+)([smh])$")
 _UNITS = {"s": 1, "m": 60, "h": 3600}
 

@@ -111,8 +111,8 @@ topic = "electro"
 prefixes = [
   "/hogar/", "/hogar y decoracion/", "/hogar y lenceria/", "/hogar cocina/", "/decoracion/",
   "/muebles/", "/navidad/", "/celebracion/", "/eventos y temporadas/", "/eventos/", "/fiesta/",
-  "/jardin y aire libre/", "/jardin/", "/pisos y paredes/", "/banos/", "/habitacion y colchones/",
-  "/mundo parrilla/", "/especiales/",
+  "/jardin y aire libre/", "/pisos y paredes/", "/banos/", "/habitacion y colchones/",
+  "/mundo parrilla/",
 ]
 topic = "hogar"
 
@@ -256,6 +256,12 @@ topic = "belleza"
 source = "jumbo"
 prefixes = ["/supermercado/cuidado del bebe/"]
 topic = "bebes"
+
+# Raíces propias de Jumbo con nombres genéricos: en otra tienda podrían ser otra cosa.
+[[rules]]
+source = "jumbo"
+prefixes = ["/jardin/", "/especiales/"]
+topic = "hogar"
 
 # Best Buy (API oficial): categorías de primer nivel en inglés. Se revisan con el árbol real.
 [[rules]]

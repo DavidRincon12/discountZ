@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -150,6 +151,7 @@ def parse_query(body: bytes) -> tuple[list[AlkostoItem], int]:
     except ValidationError as exc:
         raise ParseError("bad_query") from exc
     parsed = [_item(raw) for raw in page.hits]
+    _log_skipped(parsed)
     items = [i for i in parsed if isinstance(i, AlkostoItem)]
     if parsed and not items:
         raise ParseError("no_valid_hits")
@@ -176,7 +178,15 @@ def parse_objects(body: bytes, ids: Sequence[str]) -> dict[str, AlkostoItem | Pa
         if isinstance(item, AlkostoItem) and item.external_id != wanted:
             item = ParseError("other_id")
         out[wanted] = item
+    _log_skipped(list(out.values()))
     return out
+
+
+def _log_skipped(parsed: Sequence[AlkostoItem | ParseError]) -> None:
+    """Una línea por código y página, no por producto (~400 sin precio por vuelta)."""
+    codes = Counter(p.code for p in parsed if isinstance(p, ParseError))
+    for code, n in sorted(codes.items()):
+        event(log, "alkosto_items_skipped", source=CODE, code=code, count=n)
 
 
 def _item(raw: dict[str, object]) -> AlkostoItem | ParseError:
@@ -188,7 +198,6 @@ def _item(raw: dict[str, object]) -> AlkostoItem | ParseError:
         code = "bad_url"
     except ParseError as exc:
         code = exc.code
-    event(log, "alkosto_item_skipped", source=CODE, code=code)
     return ParseError(code)
 
 
@@ -324,7 +333,7 @@ class AlkostoSource:
         return found
 
     def _valid(self, ctx: SourceContext, external_ids: Sequence[str]) -> list[AlkostoItem]:
-        """Las fichas legibles; las rotas ya quedaron registradas como `alkosto_item_skipped`."""
+        """Las fichas legibles; las rotas ya quedaron registradas como `alkosto_items_skipped`."""
         return [i for i in self._objects(ctx, external_ids).values() if isinstance(i, AlkostoItem)]
 
     def _query(
