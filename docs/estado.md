@@ -7,15 +7,14 @@
 - eBay (`ebay_us`, ADR 0008) en producción desde el 2026-10-18: `/seguir`, `/buscar` y job `crawl` con `MODEL_LOW` (mediana del mismo `epid`).
 - Alkosto (`alkosto`, ADR 0009) en producción desde el 2026-10-20 (PR #21, esquema 7).
 - Jumbo y Pepe Ganga (VTEX, migración 0008) en producción desde el 2026-10-20 (PR #22, esquema 8): `/seguir`, `/buscar`, canario y `crawl`.
-- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 867 unitarias y 188 de integración en verde el 2026-10-20.
+- Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 869 unitarias y 188 de integración en verde el 2026-10-20.
 
 ## Último cambio
-- Rama `claude/project-thread-rlzaur`: `setup-bot` (workflow manual que pone el menú de comandos del grupo, sin `/temas`) y errores de precio de una tormenta (G12 confirmado) en un solo mensaje por tienda. Antes: PR #25 (Hot Sale CCCE) y PR #24 (esquema 9).
+- Rama `claude/project-thread-rlzaur`: el arranque del `crawl` espera 30 s y reintenta (2 veces) si el pooler rechaza la conexión (Éxito y eBay salían con código 3 a las 13:00Z). Antes: PR #26 (menú del bot con `setup-bot` y un mensaje por tormenta de errores de precio).
 
 ## Siguiente paso
-- Al fusionar: *Actions → setup-bot*. Vigilar el peso de la BD con Jumbo (≈4 vueltas de 250 peticiones) y Pepe Ganga (vuelta completa el 2026-10-20 16:02Z).
-- Descartadas: Droguerías Colsubsidio (robots bloquea `/api/`), Decathlon (no es VTEX, 403, robots bloquea `/api/`) y Metro (no responde).
-- David: certificado de Supabase y token de cron-job.org. DealNews queda apagado.
+- David: correr una vez *Actions → setup-bot* (PR #26 ya fusionado); bajar el certificado de Supabase (`config/supabase-ca.crt`) y revocar el token de GitHub de cron-job.org. DealNews queda apagado.
+- Vigilar el peso de la BD con Jumbo (≈4 vueltas de 250 peticiones) y Pepe Ganga. Descartadas: Colsubsidio y Decathlon (robots bloquea `/api/`), Metro (no responde).
 
 ## Decisiones vigentes
 - Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006), DealNews sin tope de antigüedad (ADR 0007) eBay por la Browse API con comparación por modelo (ADR 0008) y Alkosto por su índice de Algolia, asumiendo el riesgo de sus términos (ADR 0009); sin carril por descuento en VTEX porque ordena por el `ListPrice` inflado (ADR 0010).
@@ -35,6 +34,7 @@
 - Calendario CO según la CCCE: Hot Sale 16-23 oct 2026 (con Drops); Cyberlunes ya no existe. Falta el Hot Sale de 2027 (marzo y octubre, sin fecha publicada). Black Days y los eventos de EE. UU. siguen estimados.
 - Términos de la API de eBay (revisados 2026-10-20): §9.5 prohíbe usar su contenido para «modelar precios» (roza `MODEL_LOW`) y §3.1(b)/§9.7 solo permiten copias intermedias (roza el histórico de `catalog_item`). David decidió dejarlo igual (uso personal; el riesgo es que revoquen las claves).
 - Falta: `pg_terminate_backend` tras 3 `skipped_locked` (antes separar el `application_name` del ciclo y del rastreo, que hoy comparten `discountz-<run_id>`), descarte G10 contra `R_listing` en `/buscar` (hoy el lote constante no alerta pero entra al histórico) y `config/supabase-ca.crt` para `verify-full` (lo baja David del panel de Supabase).
+- Resumen diario (13:00Z): `catalog_daily_stats` pasa del `statement_timeout` de 15 s algunos días (`maintenance_failed error=QueryCanceled`); se reintenta y sale a las 13:02. Si empieza a fallar seguido, contar `catalog_item` con estimación o índice.
 - VTEX: el WAF rechaza `+` como espacio (`infra/http` usa `%20`); una página de 50 productos pesa hasta ~43 MB (se pide por mitades sobre 24 MB); `products/search` con varios `skuId` devuelve 10 sin `_from`/`_to`.
 - Pendientes menores del rastreo: reloj fijo por corrida, tope diario por día UTC, orden del barrido VTEX (sin `O=`: sin medir si salta productos), C07 sin unir tiendas. Códigos de salida: 3 BD, 4 rastreo bloqueado.
 - eBay, pendientes menores: parámetros leídos del TOML al importar el adaptador. Los seguimientos automáticos usan como mucho la mitad del tope diario (`test_auto_watches_leave_half_the_daily_budget_for_the_user`). Vigilar la cuota (`Unavailable quota`) y el peso de la BD; si satura: `/fuente off ebay_us`. La imagen `postgres:17` del CI no tiene digest fijado.

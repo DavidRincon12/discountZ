@@ -314,3 +314,41 @@ def test_setup_bot_without_settings_exits_2(monkeypatch: pytest.MonkeyPatch) -> 
     for k in ENV:
         monkeypatch.delenv(k, raising=False)
     assert main(["setup-bot"]) == 2
+
+
+def test_crawl_start_waits_out_a_pooler_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A las 13:00Z el pooler rechazó el arranque de Éxito y eBay: se espera y se reintenta."""
+    import psycopg
+
+    import discountz.__main__ as cli
+
+    calls: list[int] = []
+    sleeps: list[float] = []
+    conn = object()
+
+    def flaky(_settings: object, _rnd: object) -> object:
+        calls.append(1)
+        if len(calls) < 3:
+            raise psycopg.OperationalError("rechazo")
+        return conn
+
+    monkeypatch.setattr(cli, "_connect_with_retry", flaky)
+    monkeypatch.setattr("discountz.__main__.time.sleep", sleeps.append)
+    assert cli._connect_crawl(None, None, "exito") is conn  # type: ignore[arg-type]
+    assert sleeps == [30.0, 30.0]
+
+
+def test_crawl_start_gives_up_after_the_reconnects(monkeypatch: pytest.MonkeyPatch) -> None:
+    import psycopg
+
+    import discountz.__main__ as cli
+
+    def down(_settings: object, _rnd: object) -> object:
+        raise psycopg.OperationalError("caída")
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(cli, "_connect_with_retry", down)
+    monkeypatch.setattr("discountz.__main__.time.sleep", sleeps.append)
+    with pytest.raises(psycopg.OperationalError):
+        cli._connect_crawl(None, None, "exito")  # type: ignore[arg-type]
+    assert len(sleeps) == 2
