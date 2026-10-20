@@ -562,6 +562,16 @@ def test_crawl_respects_daily_cap(db: psycopg.Connection) -> None:
     assert len(transport.urls) == 1
 
 
+def test_crawl_spreads_the_daily_budget_over_the_hours_left(db: psycopg.Connection) -> None:
+    """A las 12:00 UTC quedan 12 horas: las 120 peticiones que quedan dan 10 por corrida."""
+    repo.save_cursor(db, replace(repo.get_cursor(db, "exito"), day=T.date(), day_requests=99_880))
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(200)]})
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.requests == 10
+    assert len(transport.urls) == 10
+
+
 def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
     seed_history(db, "123", 99_900)
     src = FakeCatalog({"C:/1/": [[obs("123", 59_900)]]}, offers={"123": offer("123", 59_900)})

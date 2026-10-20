@@ -50,6 +50,18 @@ class CrawlBudget:
     max_per_24h: int
     hot_share_bp: int = 2500  # parte de la corrida para la capa caliente
 
+    def run_cap(self, used_today: int, hour: int) -> int:
+        """Peticiones de una corrida: lo que queda del día UTC repartido en sus horas.
+
+        Las corridas de respaldo y las manuales no gastan de más: cada una toma su parte de lo que
+        queda, así que el tope no se agota antes de la noche.
+        """
+        left = self.max_per_24h - used_today
+        if left <= 0:
+            return 0
+        hours_left = 24 - hour
+        return min(self.max_per_run, -(-left // hours_left))
+
     def paced(self, group: str, max_per_run: int) -> SourceBudget:
         """El `SourceBudget` que usa `PacedClient` para esta corrida."""
         return SourceBudget(

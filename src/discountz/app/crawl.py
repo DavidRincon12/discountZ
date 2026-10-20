@@ -130,8 +130,7 @@ class _Run:
         if self.cursor.day != now.date():
             self.cursor = replace(self.cursor, day=now.date(), day_requests=0)
         self.day_base = self.cursor.day_requests
-        cap = min(deps.budget.max_per_run, deps.budget.max_per_24h - self.day_base)
-        self.cap = max(cap, 0)
+        self.cap = deps.budget.run_cap(self.day_base, now.hour)
         self.http = PacedClient(
             deps.http,
             deps.budget.paced(self.code, max(self.cap, 1)),
