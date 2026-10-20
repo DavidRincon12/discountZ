@@ -360,7 +360,14 @@ max_per_run = 1700
 max_per_24h = 40000
 
 # Calendario de eventos (spec §6.2): hora de Bogotá; fin exclusivo.
-# FECHAS A CONFIRMAR por David antes de cada evento: las tiendas las anuncian con pocas semanas.
+# Fechas CO: calendario de la CCCE, que hace dos Hot Sale al año (marzo y octubre) y ya no hace
+# Cyberlunes (lo reemplazó el Hot Sale). La de 2027 se agrega cuando la CCCE la publique.
+
+[[events]]
+name = "Hot Sale"  # Drops del 16 al 18 y Hot Sale del 19 al 23 de octubre de 2026
+sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga", "alkosto"]
+starts = "2026-10-16T00:00"
+ends = "2026-10-24T00:00"
 
 [[events]]
 name = "Black Friday"
@@ -370,7 +377,7 @@ ends = "2026-11-28T00:00"
 
 [[events]]
 name = "Black Days"
-sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga"]
+sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga", "alkosto"]
 starts = "2026-11-26T00:00"
 ends = "2026-11-30T00:00"
 
@@ -379,18 +386,6 @@ name = "Cyber Monday"
 sources = ["amazon_us", "newegg", "walmart_us", "bestbuy_us", "slickdeals"]
 starts = "2026-11-30T00:00"
 ends = "2026-12-01T00:00"
-
-[[events]]
-name = "Cyber Lunes"
-sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga"]
-starts = "2026-11-30T00:00"
-ends = "2026-12-01T00:00"
-
-[[events]]
-name = "Hot Sale"
-sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga"]
-starts = "2027-05-24T00:00"
-ends = "2027-05-27T00:00"
 
 [[events]]
 name = "Prime Day"
