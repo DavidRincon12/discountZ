@@ -3,17 +3,41 @@
 from __future__ import annotations
 
 import json
+import logging
+import random
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from discountz.domain.errors import ParseError
+from discountz.domain.errors import HardBlock, ParseError, Unavailable
+from discountz.domain.model import ListingRef, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money
-from discountz.sources.alkosto import parse_api_key, parse_objects, parse_query
+from discountz.domain.scheduling import SourceBudget
+from discountz.domain.urls import SafeUrl
+from discountz.infra.http import Files, HttpResponse, Method, PacedClient, Params
+from discountz.sources.alkosto import (
+    ALGOLIA,
+    BASE,
+    HOSTS,
+    INDEX,
+    AlkostoSource,
+    parse_api_key,
+    parse_objects,
+    parse_query,
+)
+from discountz.sources.base import ListingFound, ListingGone, NoCredentials, SourceContext
 from discountz.sources.fixtures import load_fixture
 
 TV = "7705946474559"
+OTHER = "6937574879524"
+MISSING = "0000000000000"
+T = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
+QUERY = f"{ALGOLIA}/1/indexes/{INDEX}/query"
+OBJECTS = f"{ALGOLIA}/1/indexes/*/objects"
 
 
 def _body(name: str) -> bytes:
@@ -118,3 +142,202 @@ def test_parse_query_rejects_garbage() -> None:
         parse_query(b'{"message": "nada"}')
     with pytest.raises(ParseError):
         parse_query(b"<html>")
+
+
+# --- fuente --------------------------------------------------------------------------------
+
+Handler = Callable[[str, str, Mapping[str, object] | None], HttpResponse]
+
+
+@dataclass
+class Api:
+    """HttpClient falso: responde según método y URL; anota el cuerpo y las cabeceras."""
+
+    handler: Handler
+    calls: list[tuple[str, str, Mapping[str, object] | None, Mapping[str, str]]] = field(
+        default_factory=list
+    )
+
+    def request(
+        self,
+        method: Method,
+        url: str,
+        *,
+        params: Params | None = None,
+        json: Mapping[str, object] | None = None,
+        headers: Mapping[str, str] | None = None,
+        cookies: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
+    ) -> HttpResponse:
+        self.calls.append((method, url, json, dict(headers or {})))
+        return self.handler(method, url, json)
+
+    def count(self, url: str) -> int:
+        return sum(1 for _, u, _, _ in self.calls if u == url)
+
+
+def fx(name: str) -> HttpResponse:
+    return load_fixture("alkosto", name)
+
+
+def resp(body: bytes, status: int = 200, url: str = QUERY) -> HttpResponse:
+    return HttpResponse(status, url, {}, body, 0)
+
+
+def routes(**by_url: HttpResponse | list[HttpResponse]) -> Handler:
+    """`home`, `query` y `objects` → respuesta fija o secuencia (la última se repite)."""
+    table = {
+        BASE + "/": by_url.get("home", fx("home")),
+        QUERY: by_url.get("query"),
+        OBJECTS: by_url.get("objects"),
+    }
+    seen: dict[str, int] = {}
+
+    def handle(method: str, url: str, body: Mapping[str, object] | None) -> HttpResponse:
+        route = table.get(url)
+        assert route is not None, f"sin ruta: {method} {url}"
+        if isinstance(route, HttpResponse):
+            return route
+        i = seen.get(url, 0)
+        seen[url] = i + 1
+        return route[min(i, len(route) - 1)]
+
+    return handle
+
+
+def paced(api: Api, src: AlkostoSource) -> PacedClient:
+    budget = SourceBudget("alkosto", 0, 0, 50, 100, timedelta(hours=2), timedelta(hours=6), 1)
+    return PacedClient(
+        api,
+        budget,
+        lambda s: None,
+        lambda: 0.0,
+        random.Random(0),
+        src.detect_block,
+        source="alkosto",
+    )
+
+
+def run(**by_url: HttpResponse | list[HttpResponse]) -> tuple[AlkostoSource, Api, SourceContext]:
+    src = AlkostoSource()
+    api = Api(routes(**by_url))
+    return src, api, SourceContext(paced(api, src), NoCredentials(), 1e9, T)
+
+
+def test_parse_url_accepts_product_pages_only() -> None:
+    src = AlkostoSource()
+    url = SafeUrl.parse(f"{BASE}/tv-kalley-60/p/{TV}", HOSTS)
+    assert src.parse_url(url) == ListingRef("alkosto", TV)
+    assert src.parse_url(SafeUrl.parse(f"{BASE}/tv/c/BI_TVVI_ALKOS", HOSTS)) is None
+    assert src.parse_url(SafeUrl.parse(f"{BASE}/x/p/{TV}/otra", HOSTS)) is None
+    assert src.parse_url(SafeUrl.parse(f"{BASE}/x/p/ab-c", HOSTS)) is None
+
+
+def test_fetch_listings_found_and_gone() -> None:
+    src, api, ctx = run(objects=fx("objects"))
+    refs = [ListingRef("alkosto", i) for i in (TV, OTHER, MISSING)]
+    out = src.fetch_listings(ctx, refs)
+    assert isinstance(out[0], ListingFound)
+    offer = out[0].offer
+    assert offer.price == Money(1649900, Currency.COP)
+    assert offer.list_price is None
+    assert offer.seller_class is SellerClass.FIRST_PARTY
+    assert offer.url_path is not None
+    assert offer.url_path.endswith(f"/p/{TV}")
+    assert isinstance(out[1], ListingFound)
+    assert out[2] == ListingGone(refs[2])
+    sent = api.calls[-1][2]
+    assert sent is not None
+    requests = sent["requests"]
+    assert isinstance(requests, list)
+    assert [r["objectID"] for r in requests] == [TV, OTHER, MISSING]
+    assert all(r["indexName"] == INDEX for r in requests)
+
+
+def _objects_with(**changes: object) -> HttpResponse:
+    data = json.loads(fx("objects").body)
+    data["results"][0].update(changes)
+    return resp(json.dumps(data).encode(), url=OBJECTS)
+
+
+def test_confirm_returns_none_when_out_of_stock() -> None:
+    src, _, ctx = run(objects=_objects_with(stocklevel_int=0))
+    found = src.fetch_listings(ctx, [ListingRef("alkosto", TV)])[0]
+    assert isinstance(found, ListingFound)
+    assert src.confirm(ctx, found.offer) is None
+
+
+def test_confirm_returns_the_fresh_offer() -> None:
+    src, _, ctx = run(objects=fx("objects"))
+    found = src.fetch_listings(ctx, [ListingRef("alkosto", TV)])[0]
+    assert isinstance(found, ListingFound)
+    again = src.confirm(ctx, found.offer)
+    assert again is not None
+    assert again.price == Money(1649900, Currency.COP)
+
+
+def test_search_posts_query() -> None:
+    src, api, ctx = run(query=fx("search"))
+    page = src.search(ctx, SearchSpec("alkosto", "televisor", (), None, None, "tecnologia"), 0)
+    assert len(page.offers) == 20
+    method, url, sent, headers = api.calls[-1]
+    assert (method, url) == ("POST", QUERY)
+    assert sent is not None
+    assert sent["query"] == "televisor"
+    assert sent["hitsPerPage"] == 20
+    assert "objectID" in list(sent["attributesToRetrieve"])  # type: ignore[call-overload]
+    assert headers["X-Algolia-API-Key"] == "CLAVE_DE_PRUEBA"
+    assert headers["X-Algolia-Application-Id"] == "QX5IPS1B1Q"
+
+
+def test_key_is_read_once_per_process() -> None:
+    src, api, ctx = run(query=fx("search"))
+    spec = SearchSpec("alkosto", "televisor", (), None, None, "tecnologia")
+    src.search(ctx, spec, 0)
+    src.search(ctx, spec, 0)
+    assert api.count(BASE + "/") == 1
+
+
+def test_invalid_key_rereads_home_once_then_hard_block() -> None:
+    src, api, ctx = run(query=fx("invalid-key"))
+    spec = SearchSpec("alkosto", "televisor", (), None, None, "tecnologia")
+    with pytest.raises(HardBlock) as exc:
+        src.search(ctx, spec, 0)
+    assert exc.value.code == "api_key"
+    assert api.count(BASE + "/") == 2
+    assert api.count(QUERY) == 2
+
+
+def test_invalid_key_recovers_after_rereading_home() -> None:
+    src, api, ctx = run(query=[fx("invalid-key"), fx("search")])
+    page = src.search(ctx, SearchSpec("alkosto", "tv", (), None, None, "tecnologia"), 0)
+    assert len(page.offers) == 20
+    assert api.count(BASE + "/") == 2
+
+
+def test_rate_limited_is_unavailable() -> None:
+    src, _, ctx = run(query=resp(b"<html>too many</html>", 429))
+    with pytest.raises(Unavailable) as exc:
+        src.search(ctx, SearchSpec("alkosto", "tv", (), None, None, "tecnologia"), 0)
+    assert exc.value.code == "rate_limited"
+
+
+def test_home_without_key_is_parse_error() -> None:
+    src, _, ctx = run(home=resp(b"<html></html>", url=BASE + "/"), query=fx("search"))
+    with pytest.raises(ParseError) as exc:
+        src.search(ctx, SearchSpec("alkosto", "tv", (), None, None, "tecnologia"), 0)
+    assert exc.value.code == "api_key"
+
+
+def test_key_never_logged_nor_in_errors(caplog: pytest.LogCaptureFixture) -> None:
+    secret = "SECRETO123ABCDEF"  # noqa: S105 - falsa, de prueba
+    home = resp(b'<script>"apiKey": "' + secret.encode() + b'",</script>', url=BASE + "/")
+    src, _, ctx = run(home=home, query=fx("invalid-key"))
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(HardBlock) as exc:
+        src.search(ctx, SearchSpec("alkosto", "tv", (), None, None, "tecnologia"), 0)
+    assert secret not in caplog.text
+    assert secret not in str(exc.value)
+    assert secret not in repr(exc.value)
+    assert secret not in repr(src)

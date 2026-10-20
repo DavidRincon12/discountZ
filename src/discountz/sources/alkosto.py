@@ -11,15 +11,33 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from discountz.domain.errors import ParseError, UnsafeUrl
+from discountz.domain.errors import HardBlock, ParseError, SourceError, Unavailable, UnsafeUrl
+from discountz.domain.model import ExtractionPath, Lead, ListingRef, Offer, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
+from discountz.infra.http import BlockKind, HttpResponse
 from discountz.infra.log import event
+from discountz.sources.base import (
+    Capability,
+    ListingFailed,
+    ListingFound,
+    ListingGone,
+    ListingOutcome,
+    NeedsResolution,
+    SearchPage,
+    SourceContext,
+    SourceDescriptor,
+    pack_unit_key,
+)
+from discountz.sources.blocks import detect_block_common
+from discountz.sources.registry import register
 
 CODE = "alkosto"
 APP_ID = "QX5IPS1B1Q"
@@ -46,6 +64,13 @@ ATTRIBUTES: tuple[str, ...] = (
 # en base64, con el filtro de lo que la tienda muestra).
 _API_KEY = re.compile(rb'"apiKey"\s*:\s*"([A-Za-z0-9+/=_]{8,400})"')
 _GTIN_LENGTHS = frozenset({8, 12, 13, 14})
+_PRODUCT_PATH = re.compile(r"^/[^/]+/p/([0-9A-Za-z]{1,40})/?$")
+QUERY_URL = f"{ALGOLIA}/1/indexes/{INDEX}/query"
+OBJECTS_URL = f"{ALGOLIA}/1/indexes/*/objects"
+MAX_BATCH = 100
+SEARCH_HITS = 20
+BAD_KEY = "bad_key"
+_INVALID_KEY = b"Invalid Application-ID or API key"
 
 log = logging.getLogger(__name__)
 
@@ -192,3 +217,138 @@ def _image(raw: str | None) -> str | None:
         return str(SafeUrl.parse(raw, IMAGE_HOSTS))
     except UnsafeUrl:
         return None
+
+
+def _offer(item: AlkostoItem, observed_at: datetime) -> Offer:
+    return Offer(
+        ref=ListingRef(CODE, item.external_id),
+        parent_external_id=None,
+        title=item.title,
+        price=item.price,
+        list_price=None,  # el «antes» de la tienda viene inflado: nunca se usa
+        in_stock=item.in_stock,
+        seller_class=SellerClass.FIRST_PARTY,  # el índice no trae vendedores de marketplace
+        unit_key=pack_unit_key(item.title) or "un|1",
+        extraction=ExtractionPath.API_JSON,
+        observed_at=observed_at,
+        url_path=item.url.removeprefix(BASE),
+    )
+
+
+class AlkostoSource:
+    def __init__(self) -> None:
+        self.descriptor = SourceDescriptor(
+            code=CODE,
+            kind="store",
+            currency=Currency.COP,
+            hosts=HOSTS,
+            client="httpx",
+            capabilities=frozenset({Capability.DETAIL, Capability.SEARCH, Capability.CONFIRM}),
+            max_batch=MAX_BATCH,
+            external_id_re=EXTERNAL_ID_RE,
+            image_hosts=IMAGE_HOSTS,
+        )
+        self._key: str | None = None
+
+    def __repr__(self) -> str:
+        return f"AlkostoSource(key={self._key is not None})"
+
+    # --- clave y peticiones -----------------------------------------------------------------
+
+    def _api_key(self, ctx: SourceContext, *, reread: bool) -> str:
+        if self._key is None or reread:
+            self._key = None
+            self._key = parse_api_key(ctx.http.request("GET", BASE + "/").body)
+        return self._key
+
+    def _post(self, ctx: SourceContext, url: str, body: Mapping[str, object]) -> bytes:
+        """POST a Algolia; una clave rechazada relee la portada una vez y, si sigue, es bloqueo."""
+        for reread in (False, True):
+            headers = {
+                "X-Algolia-Application-Id": APP_ID,
+                "X-Algolia-API-Key": self._api_key(ctx, reread=reread),
+                "Content-Type": "application/json",
+            }
+            try:
+                return ctx.http.request("POST", url, json=body, headers=headers).body
+            except Unavailable as exc:
+                if exc.code != BAD_KEY:
+                    raise
+        self._key = None
+        raise HardBlock(CODE, "api_key", 403)
+
+    def _objects(self, ctx: SourceContext, external_ids: Sequence[str]) -> dict[str, AlkostoItem]:
+        ids = [i for i in external_ids if EXTERNAL_ID_RE.fullmatch(i)]
+        found: dict[str, AlkostoItem] = {}
+        for i in range(0, len(ids), MAX_BATCH):
+            requests = [
+                {"indexName": INDEX, "objectID": x, "attributesToRetrieve": list(ATTRIBUTES)}
+                for x in ids[i : i + MAX_BATCH]
+            ]
+            found |= parse_objects(self._post(ctx, OBJECTS_URL, {"requests": requests}))
+        return found
+
+    def _query(
+        self, ctx: SourceContext, body: Mapping[str, object]
+    ) -> tuple[list[AlkostoItem], int]:
+        query = {"attributesToRetrieve": list(ATTRIBUTES), **body}
+        return parse_query(self._post(ctx, QUERY_URL, query))
+
+    # --- contrato de la v1 ------------------------------------------------------------------
+
+    def parse_url(self, url: SafeUrl) -> ListingRef | NeedsResolution | None:
+        m = _PRODUCT_PATH.match(url.path)
+        return ListingRef(CODE, m.group(1)) if m else None
+
+    def resolve(self, ctx: SourceContext, pending: NeedsResolution) -> ListingRef:
+        raise ParseError("no_resolution")  # los enlaces de Alkosto ya traen el código
+
+    def fetch_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        out: list[ListingOutcome] = []
+        for i in range(0, len(refs), MAX_BATCH):
+            batch = refs[i : i + MAX_BATCH]
+            try:
+                found = self._objects(ctx, [r.external_id for r in batch])
+            except (SourceError, ParseError) as exc:
+                out.extend(ListingFailed(r, exc) for r in batch)
+                continue
+            for r in batch:
+                item = found.get(r.external_id)
+                out.append(ListingFound(_offer(item, ctx.now)) if item else ListingGone(r))
+        return out
+
+    def fetch_catalog_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        return self.fetch_listings(ctx, refs)  # un solo vendedor: la misma ficha
+
+    def search(self, ctx: SourceContext, spec: SearchSpec, page: int) -> SearchPage:
+        query = " ".join(spec.query.split())[:100]
+        if not query:
+            return SearchPage([], 0)
+        items, hits = self._query(ctx, {"query": query, "hitsPerPage": SEARCH_HITS, "page": page})
+        return SearchPage([_offer(i, ctx.now) for i in items], hits)
+
+    def confirm(self, ctx: SourceContext, offer: Offer) -> Offer | None:
+        """Relee la ficha por `getObjects`: None si ya no existe o se agotó."""
+        item = self._objects(ctx, [offer.ref.external_id]).get(offer.ref.external_id)
+        if item is None or not item.in_stock:
+            return None
+        return _offer(item, ctx.now)
+
+    def fetch_leads(self, ctx: SourceContext) -> list[Lead]:
+        return []
+
+    def detect_block(self, resp: HttpResponse) -> BlockKind | None:
+        """En Algolia, una clave rechazada o el límite de peticiones no son bloqueos anti-bots."""
+        if resp.url.startswith(ALGOLIA):
+            if resp.status == 429:
+                raise Unavailable(CODE, "rate_limited", 429)
+            if resp.status == 403 and _INVALID_KEY in resp.body[:500]:
+                raise Unavailable(CODE, BAD_KEY, 403)
+        return detect_block_common(resp)
+
+
+register(AlkostoSource())

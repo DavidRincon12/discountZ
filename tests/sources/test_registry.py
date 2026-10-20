@@ -20,7 +20,7 @@ from discountz.sources.base import (
     SourceDescriptor,
 )
 from discountz.sources.fixtures import load_fixture, save_fixture, scrub
-from discountz.sources.registry import route_url
+from discountz.sources.registry import load_all, route_url
 
 ASIN_PATH = re.compile(r"^/(?:[^/]+/)?(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})(?:[/?]|$)")
 
@@ -110,3 +110,9 @@ def test_scrub_removes_ips_and_delivery_location() -> None:
 def test_scrub_keeps_times_and_hex_that_are_not_ips() -> None:
     body = b"12:30:45 #ab:cd:ef 2026-10-13T15:00:00Z v1.2.3 999.1.1.1"
     assert scrub(body) == body
+
+
+def test_route_alkosto_product_url() -> None:
+    source, ref = route_url("https://www.alkosto.com/tv-kalley/p/7705946474559", load_all())
+    assert source.descriptor.code == "alkosto"
+    assert ref == ListingRef("alkosto", "7705946474559")

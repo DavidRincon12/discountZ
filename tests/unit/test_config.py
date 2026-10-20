@@ -49,6 +49,7 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "walmart_us",
         "bestbuy_us",
         "ebay_us",
+        "alkosto",
         "slickdeals",
         "tg_descuentostech",
         "tg_clubgratis",
