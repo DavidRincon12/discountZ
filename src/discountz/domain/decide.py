@@ -44,6 +44,8 @@ class PendingAlert:
     listing_id: int
     kind: AlertKind
     category: str
+    source: str = ""
+    storm: bool = False  # G12 confirmado: va con los demás errores de la tienda
 
 
 def decide(
@@ -92,14 +94,19 @@ def _is_quiet(now: datetime) -> bool:
 
 
 def group_summaries(sends: Sequence[PendingAlert]) -> list[list[PendingAlert]]:
-    """≥ 3 good_deal/community_deal de una categoría ⇒ grupos de hasta 10; el resto, solos."""
+    """≥ 3 good_deal/community_deal de una categoría ⇒ grupos de hasta 10; los errores de precio
+    de una tormenta (G12) ⇒ un mensaje por tienda (spec §3.6); el resto, solos."""
     by_cat: defaultdict[str, list[PendingAlert]] = defaultdict(list)
+    by_storm: defaultdict[str, list[PendingAlert]] = defaultdict(list)
     groups: list[list[PendingAlert]] = []
     for item in sends:
         if item.kind in _SUMMARY_KINDS:
             by_cat[item.category].append(item)
+        elif item.kind is AlertKind.PRICE_ERROR and item.storm:
+            by_storm[item.source].append(item)
         else:
             groups.append([item])
+    groups.extend(by_storm.values())
     for items in by_cat.values():
         if len(items) < SUMMARY_MIN:
             groups.extend([i] for i in items)
