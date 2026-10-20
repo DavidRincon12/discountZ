@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -217,3 +218,49 @@ def test_ebay_subcategories_change_topic() -> None:
     assert assign_topic(rules, "ebay_us", "/Home & Garden/Major Appliances/Washers/") == "electro"
     assert assign_topic(rules, "ebay_us", "/Home & Garden/Bedding/") == "hogar"
     assert assign_topic(rules, "ebay_us", "/Pet Supplies/Dog Supplies/") == "mascotas"
+
+
+ALKOSTO_LVL0 = Path(__file__).parents[1] / "fixtures" / "alkosto" / "categories-lvl0.json"
+
+
+def test_alkosto_first_level_categories_are_mapped() -> None:
+    topics = load_topics()
+    names = json.loads(ALKOSTO_LVL0.read_text())["categorias"]
+    assert len(names) == 25
+    unmapped = [
+        n
+        for n in names
+        if assign_topic(topics.rules, "alkosto", f"/{n}/") == "otros"
+        and f"alkosto:{normalize_path(f'/{n}/')}" not in topics.intentional_otros
+    ]
+    assert unmapped == []
+
+
+@pytest.mark.parametrize(
+    ("path", "topic"),
+    [
+        ("/tv/smart tv/", "tecnologia"),
+        ("/celulares/smartphones/", "tecnologia"),
+        ("/videojuegos/consolas/", "tecnologia"),
+        ("/electrodomésticos/refrigeración/", "electro"),
+        ("/colchones/king/", "hogar"),
+        ("/mesa y cocina/artículos cocina/", "hogar"),
+        ("/ropa hogar/habitación/", "hogar"),
+        ("/vestuario-ropa/camisetas/", "moda"),
+        ("/deportes/movilidad/", "deportes"),
+        ("/consumo/anchetas/", "mercado"),
+        ("/consumo/bebé/", "bebes"),
+        ("/consumo/mascotas/", "mascotas"),
+        ("/juguetes/peluches/", "bebes"),
+        ("/llantas/llantas automóvil/", "ferreteria"),
+        ("/accesorios automotores/accesorios moto/", "ferreteria"),
+    ],
+)
+def test_alkosto_topics(path: str, topic: str) -> None:
+    assert assign_topic(load_topics().rules, "alkosto", path) == topic
+
+
+@pytest.mark.parametrize("name", ["Servicios", "Pines", "Instrumentos Musicales"])
+def test_alkosto_intentional_otros(name: str) -> None:
+    topics = load_topics()
+    assert f"alkosto:{normalize_path(f'/{name}/')}" in topics.intentional_otros
