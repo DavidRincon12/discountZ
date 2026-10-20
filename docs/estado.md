@@ -10,12 +10,11 @@
 - Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 869 unitarias y 188 de integración en verde el 2026-10-20.
 
 ## Último cambio
-- Rama `claude/project-thread-rlzaur`: `setup-bot` (workflow manual que pone el menú de comandos del grupo, sin `/temas`) errores de precio de una tormenta (G12 confirmado) en un solo mensaje por tienda, y el arranque del `crawl` espera 30 s y reintenta (2 veces) si el pooler lo rechaza (Éxito y eBay salían con código 3 a las 13:00Z). Antes: PR #25 (Hot Sale CCCE) y PR #24 (esquema 9).
+- Rama `claude/project-thread-rlzaur`: el arranque del `crawl` espera 30 s y reintenta (2 veces) si el pooler rechaza la conexión (Éxito y eBay salían con código 3 a las 13:00Z). Antes: PR #26 (menú del bot con `setup-bot` y un mensaje por tormenta de errores de precio).
 
 ## Siguiente paso
-- Al fusionar: *Actions → setup-bot*. Vigilar el peso de la BD con Jumbo (≈4 vueltas de 250 peticiones) y Pepe Ganga (vuelta completa el 2026-10-20 16:02Z).
-- Descartadas: Droguerías Colsubsidio (robots bloquea `/api/`), Decathlon (no es VTEX, 403, robots bloquea `/api/`) y Metro (no responde).
-- David: certificado de Supabase y token de cron-job.org. DealNews queda apagado.
+- David: correr una vez *Actions → setup-bot* (PR #26 ya fusionado); bajar el certificado de Supabase (`config/supabase-ca.crt`) y revocar el token de GitHub de cron-job.org. DealNews queda apagado.
+- Vigilar el peso de la BD con Jumbo (≈4 vueltas de 250 peticiones) y Pepe Ganga. Descartadas: Colsubsidio y Decathlon (robots bloquea `/api/`), Metro (no responde).
 
 ## Decisiones vigentes
 - Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006), DealNews sin tope de antigüedad (ADR 0007) eBay por la Browse API con comparación por modelo (ADR 0008) y Alkosto por su índice de Algolia, asumiendo el riesgo de sus términos (ADR 0009); sin carril por descuento en VTEX porque ordena por el `ListPrice` inflado (ADR 0010).
