@@ -1,18 +1,16 @@
-# Temporal: graba las fixtures de Jumbo y Pepe Ganga (la red de la sesión no llega). Imprime el tgz en base64 por partes; se borra después.
+# Temporal: graba las fixtures de Jumbo y Pepe Ganga (la red de la sesión no llega). Sube las fixtures a la rama (autorizado por David); se borra después.
 name: tmp-fixtures
 on:
   push:
     branches: [claude/project-thread-rlzaur]
     paths: [.github/workflows/tmp-fixtures.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
   grabar:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
           version-file: pyproject.toml
@@ -37,7 +35,8 @@ jobs:
             sleep 2
           done
           ls -la tests/fixtures/vtex/ | grep -E "jumbo|pepeganga"
-          tar czf fx.tgz tests/fixtures/vtex/jumbo* tests/fixtures/vtex/pepeganga*
-          echo "tgz bytes: $(wc -c < fx.tgz)"
-          base64 -w 60000 fx.tgz | nl -ba | sed 's/^/==B64== /'
-          echo "==FIN=="
+          git config user.name "David Santiago Rincón Bautista"
+          git config user.email "davidsantiagorb@ufps.edu.co"
+          git add tests/fixtures/vtex/jumbo* tests/fixtures/vtex/pepeganga*
+          git commit -m "test(vtex): fixtures reales de Jumbo y Pepe Ganga"
+          git push origin HEAD:claude/project-thread-rlzaur
