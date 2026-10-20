@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from discountz.__main__ import EXIT_CONFIG, main
+from discountz.__main__ import EXIT_BLOCKED, EXIT_BUG, EXIT_CONFIG, EXIT_DB, EXIT_OK, main
 from discountz.sources.base import Capability
 from discountz.sources.registry import load_all
 
@@ -65,3 +65,9 @@ def test_cycle_workflow_passes_ebay_credentials_and_probe_is_gone() -> None:
     assert "DISCOUNTZ_EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}" in text
     assert "DISCOUNTZ_EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}" in text
     assert not WORKFLOWS.joinpath("ebay-probe.yml").exists()
+
+
+def test_exit_codes_are_distinct() -> None:
+    """En Actions, una tienda bloqueada no debe leerse como la BD caída (spec v1 §1.4)."""
+    codes = (EXIT_OK, EXIT_BUG, EXIT_CONFIG, EXIT_DB, EXIT_BLOCKED)
+    assert len(set(codes)) == len(codes)
