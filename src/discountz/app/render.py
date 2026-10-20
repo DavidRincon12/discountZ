@@ -463,10 +463,11 @@ def render_health(s: StatusSnapshot, now: datetime) -> RenderedMessage:
                 f" / p95 {s.gap_p95_s // 60} min"
             )
         lines.append(line)
-    lines.append(f"{'Fuente':<14}{'Salud':<11}{'Éxito 24h':<11}{'Uso 24h':<11}Breaker")
+    w = max([14, *(len(src.code) + 1 for src in s.sources)])  # códigos de hasta 17 letras
+    lines.append(f"{'Fuente':<{w}}{'Salud':<11}{'Éxito 24h':<11}{'Uso 24h':<11}Breaker")
     for src in s.sources:
         if not src.enabled:
-            lines.append(f"{src.code:<14}{'apagada':<11}{'—':<11}{'—':<11}—")
+            lines.append(f"{src.code:<{w}}{'apagada':<11}{'—':<11}{'—':<11}—")
             continue
         if src.breaker == "open" and src.breaker_open_until is not None:
             if now >= src.breaker_open_until:
@@ -479,7 +480,7 @@ def render_health(s: StatusSnapshot, now: datetime) -> RenderedMessage:
             breaker = "cerrado"
         health = _HEALTH_TEXT.get(src.health, src.health)
         ratio = f"{src.ok_24h}/{src.requests_24h}"
-        lines.append(f"{src.code:<14}{health:<11}{ratio:<11}{src.requests_24h!s:<11}{breaker}")
+        lines.append(f"{src.code:<{w}}{health:<11}{ratio:<11}{src.requests_24h!s:<11}{breaker}")
     lines.append(f"BD {_mb(s.db_bytes)} MB de {DB_LIMIT_MB} · Atrasados > 1 h: {s.overdue}")
     return RenderedMessage("<pre>" + esc("\n".join(lines)) + "</pre>")
 
