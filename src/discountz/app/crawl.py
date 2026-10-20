@@ -66,6 +66,8 @@ PARSE_STOP = 3  # errores de parseo seguidos que detienen la corrida
 # `retries_exhausted` en sus primeros minutos, 2026-10-18 y 19).
 UNAVAILABLE_TRIES = 3
 UNAVAILABLE_PAUSE_S = 60.0
+# Lo único que una pausa puede arreglar: red, descarga lenta y 5xx o 429 tras los reintentos.
+TRANSIENT_CODES = frozenset({"network", "timeout", "deadline", "retries_exhausted"})
 CONFIRM_TOL_PCT = 1  # la relectura debe quedar a ±1 % del precio visto
 SAMPLE_GAP = gap_h(timedelta(hours=6))
 ERRORS_TOPIC = "errores"
@@ -271,6 +273,8 @@ class _Run:
                     raise _Stop("partial") from None
                 self.deps.sleep(UNAVAILABLE_PAUSE_S)
                 continue
+            if attempt > 1:  # se recuperó: sus fallas ya no son seguidas para el breaker
+                self.breaker_event(BreakerEvent.OK)
             self.parse_streak = 0
             self.ok_pages += 1
             return result
@@ -280,7 +284,7 @@ class _Run:
         """Solo un corte pasajero, con intentos, breaker cerrado y tiempo para la pausa."""
         return (
             isinstance(exc, Unavailable)
-            and exc.code not in (QUOTA, "too_large")  # ninguna se arregla esperando un minuto
+            and exc.code in TRANSIENT_CODES
             and attempt < UNAVAILABLE_TRIES
             and effective_state(self.breaker, self.now) != "open"
             and self.deps.monotonic() + UNAVAILABLE_PAUSE_S < self.end

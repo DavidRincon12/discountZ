@@ -122,6 +122,7 @@ class FakeCatalog:
     errors: set[tuple[str, int]] = field(default_factory=set)
     # Página → lecturas que fallan por red (5xx tras los reintentos) antes de responder.
     transient: dict[tuple[str, int], int] = field(default_factory=dict)
+    failure: tuple[str, int] = ("retries_exhausted", 503)  # código y status de esas fallas
     items_failures: int = 0  # relecturas de la capa caliente que fallan por red
     code: str = "exito"
     supports_changed: bool = False
@@ -156,7 +157,7 @@ class FakeCatalog:
             raise ParseError("schema")
         if self.transient.get((partition, page), 0) > 0:
             self.transient[(partition, page)] -= 1
-            raise Unavailable(self.code, "retries_exhausted", 503)
+            raise Unavailable(self.code, *self.failure)
         pages = self.pages[partition]
         items = pages[page] if page < len(pages) else []
         return CatalogPage(items, has_more=page + 1 < len(pages))
@@ -440,6 +441,17 @@ def test_crawl_stops_after_three_transient_errors_on_the_same_page(db: psycopg.C
     assert repo.load_breakers(db)["exito"].consecutive_unavailable == 3
 
 
+def test_crawl_recovered_errors_do_not_add_up_in_the_breaker(db: psycopg.Connection) -> None:
+    """Cinco cortes de segundos en páginas distintas no son cinco fallas seguidas."""
+    transient = {("C:/1/", p): 1 for p in range(1, 6)}
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(7)]}, transient=transient)
+    d, _ = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert (result.status, result.items) == ("ok", 7)
+    breaker = repo.load_breakers(db)["exito"]
+    assert (breaker.state, breaker.consecutive_unavailable) == ("closed", 0)
+
+
 def test_crawl_hot_tier_survives_a_transient_error(db: psycopg.Connection) -> None:
     state = CatalogState(10_000, None, None, T, T, 1, T - timedelta(hours=1), None, None)
     row = CatalogRow("7", None, "tecnologia", "COP", state, False)
@@ -448,6 +460,20 @@ def test_crawl_hot_tier_survives_a_transient_error(db: psycopg.Connection) -> No
     d, transport = deps(db, src, Clock())
     assert run_crawl(d, T, minutes=60).status == "ok"
     assert transport.kinds() == ["items", "items", "partitions", "page"]
+
+
+def test_crawl_does_not_wait_for_an_error_a_pause_cannot_fix(db: psycopg.Connection) -> None:
+    """Una clave rechazada no se arregla en un minuto: la corrida para sin esperar."""
+    src = FakeCatalog(
+        {"C:/1/": [page_of(1, i) for i in range(3)]},
+        transient={("C:/1/", 1): 9},
+        failure=("bad_key", 401),
+    )
+    clock = Clock()
+    d, transport = deps(db, src, clock)
+    assert run_crawl(d, T, minutes=60).status == "partial"
+    assert transport.kinds() == ["partitions", "page", "page"]
+    assert clock.t < 60
 
 
 def test_crawl_does_not_wait_past_its_deadline(db: psycopg.Connection) -> None:
