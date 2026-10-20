@@ -205,10 +205,18 @@ def test_channel_rules_point_to_existing_topics() -> None:
     assert "banador" in moda.words
 
 
-def test_channel_interval_is_ten_minutes() -> None:
+def test_telegram_channels_are_read_every_three_minutes() -> None:
+    """El ciclo corre cada ~2 min: con 3 min de espera, cada canal se lee en ciclos alternos."""
     from datetime import timedelta
 
-    assert load_params(PARAMS_PATH).channel_interval == timedelta(minutes=10)
+    p = load_params(PARAMS_PATH)
+    assert p.channel_interval == timedelta(minutes=3)
+    reads_per_day = timedelta(days=1) // p.channel_interval
+    channels = [b for code, b in p.budgets.items() if code.startswith("tg_")]
+    assert len(channels) == 5
+    for b in channels:
+        assert b.watch_interval <= p.channel_interval  # el presupuesto no alarga la espera
+        assert b.max_per_run * reads_per_day <= b.max_per_24h  # el tope diario no corta lecturas
 
 
 def test_params_ebay_defaults() -> None:

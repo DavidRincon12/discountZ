@@ -235,7 +235,7 @@ def test_parse_error_opens_breaker_after_threshold(db: psycopg.Connection) -> No
     assert "tg_cajitatech" not in due
 
 
-def test_channel_due_every_ten_minutes(db: psycopg.Connection) -> None:
+def test_channel_due_every_three_minutes(db: psycopg.Connection) -> None:
     def due(now: datetime) -> Sequence[str]:
         return due_channels(db, load_all(), PARAMS.budgets, {}, now, PARAMS.channel_interval)
 
@@ -249,8 +249,12 @@ def test_channel_due_every_ten_minutes(db: psycopg.Connection) -> None:
         "slickdeals_amazon",
     }
     repo.save_channel_cursor(db, "tg_cajitatech", 100, T)
-    assert "tg_cajitatech" not in due(T + timedelta(minutes=5))
-    assert "tg_cajitatech" in due(T + timedelta(minutes=10))
+    assert "tg_cajitatech" not in due(T + timedelta(minutes=2))
+    assert "tg_cajitatech" in due(T + timedelta(minutes=3))
+    # DealNews sigue a su ritmo: su presupuesto pide 10 min entre lecturas.
+    repo.save_channel_cursor(db, "dealnews", 0, T)
+    assert "dealnews" not in due(T + timedelta(minutes=5))
+    assert "dealnews" in due(T + timedelta(minutes=10))
     # Un canal apagado con /fuente off no tiene presupuesto en la entrada del plan.
     budgets = {k: v for k, v in PARAMS.budgets.items() if k != "tg_clubgratis"}
     assert "tg_clubgratis" not in due_channels(

@@ -144,7 +144,7 @@ def _run_one(
     pages, clean = _fetch(r, source, after, now, rnd, deadline)
     if not pages:
         return
-    # Racha de publicaciones con precio y sin oferta: con 10 min entre lecturas casi nunca
+    # Racha de publicaciones con precio y sin oferta: con 3 min entre lecturas casi nunca
     # llegan 5 en una página, así que el formato roto se detecta sumando entre lecturas.
     previous = cursor.unparsed_streak if cursor else 0
     found = any(p.posts for p in pages)
