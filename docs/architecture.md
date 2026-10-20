@@ -3,7 +3,7 @@
 ## Contexto
 Monitor **personal** de ofertas para David (Colombia). Rastrea tiendas colombianas (COP) y de EE. UU. que envían a casillero (USD), filtra descuentos inflados con un histórico propio y avisa por Telegram. Escala: decenas a pocos cientos de productos, un solo usuario, costo $0. Diseño completo: `docs/superpowers/specs/2026-10-13-discountz-v1-design.md`; decisiones en `docs/decisions/`.
 
-Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×4, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API), el RSS de Slickdeals y el RSS de Amazon de DealNews.
+Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×6, Algolia de Alkosto, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API), el RSS de Slickdeals y el RSS de Amazon de DealNews.
 
 ## Contenedores
 ```mermaid
@@ -75,6 +75,8 @@ Migración `0004_feeds_web` (feeds de Amazon, ADR 0006): fuentes `dealnews` y `s
 Migración `0005_ebay` (ADR 0008): fuente `ebay_us`, `catalog_item.model_key` (el `epid` de eBay, con índice parcial) y `alert.kind = 'model_low'`.
 
 Migración `0007_alkosto` (ADR 0009): fuente `alkosto` (`sources/alkosto.py`), que lee el índice público de Algolia de la tienda.
+
+Migración `0008_jumbo_pepeganga`: fuentes `jumbo` y `pepeganga`, dos tiendas VTEX más (`STORES` en `sources/vtex.py`).
 
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
