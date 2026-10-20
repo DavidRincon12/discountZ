@@ -24,6 +24,7 @@ COOLDOWN = timedelta(hours=72)
 # publicación no vuelve a alertar por §4.2 en este plazo (spec de eBay §4.2).
 MODEL_REALERT = timedelta(days=30)
 MAX_MIN_DAYS = 90
+MIN_WINDOW = timedelta(days=MAX_MIN_DAYS)  # el mínimo de precios estables vence a los 90 días
 MIN_PEERS = 5  # publicaciones del mismo modelo para comparar (spec de eBay §4.2)
 
 
@@ -48,6 +49,7 @@ class CatalogState:
     last_changed_at: datetime | None
     last_alert_at: datetime | None
     last_alert_minor: int | None
+    min_seen_at: datetime | None = None  # última vez que el precio estable estuvo en el mínimo
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,17 +76,15 @@ def observe(
     if p == state.price_minor:
         reads = state.reads_at_price + 1
         stable = reads >= MIN_READS and now - state.stable_since >= STABLE_FOR
-        lowest = state.min_seen_minor if state.min_seen_minor is not None else p
-        return (
-            replace(
-                state,
-                reads_at_price=reads,
-                usual_minor=p if stable else state.usual_minor,
-                min_seen_minor=min(lowest, p) if stable else state.min_seen_minor,
-            ),
-            None,
-            False,
-        )
+        state = replace(state, reads_at_price=reads)
+        if stable:
+            state = replace(state, usual_minor=p)
+            lowest = _min_seen(state, now)
+            if lowest is None or p <= lowest:
+                state = replace(state, min_seen_minor=p, min_seen_at=now)
+            elif state.min_seen_at is None:  # guardado antes de la ventana: cuenta desde hoy
+                state = replace(state, min_seen_at=now)
+        return state, None, False
     candidate = _candidate(state, obs, now, topic, glob)
     moved = replace(state, price_minor=p, stable_since=now, reads_at_price=1, last_changed_at=now)
     return moved, candidate, True
@@ -107,7 +107,7 @@ def _candidate(
     elif (
         now - state.first_seen_at >= WARMUP
         and drop_bp >= topic.t_bp
-        and (state.min_seen_minor is None or p < state.min_seen_minor)
+        and ((lowest := _min_seen(state, now)) is None or p < lowest)
         and u - p >= glob.min_abs[obs.price.currency]
     ):
         kind = AlertKind.CATALOG_DROP
@@ -115,6 +115,13 @@ def _candidate(
         return None
     days = min(MAX_MIN_DAYS, (now - state.first_seen_at).days)
     return CatalogCandidate(kind, obs.price, Money(u, obs.price.currency), drop_bp, days)
+
+
+def _min_seen(state: CatalogState, now: datetime) -> int | None:
+    """El mínimo de precios estables de los últimos 90 días; `None` si venció."""
+    if state.min_seen_at is not None and now - state.min_seen_at > MIN_WINDOW:
+        return None
+    return state.min_seen_minor
 
 
 def _cooling(

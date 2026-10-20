@@ -78,6 +78,8 @@ Migración `0007_alkosto` (ADR 0009): fuente `alkosto` (`sources/alkosto.py`), q
 
 Migración `0008_jumbo_pepeganga`: fuentes `jumbo` y `pepeganga`, dos tiendas VTEX más (`STORES` en `sources/vtex.py`).
 
+Migración `0009_min_seen_at`: `catalog_item.min_seen_at`; el mínimo de precios estables vence a los 90 días (`domain/catalog.py`, `MIN_WINDOW`).
+
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
 ## Flujos clave

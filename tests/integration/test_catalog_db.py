@@ -213,3 +213,16 @@ def test_recent_alert_for_model_excludes_self_and_tolerance(db: psycopg.Connecti
     assert repo.recent_alert_for_model(db, "ebay_us", "123456", 10050, since, "333333333")
     assert not repo.recent_alert_for_model(db, "ebay_us", "123456", 10200, since, "333333333")
     assert not repo.recent_alert_for_model(db, "ebay_us", "123456", 10000, since, "222222222")
+
+
+def test_min_seen_at_round_trips(db: psycopg.Connection) -> None:
+    """La ventana de 90 días del mínimo necesita saber cuándo se vio (migración 0009)."""
+    at = T - timedelta(days=10)
+    s = CatalogState(99_900, 99_900, 89_900, T, T, 3, None, None, None, at)
+    repo.save_catalog_page(db, "exito", [CatalogRow("1", None, "tecnologia", "COP", s, False)], T)
+    assert repo.load_catalog_states(db, "exito", ["1"])["1"].min_seen_at == at
+    later = CatalogState(99_900, 99_900, 89_900, T, T, 4, None, None, None, T)
+    repo.save_catalog_page(
+        db, "exito", [CatalogRow("1", None, "tecnologia", "COP", later, False)], T
+    )
+    assert repo.load_catalog_states(db, "exito", ["1"])["1"].min_seen_at == T
