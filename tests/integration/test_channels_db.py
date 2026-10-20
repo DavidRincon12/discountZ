@@ -96,7 +96,7 @@ def test_channel_post_rejects_bad_values(db: psycopg.Connection, price: int, cur
 
 def test_migration_0003_down_restores_schema_2(db: psycopg.Connection) -> None:
     dbm.save_channel_cursor(db, "tg_clubgratis", 1, T)
-    assert migrate(db, 2) == [7, 6, 5, 4, 3]
+    assert migrate(db, 2) == [8, 7, 6, 5, 4, 3]
     assert current_version(db) == 2
     assert db.execute("SELECT to_regclass('discountz.channel_post')").fetchone() == (None,)
     assert db.execute("SELECT count(*) FROM discountz.source").fetchone() == (9,)
