@@ -10,7 +10,7 @@
 - Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 869 unitarias y 188 de integración en verde el 2026-10-20.
 
 ## Último cambio
-- Rama `claude/project-thread-rlzaur`: el arranque del `crawl` espera 30 s y reintenta (2 veces) si el pooler rechaza la conexión (Éxito y eBay salían con código 3 a las 13:00Z). Antes: PR #26 (menú del bot con `setup-bot` y un mensaje por tormenta de errores de precio).
+- Rama `claude/project-thread-y6ijcd`: la foto de la tarjeta se reintenta hasta 3 veces (pausa de 1 s y 2 s) ante un 5xx o un error de red; telesco.pe dio 502 a dos ofertas de Clubgratis el 2026-10-20 y salieron sin foto.
 
 ## Siguiente paso
 - David: correr una vez *Actions → setup-bot* (PR #26 ya fusionado); bajar el certificado de Supabase (`config/supabase-ca.crt`) y revocar el token de GitHub de cron-job.org. DealNews queda apagado.
