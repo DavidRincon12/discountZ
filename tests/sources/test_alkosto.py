@@ -125,6 +125,24 @@ def test_parse_query_skips_foreign_url(url: str) -> None:
     assert len(items) == 29
 
 
+def test_parse_query_logs_skipped_hits_once_per_page(caplog: pytest.LogCaptureFixture) -> None:
+    """~400 hits sin precio por vuelta llenaban el log con una línea cada uno (2026-10-20)."""
+    data = _band()
+    hits = data["hits"]
+    assert isinstance(hits, list)
+    for i in range(3):
+        hits[i] = {**hits[i], "lowestprice_double": None}
+    hits[3] = {**hits[3], "url_es_string": "https://evil.com/p/1"}
+    caplog.set_level(logging.INFO, logger="discountz")
+    items, _ = parse_query(json.dumps(data).encode())
+    assert len(items) == 26
+    lines = [r.getMessage() for r in caplog.records if "skipped" in r.getMessage()]
+    assert lines == [
+        "alkosto_items_skipped source=alkosto code=bad_price count=3",
+        "alkosto_items_skipped source=alkosto code=bad_url count=1",
+    ]
+
+
 def test_parse_query_out_of_stock() -> None:
     items, _ = parse_query(_with_hit(stocklevel_int=0))
     tv = next(i for i in items if i.external_id == TV)
