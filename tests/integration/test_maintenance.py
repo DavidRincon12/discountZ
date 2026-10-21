@@ -11,6 +11,7 @@ import pytest
 
 from discountz.app.collect import Collector, SourceRun
 from discountz.app.crawl import run_crawl
+from discountz.app.cycle import _daily
 from discountz.app.maintenance import (
     MB,
     daily_summary,
@@ -330,3 +331,14 @@ def test_daily_summary_counts_channel_posts(db: psycopg.Connection) -> None:
     assert view.catalog is not None
     assert (view.catalog.channel_posts, view.catalog.channel_duplicates) == (3, 1)
     assert "\nCanales: 3 ofertas (1 repetidas)" in render_daily(view).html
+
+
+def test_daily_maintenance_logs_db_size_in_mb(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    now = T.replace(hour=9, minute=0)  # 04:00 en Bogotá: ya pasó la hora del mantenimiento
+    assert maintenance_due(db, now)
+    with caplog.at_level("INFO", logger="discountz.app.cycle"):
+        _daily(db, now, load_params())
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("maintenance "))
+    assert f"db_mb={repo.db_size(db) // MB}" in line.split()

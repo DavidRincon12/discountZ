@@ -33,6 +33,7 @@ ALLOWED_FIELDS = frozenset(
         "posts",
         "duplicates",
         "skipped",
+        "db_mb",
     }
 )
 _REDACT = (

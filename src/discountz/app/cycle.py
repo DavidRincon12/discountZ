@@ -24,6 +24,7 @@ from discountz.app.deliver import deliver, make_photo_fetcher
 from discountz.app.inbox import process_inbox
 from discountz.app.links import make_link_resolver
 from discountz.app.maintenance import (
+    MB,
     maintenance_due,
     run_maintenance,
     send_daily_summary,
@@ -260,7 +261,12 @@ def _daily(conn: psycopg.Connection, now: datetime, params: AppParams) -> None:
     try:
         if maintenance_due(conn, now):
             report = run_maintenance(conn, now, params)
-            event(log, "maintenance", count=report.segments_deleted + report.retention_deleted)
+            event(
+                log,
+                "maintenance",
+                count=report.segments_deleted + report.retention_deleted,
+                db_mb=report.db_bytes // MB,  # el peso de la BD se vigila desde Actions
+            )
         if summary_due(conn, now):
             send_daily_summary(conn, now)
     except Exception as exc:
