@@ -304,7 +304,8 @@ def test_crawl_resumes_from_cursor_without_duplicates(db: psycopg.Connection) ->
     second = run_crawl(d2, T + timedelta(hours=1), minutes=1)
     assert second.pages == 2
     assert count(db, "catalog_item") == 8
-    assert count(db, "catalog_price_change") == 8
+    assert count(db, "catalog_item", "last_changed_at IS NOT NULL") == 0  # 8 nuevos, sin cambios
+    assert count(db, "catalog_price_change") == 0
     assert transport2.kinds() == ["page", "page"]  # la vuelta terminó: la corrida para
     cur = repo.get_cursor(db, "exito")
     assert (cur.sweep_no, cur.partitions, cur.partition_idx, cur.page) == (1, (), 0, 0)
@@ -531,10 +532,10 @@ def test_crawl_confirm_failure_keeps_candidate_for_next_run(db: psycopg.Connecti
     )
     d, _ = deps(db, src, Clock())
     assert run_crawl(d, T, minutes=60).alerts == 0
-    assert count(db, "catalog_price_change") == 0  # el cambio queda sin aplicar
+    assert count(db, "catalog_item", "last_changed_at IS NOT NULL") == 0  # queda sin aplicar
     d2, _ = deps(db, src, Clock())
     assert run_crawl(d2, T + timedelta(hours=1), minutes=60).alerts == 1
-    assert count(db, "catalog_price_change") == 1
+    assert count(db, "catalog_item", "last_changed_at IS NOT NULL") == 1
 
 
 def test_crawl_ean_duplicate_is_skipped(db: psycopg.Connection) -> None:
