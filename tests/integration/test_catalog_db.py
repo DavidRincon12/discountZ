@@ -45,7 +45,10 @@ def test_save_page_upserts_and_logs_only_changes(db: psycopg.Connection) -> None
     repo.save_catalog_page(
         db,
         "exito",
-        [row("1", 99_900, changed=False, reads=2), row("2", 45_000, changed=True)],
+        [
+            row("1", 99_900, changed=False, reads=2),
+            row("2", 45_000, changed=True, last_changed=T + timedelta(hours=1)),
+        ],
         T + timedelta(hours=1),
     )
     states = repo.load_catalog_states(db, "exito", ["1", "2", "3"])
@@ -53,7 +56,11 @@ def test_save_page_upserts_and_logs_only_changes(db: psycopg.Connection) -> None
     assert states["1"].reads_at_price == 2
     assert states["2"].price_minor == 45_000
     assert count(db, "catalog_item") == 2
-    assert count(db, "catalog_price_change") == 3
+    assert count(db, "catalog_price_change") == 0  # el cambio vive en `last_changed_at`
+    changed = db.execute(
+        "SELECT last_changed_at FROM discountz.catalog_item WHERE external_id = '2'"
+    ).fetchone()
+    assert changed == (T + timedelta(hours=1),)
     seen = db.execute(
         "SELECT last_seen_at FROM discountz.catalog_item WHERE external_id = '1'"
     ).fetchone()

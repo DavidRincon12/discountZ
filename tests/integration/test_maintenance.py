@@ -225,16 +225,17 @@ def _crawled(conn: psycopg.Connection, source: str, days_ago: int) -> None:
     )
 
 
-def test_catalog_retention_90d_and_unseen_30d(db: psycopg.Connection) -> None:
+def test_catalog_unseen_30d_and_legacy_changes_drained(db: psycopg.Connection) -> None:
+    """`catalog_price_change` ya no se escribe (llegó a 140 MB en 4 días): se vacía."""
     _crawled(db, "exito", 0)
     fresh = _item(db, "1", 0)
     _item(db, "2", 31)
-    for days in (1, 60, 91):
+    for days in (0, 1, 60, 91):
         _change(db, fresh, days)
     run_maintenance(db, T, load_params(), db_bytes=10 * MB)
     items = db.execute("SELECT external_id FROM discountz.catalog_item").fetchall()
     assert items == [("1",)]
-    assert _changes(db) == 2
+    assert _changes(db) == 0
 
 
 def test_unseen_items_of_a_paused_crawl_are_kept(db: psycopg.Connection) -> None:
@@ -246,14 +247,6 @@ def test_unseen_items_of_a_paused_crawl_are_kept(db: psycopg.Connection) -> None
     run_maintenance(db, T, load_params(), db_bytes=10 * MB)
     items = db.execute("SELECT external_id FROM discountz.catalog_item ORDER BY 1").fetchall()
     assert items == [("1",), ("3",)]
-
-
-def test_size_guard_400_shortens_retention_to_45d(db: psycopg.Connection) -> None:
-    fresh = _item(db, "1", 0)
-    for days in (1, 44, 46):
-        _change(db, fresh, days)
-    run_maintenance(db, T, load_params(), db_bytes=410 * MB)
-    assert _changes(db) == 2
 
 
 def test_size_guard_450_pauses_exito_carulla_crawl(db: psycopg.Connection) -> None:
@@ -271,14 +264,18 @@ def test_size_guard_450_pauses_exito_carulla_crawl(db: psycopg.Connection) -> No
 def test_daily_summary_has_catalog_lines(db: psycopg.Connection) -> None:
     item = _item(db, "1", 0)
     _item(db, "2", 0, source="carulla")
-    _change(db, item, 0)
+    old = _item(db, "3", 0)
+    db.execute("UPDATE discountz.catalog_item SET last_changed_at = %s WHERE id = %s", (T, item))
+    db.execute(
+        "UPDATE discountz.catalog_item SET last_changed_at = %s WHERE id = %s", (T - 2 * DAY, old)
+    )
     db.execute("INSERT INTO discountz.crawl_cursor (source, last_sweep_s) VALUES ('exito', 18720)")
     repo.enqueue(
         db, "alert", "x", priority=3, dedup_key="cat:1", now=T, ttl=DAY, topic="tecnologia"
     )
     view = daily_summary(db, T)
     assert view.catalog is not None
-    assert view.catalog.items_by_source["exito"] == 1
+    assert view.catalog.items_by_source["exito"] == 2
     assert view.catalog.changes_today == 1
     assert view.catalog.alerts_by_topic == {"tecnologia": 1}
     assert view.catalog.last_sweep_s_by_source["exito"] == 18_720

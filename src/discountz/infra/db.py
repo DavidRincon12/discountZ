@@ -1820,15 +1820,6 @@ def save_catalog_page(
                 for r in rows
             ],
         )
-        changed = [(r.external_id, r.state.price_minor) for r in rows if r.price_changed]
-        if changed:
-            cur.executemany(
-                """INSERT INTO discountz.catalog_price_change (item_id, at, price_minor)
-                   SELECT id, %s, %s FROM discountz.catalog_item
-                    WHERE source = %s AND external_id = %s
-                   ON CONFLICT DO NOTHING""",
-                [(now, price, source, ext) for ext, price in changed],
-            )
 
 
 def model_peer_prices(
@@ -2024,10 +2015,12 @@ def save_topic(conn: psycopg.Connection, code: str, title: str, thread_id: int |
 # ───────────── Catálogo: retención y resumen diario (spec del rastreo §7.2 y §8)
 
 
-def delete_old_catalog_changes(conn: psycopg.Connection, cutoff: datetime) -> int:
-    return conn.execute(
-        "DELETE FROM discountz.catalog_price_change WHERE at < %s", (cutoff,)
-    ).rowcount
+def drain_catalog_changes(conn: psycopg.Connection) -> int:
+    """Vacía `catalog_price_change`, que ya no se escribe (llegó a 140 MB en 4 días).
+
+    El cambio vive en `catalog_item.last_changed_at`. Por lotes, como el resto de la retención.
+    """
+    return _delete_batched(conn, "catalog_price_change", "true", ())
 
 
 def delete_unseen_catalog_items(conn: psycopg.Connection, unseen: timedelta) -> int:
@@ -2058,12 +2051,12 @@ class CatalogDaily:
 
 def catalog_daily_stats(conn: psycopg.Connection, now: datetime) -> CatalogDaily:
     since = now - timedelta(hours=24)
+    # Una sola pasada por `catalog_item` (~900 mil filas): productos y cambios del día por tienda.
     items = conn.execute(
-        "SELECT source, count(*) FROM discountz.catalog_item GROUP BY source"
+        """SELECT source, count(*), count(*) FILTER (WHERE last_changed_at >= %s)
+             FROM discountz.catalog_item GROUP BY source""",
+        (since,),
     ).fetchall()
-    changes = _one(
-        conn, "SELECT count(*) FROM discountz.catalog_price_change WHERE at >= %s", (since,)
-    )
     alerts = conn.execute(
         """SELECT topic, count(*) FROM discountz.outbox
             WHERE purpose IN ('alert', 'digest') AND topic IS NOT NULL AND created_at >= %s
@@ -2084,7 +2077,7 @@ def catalog_daily_stats(conn: psycopg.Connection, now: datetime) -> CatalogDaily
     )
     return CatalogDaily(
         items_by_source={r[0]: int(r[1]) for r in items},
-        changes_today=int(_required(changes)[0]),
+        changes_today=sum(int(r[2]) for r in items),
         alerts_by_topic={r[0]: int(r[1]) for r in alerts},
         last_sweep_s_by_source={r[0]: int(r[1]) for r in sweeps},
         channel_posts=int(channels[0]),

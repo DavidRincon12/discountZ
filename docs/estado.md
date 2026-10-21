@@ -10,18 +10,18 @@
 - Dos chats: el grupo (todo, con temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas). Canales leídos: DescuentosTech, DescuentosHome, Clubgratis, cajitatech y OFERTU (solo con código). Suite: 891 unitarias y 190 de integración en verde el 2026-10-20.
 
 ## Último cambio
-- Rama `claude/project-thread-tl4xoa`: el evento `maintenance` (08:00 UTC) registra `db_mb`, el peso de la BD, para vigilar el tope de 450 MB desde los logs de Actions; la imagen `postgres:17` del CI queda fijada por digest. PR #18, #28 y #29 ya fusionados; `setup-bot` corrido; el resumen diario del 2026-10-21 salió sin `maintenance_failed`.
+- 2026-10-21 la BD llegó a 494 de 500 MB: `catalog_item` 335 MB (895 mil productos) y `catalog_price_change` 140 MB (1,46 M filas en 4 días; el spec estimó 60-80 MB en 90 d). David la vació con `TRUNCATE` (quedó en 354 MB). Esta rama deja de escribirla: «cambios hoy» sale de `catalog_item.last_changed_at` y el mantenimiento vacía lo que quede. PR #30: `maintenance db_mb=` en el log de las 08:00 UTC.
 
 ## Siguiente paso
 - G10 en `/buscar`: descartar el lote constante contra `R_listing` (`check_batch` existe en `domain/guards.py` pero nadie lo llama; hoy el lote constante no alerta pero entra al histórico). Prueba: búsqueda de 5 ofertas al mismo precio con 3 listings con histórico a > 30 % → sin segmentos nuevos y `parse_errors=1`.
-- David: código de afiliado de Amazon cuando lo tenga. Hot Sale 2027 sin fecha publicada por la CCCE (revisado 2026-10-21).
+- Vigilar `maintenance db_mb=`: `catalog_item` sola ocupa 335 MB (178 en índices). Pendiente menor: borrar `catalog_price_change` en una migración y el campo `CatalogRow.price_changed`, que ya no se usa. David: código de afiliado de Amazon cuando lo tenga. Hot Sale 2027 sin fecha publicada por la CCCE (revisado 2026-10-21).
 
 ## Decisiones vigentes
 - Python 3.13 síncrono en GitHub Actions, Supabase Postgres, Telegram vía getUpdates (ADR 0001); histórico por segmentos (ADR 0002); disparo externo y modo caliente (ADR 0003); rastreo de catálogo completo (ADR 0004); canales de Telegram como fuente `channel` sin verificar (ADR 0005); feeds de Amazon como canales sin orden de ids (ADR 0006), DealNews sin tope de antigüedad (ADR 0007) eBay por la Browse API con comparación por modelo (ADR 0008) y Alkosto por su índice de Algolia, asumiendo el riesgo de sus términos (ADR 0009); sin carril por descuento en VTEX porque ordena por el `ListPrice` inflado (ADR 0010); enlace de la tienda sin referido en los canales con `joylink.io` (ADR 0011; cajitatech, DescuentosTech y DescuentosHome no se pueden).
 - Sin costo puesto ni TRM: las alertas USD dicen «🇺🇸 Compra por casillero». Si spec y plan difieren, manda spec §0.2 y luego el plan.
 - La confirmación exige ±1 %, stock, misma variante y mismo vendedor; en búsquedas sin vendedor visible (Amazon, Newegg) la ficha decide.
 - Rastreo: descuento solo contra precios observados (nunca `ListPrice`); la alerta exige «antes» estable 24 h y 2 lecturas, confirmación en la ficha y que otra tienda no haya alertado el mismo EAN en 6 h.
-- Sin temas guardados todo va a *General* sin aviso. Con la BD en ≥ 450 MB se pausan las búsquedas y el rastreo de Éxito, Carulla, eBay, Alkosto y Jumbo.
+- Sin temas guardados todo va a *General* sin aviso. Con la BD en ≥ 450 MB se pausan (Olímpica, Panamericana y Pepe Ganga siguen) las búsquedas y el rastreo de Éxito, Carulla, eBay, Alkosto y Jumbo.
 - Slickdeals: un solo task `feed` por ciclo; sus leads a Amazon se descartan con el breaker abierto: los cubre `slickdeals_amazon`.
 - No se sortea ningún CAPTCHA ni detección de bots (camelcamelcamel descartado por Cloudflare; Keepa en pausa por costo; Falabella y Homecenter detrás de Cloudflare).
 
