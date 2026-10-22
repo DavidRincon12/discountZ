@@ -317,14 +317,18 @@ def test_crawl_resumes_from_cursor_without_duplicates(db: psycopg.Connection) ->
     assert cur.day_requests == 5
 
 
-def test_crawl_skips_partitions_outside_the_profile(db: psycopg.Connection) -> None:
+def test_crawl_skips_partitions_outside_the_profile(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
     """Mercado está apagado en el perfil: su partición no se pide (ADR 0013)."""
     src = FakeCatalog(
         {"C:/1/": [page_of(1)], "C:/2/": [page_of(1, 5)]},
         paths={"C:/1/": "/Tecnología/", "C:/2/": "/Mercado/"},
     )
     d, transport = deps(db, src, Clock())
-    result = run_crawl(d, T, minutes=60)
+    with caplog.at_level(logging.INFO, logger="discountz"):
+        result = run_crawl(d, T, minutes=60)
+    assert "crawl_partitions_skipped source=exito count=1" in caplog.text
     assert result.status == "ok"
     assert transport.kinds() == ["partitions", "page"]
     assert transport.urls[1] == "https://fake/page/C:/1//0"
@@ -693,7 +697,9 @@ def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
     assert (s.last_alert_at, s.last_alert_minor) == (T, 119_900)
 
 
-def test_drop_in_a_non_card_topic_is_not_confirmed(db: psycopg.Connection) -> None:
+def test_drop_in_a_non_card_topic_is_not_confirmed(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
     """Belleza está fuera del perfil: la bajada no se confirma ni alerta (ADR 0013)."""
     seed_history(db, "123", 199_900)
     drop = CatalogObservation(
@@ -701,8 +707,11 @@ def test_drop_in_a_non_card_topic_is_not_confirmed(db: psycopg.Connection) -> No
     )
     src = FakeCatalog({"C:/1/": [[drop]]}, offers={"123": offer("123", 119_900)})
     d, transport = deps(db, src, Clock())
-    result = run_crawl(d, T, minutes=60)
+    with caplog.at_level(logging.INFO, logger="discountz"):
+        result = run_crawl(d, T, minutes=60)
     assert result.alerts == 0
+    (done,) = [m for m in caplog.messages if m.startswith("crawl_done")]
+    assert "skipped=1" in done.split()
     assert "listings" not in transport.kinds()
     assert count(db, "alert") == 0
     # La fila sí se guarda con el precio nuevo, como cualquier lectura sin candidato.
