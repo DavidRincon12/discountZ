@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime, time, timedelta
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from discountz.config import (
     load_canaries,
     load_params,
     load_settings,
+    load_topics,
 )
 from discountz.domain.errors import ConfigError
 from discountz.domain.money import Currency
@@ -375,8 +377,6 @@ def test_load_topics_reads_profile_modes() -> None:
 
     Hasta que lleguen los intereses (PR 2), Hogar, Deportes y Otros siguen en tarjeta.
     """
-    from discountz.config import load_topics
-
     modes = {code: p.mode for code, p in load_topics().params.items()}
     off = {"belleza", "mercado", "bebes", "mascotas"}
     assert {c for c, m in modes.items() if m == "off"} == off
@@ -384,13 +384,29 @@ def test_load_topics_reads_profile_modes() -> None:
     assert {c for c, m in modes.items() if m == "card"} == set(modes) - off
 
 
-def test_load_topics_rejects_unknown_mode(tmp_path: Path) -> None:
-    from discountz.config import load_topics
-
+def _topics_with_unknown_mode(folder: Path) -> Path:
+    """Copia de `config/topics.toml` con su primer `mode` cambiado por uno que no existe."""
     src = Path("config/topics.toml").read_text(encoding="utf-8")
     bad, n = re.subn(r'^mode = "[a-z]+"$', 'mode = "quiza"', src, count=1, flags=re.MULTILINE)
     assert n == 1
-    path = tmp_path / "topics.toml"
+    path = folder / "topics.toml"
     path.write_text(bad, "utf-8")
+    return path
+
+
+def test_load_topics_rejects_unknown_mode(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match=r"\.mode"):
-        load_topics(path)
+        load_topics(_topics_with_unknown_mode(tmp_path))
+
+
+def test_check_config_fails_on_unknown_topic_mode(
+    env: None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Un `mode` desconocido es un error de configuración (spec del perfil §2)."""
+    bad = _topics_with_unknown_mode(tmp_path)
+    monkeypatch.setattr("discountz.__main__.load_topics", partial(load_topics, bad))
+    assert main(["check-config"]) == 2
+    assert ".mode" in capsys.readouterr().err
