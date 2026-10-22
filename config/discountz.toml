@@ -23,6 +23,12 @@ jump_window_d = 7
 gap_before_d = 7
 min_abs_cop = 10000
 min_abs_usd = 500
+# Calidad de las ofertas (2026-10-22): el «antes» del rastreo y lo que llega por casillero cuestan
+# al menos esto, y el rastreo exige este ahorro (los seguimientos siguen con min_abs).
+min_price_cop = 100000
+min_price_usd = 2500
+catalog_min_saving_cop = 30000
+catalog_min_saving_usd = 500
 rarity_tol_bp = 50
 improve_bp = 300
 rearm_h = 24

@@ -151,6 +151,10 @@ class _Pricing(_Strict):
     gap_before_d: Pos
     min_abs_cop: NonNeg
     min_abs_usd: NonNeg
+    min_price_cop: NonNeg
+    min_price_usd: NonNeg
+    catalog_min_saving_cop: NonNeg
+    catalog_min_saving_usd: NonNeg
     rarity_tol_bp: Bp
     improve_bp: Bp
     rearm_h: Pos
@@ -307,6 +311,10 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
         jump_window=_days(p.jump_window_d),
         gap_before=_days(p.gap_before_d),
         min_abs=MappingProxyType({Currency.COP: p.min_abs_cop, Currency.USD: p.min_abs_usd}),
+        min_price=MappingProxyType({Currency.COP: p.min_price_cop, Currency.USD: p.min_price_usd}),
+        catalog_min_saving=MappingProxyType(
+            {Currency.COP: p.catalog_min_saving_cop, Currency.USD: p.catalog_min_saving_usd}
+        ),
         rarity_tol_bp=p.rarity_tol_bp,
         improve_bp=p.improve_bp,
         rearm=_hours(p.rearm_h),

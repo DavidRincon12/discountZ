@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from types import MappingProxyType
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -24,25 +25,27 @@ from discountz.domain.params import GlobalParams
 from discountz.domain.topics import TopicParams
 
 T0 = datetime(2026, 10, 1, 12, tzinfo=UTC)
-GLOB = GlobalParams()
+PROD = GlobalParams()
+# Las reglas de siempre se prueban sin el precio mínimo de la calidad (2026-10-22): tiene las suyas.
+GLOB = replace(PROD, min_price=MappingProxyType({Currency.COP: 0, Currency.USD: 0}))
 TECH = TopicParams("tecnologia", "📱 Tecnología", 1200, 5000, "tecnologia")
 MERCADO = TopicParams("mercado", "🛒 Mercado", 2500, 7000, "otros")
 
 
-def obs(price: int) -> CatalogObservation:
-    return CatalogObservation(
-        "123", Money(price, Currency.COP), "/Tecnología/", None, SellerClass.FIRST_PARTY
-    )
+def obs(price: int, seller: SellerClass = SellerClass.FIRST_PARTY) -> CatalogObservation:
+    return CatalogObservation("123", Money(price, Currency.COP), "/Tecnología/", None, seller)
 
 
-def history(price: int, days: float, topic: TopicParams = TECH) -> tuple[CatalogState, datetime]:
+def history(
+    price: int, days: float, topic: TopicParams = TECH, glob: GlobalParams = GLOB
+) -> tuple[CatalogState, datetime]:
     """Producto visto a `price` cada 6 h durante `days` días; devuelve el estado y el instante."""
     state: CatalogState | None = None
     t = T0
     steps = int(days * 4)
     for i in range(steps + 1):
         t = T0 + timedelta(hours=6 * i)
-        state, cand, _ = observe(state, obs(price), t, topic, GLOB)
+        state, cand, _ = observe(state, obs(price), t, topic, glob)
         assert cand is None
     assert state is not None
     return state, t
@@ -66,12 +69,48 @@ def test_c02_no_alert_before_three_days() -> None:
     assert cand is None
 
 
-def test_c03_price_error_without_warmup() -> None:
+def test_c03_price_error_needs_warmup_too() -> None:
+    """Sin los 3 días, el «antes» puede ser un precio de lanzamiento inflado."""
     state, t = history(99_900, 1)
+    _, cand, _ = observe(state, obs(19_900), t + timedelta(hours=6), TECH, GLOB)
+    assert cand is None
+    state, t = history(99_900, 5)
     _, cand, _ = observe(state, obs(19_900), t + timedelta(hours=6), TECH, GLOB)
     assert cand is not None
     assert cand.kind is AlertKind.PRICE_ERROR
     assert cand.drop_bp == 8008
+
+
+def test_marketplace_drop_past_the_error_threshold_never_alerts() -> None:
+    """En el marketplace es un vendedor que juega con el precio (perfumes al −78 % en Carulla)."""
+    state, t = history(99_900, 5)
+    later = t + timedelta(hours=6)
+    _, cand, _ = observe(state, obs(19_900, SellerClass.MARKETPLACE), later, TECH, GLOB)
+    assert cand is None
+    _, cand, _ = observe(state, obs(59_900, SellerClass.MARKETPLACE), later, TECH, GLOB)
+    assert cand is not None
+    assert cand.kind is AlertKind.CATALOG_DROP
+
+
+def test_product_cheaper_than_min_price_never_alerts() -> None:
+    """Precio mínimo de 100.000 sobre el «antes»: lo barato es mercado y bagatelas."""
+    state, t = history(99_900, 5, glob=PROD)
+    later = t + timedelta(hours=6)
+    assert observe(state, obs(59_900), later, TECH, PROD)[1] is None
+    assert observe(state, obs(19_900), later, TECH, PROD)[1] is None
+    state, t = history(100_000, 5, glob=PROD)
+    cand = observe(state, obs(60_000), t + timedelta(hours=6), TECH, PROD)[1]
+    assert cand is not None
+    assert cand.kind is AlertKind.CATALOG_DROP
+
+
+def test_saving_under_30000_cop_never_alerts() -> None:
+    state, t = history(150_000, 5, glob=PROD)
+    later = t + timedelta(hours=6)
+    assert observe(state, obs(120_001), later, TECH, PROD)[1] is None  # 29.999 (20 %)
+    cand = observe(state, obs(120_000), later, TECH, PROD)[1]
+    assert cand is not None
+    assert cand.kind is AlertKind.CATALOG_DROP
 
 
 def test_c04_first_observation_never_alerts() -> None:
@@ -136,7 +175,7 @@ def test_min_seen_is_refreshed_while_the_price_stays_there() -> None:
 
 
 def test_absolute_saving_floor() -> None:
-    state, t = history(50_000, 5)  # 15 % de 50.000 = 7.500 < 10.000
+    state, t = history(50_000, 5)  # 15 % de 50.000 = 7.500 < 30.000
     _, cand, _ = observe(state, obs(42_500), t + timedelta(hours=6), TECH, GLOB)
     assert cand is None
 
@@ -212,6 +251,16 @@ def test_model_candidate_price_error() -> None:
     cand = model_candidate(None, T0, usd(4_000), [10_000] * 5, TECH, GLOB)
     assert cand is not None
     assert cand.kind is AlertKind.PRICE_ERROR
+
+
+def test_model_candidate_marketplace_price_error_is_none() -> None:
+    mkt = replace(usd(4_000), seller_class=SellerClass.MARKETPLACE)
+    assert model_candidate(None, T0, mkt, [10_000] * 5, TECH, GLOB) is None
+
+
+def test_model_candidate_median_below_min_price_is_none() -> None:
+    assert model_candidate(None, T0, usd(1_600), [2_400] * 5, TECH, PROD) is None  # US$24
+    assert model_candidate(None, T0, usd(1_600), [2_500] * 5, TECH, PROD) is not None
 
 
 def test_model_candidate_no_threshold_topic() -> None:
