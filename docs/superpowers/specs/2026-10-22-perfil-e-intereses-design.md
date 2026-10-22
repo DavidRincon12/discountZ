@@ -1,7 +1,7 @@
 # discountZ: perfil de temas e intereses (spec de diseño)
 
 - Fecha: 2026-10-22
-- Estado: propuesto, pendiente de la revisión de David
+- Estado: aprobado por David el 2026-10-22
 - Autor: David Santiago Rincón Bautista
 - Base: spec del rastreo (`2026-10-14-rastreo-catalogo-design.md`), canales (`2026-10-17-canales-telegram-design.md`) y ADR 0012 (tope diario). Donde este spec no dice nada, mandan ellos.
 
@@ -14,7 +14,7 @@ Hoy salen en tarjeta las primeras 8 ofertas de cada fuente al día, de cualquier
 1. **Perfil de temas.** Cada tema del grupo (los mismos de `config/topics.toml` y sus hashtags) tiene un modo: `card` (sale en tarjeta), `interest` (se rastrea, pero solo sale si coincide con un interés) u `off` (no se rastrea y solo sale si coincide con un interés). El rastreo deja de recorrer las categorías `off`.
 2. **Intereses.** Una lista de cosas concretas («multímetro», «silla ergonómica», «rtx 5070»), cada una con sus palabras en español y en inglés. Lo que coincide sale en tarjeta aunque su tema no sea `card`, aunque la fuente haya llenado su tope y sin el precio mínimo; sigue exigiendo un descuento real.
 
-Se entrega en dos PR: el **PR 1** trae el perfil (§1 y §2) y el **PR 2** los intereses (§3 a §5).
+Se entrega en dos PR: el **PR 1** trae el perfil (§1 y §2) y el **PR 2** los intereses (§3 a §5). Mientras no haya intereses, el PR 1 deja Hogar, Deportes y Otros en `card` para no perder sus ofertas; el PR 2 los pasa a `interest` (revisión final del PR 1).
 
 ### 0.2 Decisiones de David (2026-10-22, hilo «Mejoras mayores del bot»)
 
@@ -68,7 +68,7 @@ La función pura `domain.topics.crawl_wanted(rules, modes, source, path)` decide
 - el tema de su ruta (`assign_topic`) tiene modo `card` o `interest`, o
 - alguna regla más profunda de esa fuente (o comodín) que empieza por su ruta lleva a un tema `card` o `interest`. Así `panamericana:/hogar/ferreteria/` mantiene la raíz `/hogar/`.
 
-Efecto por tienda: Éxito, Panamericana, Jumbo y Pepe Ganga (VTEX, una partición por categoría raíz) y eBay (categorías de nivel 3) dejan de recorrer belleza, mercado, bebés y mascotas. Alkosto sigue entero: su barrido es por franjas de precio y casi todo su surtido es tecnología y electrodomésticos. La capa caliente (`fetch_changed`) no cambia: lo que traiga de esas categorías se guarda, pero no sale (§1.2).
+Efecto por tienda: Éxito, Panamericana, Jumbo y Pepe Ganga (VTEX, una partición por categoría raíz) y eBay (categorías de nivel 3) dejan de recorrer belleza, mercado, bebés y mascotas. Alkosto sigue entero: su barrido es por franjas de precio y casi todo su surtido es tecnología y electrodomésticos. La relectura de la capa caliente (`hot_catalog_ids`) salta lo guardado de temas `off`, que así vence con la retención; `fetch_changed` (Best Buy) no se puede filtrar por categoría: lo que traiga de esas categorías se guarda, pero no sale (§1.2). La aclaración salió de la revisión final del PR 1.
 
 El catálogo que deja de recorrerse se borra solo con la retención de siempre, porque ya no se vuelve a ver. El peso de la base debería bajar.
 

@@ -4,17 +4,17 @@
 - v1 en producción desde el 2026-10-14 (Supabase, `DISCOUNTZ_ACTIVO=true`); cron-job.org dispara el ciclo cada ~2 min y el rastreo cada hora.
 - Rastreo de catálogo (ADR 0004): Éxito, Panamericana, Jumbo y Pepe Ganga (VTEX), Alkosto (ADR 0009) y eBay (ADR 0008, `MODEL_LOW`). Carulla y Olímpica apagadas y sin catálogo (migración 0011).
 - Canales de Telegram (ADR 0005: DescuentosTech, DescuentosHome, Clubgratis, cajitatech, OFERTU) y Amazon de Slickdeals «sin verificar» (ADR 0006). DealNews apagado (406 desde Actions). Best Buy y Walmart fuera; Amazon da CAPTCHA.
-- Perfil de temas (ADR 0013): en tarjeta Tecnología, Electrodomésticos, Ferretería, Moda y Libros; Hogar, Deportes y Otros solo por interés (sin intereses aún, no llegan); Belleza, Mercado, Bebés y Mascotas no se rastrean y sus ofertas de canales quedan vistas.
+- Perfil de temas (ADR 0013): Belleza, Mercado, Bebés y Mascotas apagados (no se rastrean ni se releen, y sus ofertas de canales quedan vistas); el resto en tarjeta. Hogar, Deportes y Otros pasan a «solo por interés» con el PR 2.
 - Dos chats: el grupo (todo, temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas y resúmenes de ofertas).
-- Suite: 919 unitarias y 219 de integración en verde el 2026-10-22.
+- Suite: 921 unitarias y 220 de integración en verde el 2026-10-22.
 
 ## Último cambio
-- Rama `claude/project-thread-rmnaug` (PR 1 del perfil, sin migración): `mode` por tema en `config/topics.toml`; el rastreo salta las categorías apagadas (`CatalogPartition` + `crawl_wanted`) y no confirma temas fuera de tarjeta; los canales solo envían temas en tarjeta.
+- Rama `claude/project-thread-rmnaug` (PR 1 del perfil, sin migración): `mode` por tema en `config/topics.toml`; el rastreo salta las categorías apagadas (`CatalogPartition` + `crawl_wanted`), no las relee en la capa caliente y no confirma temas fuera de tarjeta; los canales solo envían temas en tarjeta; `check-config` valida el perfil.
 
 ## Siguiente paso
-- PR 2 del perfil, en Native: intereses (`/interes`, ~55 semillas en español e inglés en `config/interests.toml`, migración 0012). Empieza en la Task 6 del plan `docs/superpowers/plans/2026-10-22-perfil-e-intereses.md` (spec `docs/superpowers/specs/2026-10-22-perfil-e-intereses-design.md`). Al fusionarlo: *Actions → migrate* con `to = head` y luego `setup-bot`.
+- PR 2 del perfil, en Native: intereses (`/interes`, ~55 semillas en español e inglés en `config/interests.toml`, migración 0012). Empieza en la Task 6 del plan `docs/superpowers/plans/2026-10-22-perfil-e-intereses.md` (spec `docs/superpowers/specs/2026-10-22-perfil-e-intereses-design.md`); la Task 12 pasa Hogar, Deportes y Otros a `interest`. Al fusionarlo: *Actions → migrate* con `to = head` y luego `setup-bot`.
 - Después, cada una con su spec: 9to5Toys (RSS), Woot (API oficial; el secreto `WOOT_API_KEY` ya está en GitHub) y Mercado Libre (falta la app de desarrollador de David).
-- Medir la calidad 2-3 días con `/mnt/project-files/calidad-tiendas/consulta-todas.sql` (contar también `alert.delivery = 'held'` y `offer_log`) y ajustar `[pricing]`, `[cards]` o los modos si David lo pide.
+- Medir la calidad 2-3 días con `/mnt/project-files/calidad-tiendas/consulta-todas.sql` (contar también `alert.delivery = 'held'` y `offer_log`) y ajustar `[pricing]`, `[cards]` o los modos si David lo pide. Contar también lo que esconde el perfil: `channel_post` con `baseline` por `topic` y `crawl_done skipped=` por tienda.
 - Ideas sin hacer: comparar por EAN con otras tiendas y botón 👎 que silencia marca o categoría. G10 en `/buscar`: `check_batch` (`domain/guards.py`) no se llama.
 
 ## Decisiones vigentes
@@ -29,5 +29,5 @@
 - BD: el rastreo reconecta hasta 2 veces (`db_reconnect`); el ciclo no. Supabase: el migrador necesita `GRANT CREATE ON DATABASE postgres TO discountz_owner`. Postgres en la nube: `service postgresql start` y `ALTER USER postgres PASSWORD 'postgres'`.
 - Resumen diario (13:00Z): `catalog_daily_stats` a veces pasa el `statement_timeout` de 15 s y se reintenta; el peso sale en el log `maintenance db_mb=`.
 - Desde la nube de la sesión: Newegg, Best Buy, Amazon, `*.vtexassets.com`, Jumbo y Pepe Ganga bloqueados (no desde Actions); sus fixtures se graban con un workflow temporal. `record-fixture` no sigue redirecciones.
-- Ofertas con el tema equivocado: agregar el término a `channel_rules` y la oferta a `tests/fixtures/topics/ofertas-etiquetadas.jsonl` (`tests/unit/test_topic_precision.py` exige ≥ 95 %). Con el perfil, un tema equivocado puede esconder una oferta (p. ej. un filtro de polvo para PC cae en Hogar).
+- Ofertas con el tema equivocado: agregar el término a `channel_rules` y la oferta a `tests/fixtures/topics/ofertas-etiquetadas.jsonl` (`tests/unit/test_topic_precision.py` exige ≥ 95 %). Con el perfil, un tema equivocado esconde la oferta: 34 de las 946 etiquetadas (`test_profile_hides_few_card_offers` fija ese techo); se baja con términos en `channel_rules` o con intereses.
 - Falta: `pg_terminate_backend` tras 3 `skipped_locked` (separar antes el `application_name` del ciclo y del rastreo); reloj fijo por corrida; orden del barrido VTEX sin medir; parámetros de eBay leídos al importar. Hot Sale 2027 sin fecha publicada.
