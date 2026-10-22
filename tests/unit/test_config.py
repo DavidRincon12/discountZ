@@ -367,3 +367,32 @@ def test_crawl_start_gives_up_after_the_reconnects(monkeypatch: pytest.MonkeyPat
     with pytest.raises(psycopg.OperationalError):
         cli._connect_crawl(None, None, "exito")  # type: ignore[arg-type]
     assert len(sleeps) == 2
+
+
+def test_load_topics_reads_profile_modes() -> None:
+    from discountz.config import load_topics
+
+    params = load_topics().params
+    modes = {code: p.mode for code, p in params.items()}
+    assert {c for c, m in modes.items() if m == "card"} >= {
+        "tecnologia",
+        "electro",
+        "ferreteria",
+        "moda",
+        "libros",
+    }
+    assert {c for c, m in modes.items() if m == "interest"} == {"hogar", "deportes", "otros"}
+    off = {c for c, m in modes.items() if m == "off"}
+    assert off == {"belleza", "mercado", "bebes", "mascotas"}
+
+
+def test_load_topics_rejects_unknown_mode(tmp_path: Path) -> None:
+    from discountz.config import load_topics
+
+    src = Path("config/topics.toml").read_text(encoding="utf-8")
+    old = '[topics.hogar]\ntitle = "🛋️ Hogar y muebles"\nmode = "interest"\n'
+    assert old in src
+    path = tmp_path / "topics.toml"
+    path.write_text(src.replace(old, old.replace('"interest"', '"quiza"')), "utf-8")
+    with pytest.raises(ConfigError, match=r"topics\.hogar"):
+        load_topics(path)

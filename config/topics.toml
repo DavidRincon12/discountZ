@@ -2,6 +2,8 @@
 # `category` es la categoría de la v1 que reciben los listings del tema (seguir, silenciar, umbrales).
 # Reglas: gana el prefijo más largo; a igual largo, la de la fuente antes que la comodín "*".
 # Las rutas se normalizan (minúsculas, sin tildes) antes de comparar.
+# `mode` es el perfil de David (spec del perfil §1.1): `card` sale en tarjeta; `interest` se rastrea
+# pero solo sale si coincide con un interés; `off` no se rastrea. Sin `mode`, `card`.
 
 # Categorías de primer nivel que caen en «Otros» a propósito (servicios, donaciones, internas).
 intentional_otros = [
@@ -21,64 +23,75 @@ category = "otros"
 
 [topics.tecnologia]
 title = "📱 Tecnología"
+mode = "card"
 t_bp = 1200
 g_bp = 5000
 category = "tecnologia"
 
 [topics.electro]
 title = "🔌 Electrodomésticos"
+mode = "card"
 t_bp = 1500
 g_bp = 5000
 category = "hogar"
 
 [topics.hogar]
 title = "🛋️ Hogar y muebles"
+mode = "interest"
 t_bp = 2000
 g_bp = 6000
 category = "hogar"
 
 [topics.moda]
 title = "👕 Moda y calzado"
+mode = "card"
 t_bp = 3000
 g_bp = 7500
 category = "ropa"
 
 [topics.belleza]
 title = "💄 Belleza y cuidado"
+mode = "off"
 t_bp = 2500
 g_bp = 7000
 category = "otros"
 
 [topics.mercado]  # sin t_bp ni g_bp: el rastreo no alerta mercado (calidad de las ofertas, 2026-10-22)
 title = "🛒 Mercado"
+mode = "off"
 category = "otros"
 
 [topics.deportes]
 title = "⚽ Deportes"
+mode = "interest"
 t_bp = 2000
 g_bp = 6000
 category = "otros"
 
 [topics.bebes]
 title = "🧸 Bebés y juguetes"
+mode = "off"
 t_bp = 2000
 g_bp = 6000
 category = "otros"
 
 [topics.ferreteria]
 title = "🔧 Ferretería y autos"
+mode = "card"
 t_bp = 2000
 g_bp = 6000
 category = "otros"
 
 [topics.mascotas]
 title = "🐶 Mascotas"
+mode = "off"
 t_bp = 2000
 g_bp = 6000
 category = "otros"
 
 [topics.libros]
 title = "📚 Libros y papelería"
+mode = "card"
 t_bp = 2000
 g_bp = 6000
 category = "otros"
@@ -89,6 +102,7 @@ category = "otros"
 
 [topics.otros]
 title = "📦 Otros"
+mode = "interest"
 t_bp = 2000
 g_bp = 6000
 category = "otros"

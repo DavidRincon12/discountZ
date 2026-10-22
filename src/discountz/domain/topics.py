@@ -9,6 +9,7 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Literal
 
 TOPIC_CODES: tuple[str, ...] = (
     "errores",
@@ -30,6 +31,10 @@ DEFAULT_TOPIC = "otros"
 GROCERY_TOPIC = "mercado"  # ni el rastreo ni lo que llega por casillero lo alertan
 ANY_SOURCE = "*"
 
+# Perfil de David (spec del perfil §1.1): `card` sale en tarjeta; `interest` se rastrea, pero solo
+# sale si coincide con un interés; `off` no se rastrea y solo sale si coincide con un interés.
+TopicMode = Literal["card", "interest", "off"]
+
 # Categorías de la v1 (seguimientos y búsquedas) → tema donde caen sus alertas (spec §5.1).
 CATEGORY_TOPIC: Mapping[str, str] = MappingProxyType(
     {
@@ -49,6 +54,7 @@ class TopicParams:
     t_bp: int | None  # umbral de bajada normal; None (errores, mercado) = el rastreo no alerta
     g_bp: int | None  # umbral de posible error de precio
     category: str  # categoría de la v1 que reciben los listings de este tema
+    mode: TopicMode = "card"
 
 
 @dataclass(frozen=True, slots=True)
