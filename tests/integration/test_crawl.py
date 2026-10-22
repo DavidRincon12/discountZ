@@ -281,7 +281,7 @@ def seed_history(conn: psycopg.Connection, ext: str, price: int, *, ean: str | N
     repo.save_catalog_page(
         conn,
         "exito",
-        [CatalogRow(ext, ean, "tecnologia", "COP", state, False)],
+        [CatalogRow(ext, ean, "tecnologia", "COP", state)],
         T - timedelta(hours=1),
     )
 
@@ -307,7 +307,6 @@ def test_crawl_resumes_from_cursor_without_duplicates(db: psycopg.Connection) ->
     assert second.pages == 2
     assert count(db, "catalog_item") == 8
     assert count(db, "catalog_item", "last_changed_at IS NOT NULL") == 0  # 8 nuevos, sin cambios
-    assert count(db, "catalog_price_change") == 0
     assert transport2.kinds() == ["page", "page"]  # la vuelta terminó: la corrida para
     cur = repo.get_cursor(db, "exito")
     assert (cur.sweep_no, cur.partitions, cur.partition_idx, cur.page) == (1, (), 0, 0)
@@ -352,7 +351,6 @@ def test_crawl_hot_tier_first_and_capped(db: psycopg.Connection) -> None:
             "tecnologia",
             "COP",
             CatalogState(10_000, None, None, T, T, 1, T - timedelta(hours=1), None, None),
-            False,
         )
         for i in range(200)
     ]
@@ -463,7 +461,7 @@ def test_crawl_recovered_errors_do_not_add_up_in_the_breaker(db: psycopg.Connect
 
 def test_crawl_hot_tier_survives_a_transient_error(db: psycopg.Connection) -> None:
     state = CatalogState(10_000, None, None, T, T, 1, T - timedelta(hours=1), None, None)
-    row = CatalogRow("7", None, "tecnologia", "COP", state, False)
+    row = CatalogRow("7", None, "tecnologia", "COP", state)
     repo.save_catalog_page(db, "exito", [row], T - timedelta(hours=1))
     src = FakeCatalog({"C:/1/": [page_of(1)]}, hot={"7": obs("7", 10_000)}, items_failures=1)
     d, transport = deps(db, src, Clock())
@@ -544,9 +542,7 @@ def test_crawl_ean_duplicate_is_skipped(db: psycopg.Connection) -> None:
     ean = "7701234567890"
     start = T - timedelta(days=5)
     state = CatalogState(119_900, 199_900, 199_900, start, start, 3, None, None, None)
-    repo.save_catalog_page(
-        db, "carulla", [CatalogRow("9", ean, "tecnologia", "COP", state, False)], T
-    )
+    repo.save_catalog_page(db, "carulla", [CatalogRow("9", ean, "tecnologia", "COP", state)], T)
     repo.mark_catalog_alert(db, "carulla", "9", 119_900, T - timedelta(hours=1))
     seed_history(db, "123", 199_900, ean=ean)
     src = FakeCatalog(
@@ -741,7 +737,7 @@ def seed_ebay(
 ) -> None:
     start = T - timedelta(days=days)
     state = CatalogState(price, price, price, start, start, 20, None, None, None)
-    row = CatalogRow(ext, None, "otros", "USD", state, False, model_key=model)
+    row = CatalogRow(ext, None, "otros", "USD", state, model_key=model)
     repo.save_catalog_page(conn, EBAY, [row], T - timedelta(hours=1))
 
 

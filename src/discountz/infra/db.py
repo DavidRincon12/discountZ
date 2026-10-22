@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -1754,7 +1754,6 @@ class CatalogRow:
     topic: str
     currency: str
     state: CatalogState
-    price_changed: bool
     model_key: str | None = None  # `epid` de eBay (ADR 0008)
 
 
@@ -2023,16 +2022,8 @@ def save_topic(conn: psycopg.Connection, code: str, title: str, thread_id: int |
 # ───────────── Catálogo: retención y resumen diario (spec del rastreo §7.2 y §8)
 
 
-def drain_catalog_changes(conn: psycopg.Connection) -> int:
-    """Vacía `catalog_price_change`, que ya no se escribe (llegó a 140 MB en 4 días).
-
-    El cambio vive en `catalog_item.last_changed_at`. Por lotes, como el resto de la retención.
-    """
-    return _delete_batched(conn, "catalog_price_change", "true", ())
-
-
 def delete_unseen_catalog_items(conn: psycopg.Connection, unseen: timedelta) -> int:
-    """Productos que el rastreo dejó de ver (sin stock o retirados); sus cambios caen en cascada.
+    """Productos que el rastreo dejó de ver (sin stock o retirados).
 
     El plazo cuenta desde la última corrida de su tienda, no desde hoy: una tienda pausada
     (450 MB, breaker, rastreo apagado) conserva su catálogo. Por lotes: con el de eBay

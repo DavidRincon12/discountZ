@@ -128,7 +128,7 @@ class EbayApi:
 def seed(conn: psycopg.Connection, ext: str, price: int, model: str | None) -> None:
     start = T - timedelta(days=3)
     state = CatalogState(price, price, price, start, start, 30, None, None, None)
-    row = CatalogRow(ext, None, "tecnologia", "USD", state, False, model_key=model)
+    row = CatalogRow(ext, None, "tecnologia", "USD", state, model_key=model)
     repo.save_catalog_page(conn, CODE, [row], T - timedelta(hours=2))
 
 

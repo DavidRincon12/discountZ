@@ -23,7 +23,6 @@ def row(
     ext: str,
     price: int,
     *,
-    changed: bool = True,
     ean: str | None = None,
     last_changed: datetime | None = None,
     reads: int = 1,
@@ -31,7 +30,7 @@ def row(
     currency: str = "COP",
 ) -> CatalogRow:
     state_ = state(price, last_changed=last_changed, reads=reads)
-    return CatalogRow(ext, ean, "tecnologia", currency, state_, changed, model_key)
+    return CatalogRow(ext, ean, "tecnologia", currency, state_, model_key)
 
 
 def count(db: psycopg.Connection, table: str) -> int:
@@ -46,8 +45,8 @@ def test_save_page_upserts_and_logs_only_changes(db: psycopg.Connection) -> None
         db,
         "exito",
         [
-            row("1", 99_900, changed=False, reads=2),
-            row("2", 45_000, changed=True, last_changed=T + timedelta(hours=1)),
+            row("1", 99_900, reads=2),
+            row("2", 45_000, last_changed=T + timedelta(hours=1)),
         ],
         T + timedelta(hours=1),
     )
@@ -56,7 +55,6 @@ def test_save_page_upserts_and_logs_only_changes(db: psycopg.Connection) -> None
     assert states["1"].reads_at_price == 2
     assert states["2"].price_minor == 45_000
     assert count(db, "catalog_item") == 2
-    assert count(db, "catalog_price_change") == 0  # el cambio vive en `last_changed_at`
     changed = db.execute(
         "SELECT last_changed_at FROM discountz.catalog_item WHERE external_id = '2'"
     ).fetchone()
@@ -226,10 +224,8 @@ def test_min_seen_at_round_trips(db: psycopg.Connection) -> None:
     """La ventana de 90 días del mínimo necesita saber cuándo se vio (migración 0009)."""
     at = T - timedelta(days=10)
     s = CatalogState(99_900, 99_900, 89_900, T, T, 3, None, None, None, at)
-    repo.save_catalog_page(db, "exito", [CatalogRow("1", None, "tecnologia", "COP", s, False)], T)
+    repo.save_catalog_page(db, "exito", [CatalogRow("1", None, "tecnologia", "COP", s)], T)
     assert repo.load_catalog_states(db, "exito", ["1"])["1"].min_seen_at == at
     later = CatalogState(99_900, 99_900, 89_900, T, T, 4, None, None, None, T)
-    repo.save_catalog_page(
-        db, "exito", [CatalogRow("1", None, "tecnologia", "COP", later, False)], T
-    )
+    repo.save_catalog_page(db, "exito", [CatalogRow("1", None, "tecnologia", "COP", later)], T)
     assert repo.load_catalog_states(db, "exito", ["1"])["1"].min_seen_at == T

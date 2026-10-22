@@ -59,7 +59,7 @@ Esquema `discountz` (migración `0001_init`):
 Migración `0002_catalogo` (rastreo):
 
 - `catalog_item`: un producto del catálogo, solo números (precio, «antes» estable, mínimo, EAN, tema); título y foto se leen al alertar.
-- `catalog_price_change`: cambios de precio, 90 días (45 con la BD en ≥ 400 MB).
+- `catalog_price_change`: cambios de precio; dejó de escribirse en el PR #31 y la migración `0011` la borró junto con el catálogo de Carulla y Olímpica (apagadas).
 - `crawl_cursor` y `crawl_lease`: dónde va la vuelta de cada tienda (partición, página, bandas de precio partidas, peticiones del día) y quién la corre.
 - `topic`: tema del grupo de Telegram por código y su `message_thread_id`.
 - `outbox` gana `topic` y `card` (datos de la tarjeta); `watch` gana `origin` (`manual`/`auto`) y `expires_at`.
