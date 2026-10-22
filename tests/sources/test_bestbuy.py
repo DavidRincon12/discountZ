@@ -23,6 +23,7 @@ from discountz.domain.urls import SafeUrl
 from discountz.infra.http import Files, HttpResponse, Method, PacedClient, Params
 from discountz.sources.base import (
     Capability,
+    CatalogPartition,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -135,7 +136,8 @@ def test_catalog_last_page_has_no_more() -> None:
 
 
 def test_catalog_partitions_single() -> None:
-    assert list(BestBuySource().catalog_partitions(ctx(Api(fixture("api-catalog"))))) == ["all"]
+    parts = list(BestBuySource().catalog_partitions(ctx(Api(fixture("api-catalog")))))
+    assert parts == [CatalogPartition("all")]
 
 
 def test_changed_uses_price_update_date() -> None:

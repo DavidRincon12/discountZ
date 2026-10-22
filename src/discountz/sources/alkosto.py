@@ -31,6 +31,7 @@ from discountz.sources.base import (
     Capability,
     CardFacts,
     CatalogPage,
+    CatalogPartition,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -407,8 +408,8 @@ class AlkostoSource:
 
     # --- catálogo ---------------------------------------------------------------------------
 
-    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]:
-        return [f"1-{PRICE_MAX}"]
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[CatalogPartition]:
+        return [CatalogPartition(f"1-{PRICE_MAX}")]
 
     def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
         """Una franja de precio por página; si pasa de 1.000 productos se parte en dos."""

@@ -42,6 +42,7 @@ from discountz.sources.base import (
     Capability,
     CardFacts,
     CatalogPage,
+    CatalogPartition,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -139,6 +140,7 @@ class FakeCatalog:
     default_offers: dict[str, Offer] = field(default_factory=dict)  # vendedor por defecto (v1)
     fail_confirms: int = 0  # confirmaciones que fallan por red antes de responder
     currency: Currency = Currency.COP
+    paths: dict[str, str] = field(default_factory=dict)  # partición → ruta; sin ruta, «/»
     descriptor: SourceDescriptor = field(init=False)
 
     def __post_init__(self) -> None:
@@ -155,9 +157,9 @@ class FakeCatalog:
             supports_changed=self.supports_changed,
         )
 
-    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]:
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[CatalogPartition]:
         ctx.http.request("GET", "https://fake/partitions")
-        return list(self.pages)
+        return [CatalogPartition(k, self.paths.get(k, "/")) for k in self.pages]
 
     def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
         ctx.http.request("GET", f"https://fake/page/{partition}/{page}")
@@ -312,6 +314,46 @@ def test_crawl_resumes_from_cursor_without_duplicates(db: psycopg.Connection) ->
     assert (cur.sweep_no, cur.partitions, cur.partition_idx, cur.page) == (1, (), 0, 0)
     assert cur.last_sweep_s == 3600
     assert cur.day_requests == 5
+
+
+def test_crawl_skips_partitions_outside_the_profile(db: psycopg.Connection) -> None:
+    """Mercado está apagado en el perfil: su partición no se pide (ADR 0013)."""
+    src = FakeCatalog(
+        {"C:/1/": [page_of(1)], "C:/2/": [page_of(1, 5)]},
+        paths={"C:/1/": "/Tecnología/", "C:/2/": "/Mercado/"},
+    )
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.status == "ok"
+    assert transport.kinds() == ["partitions", "page"]
+    assert transport.urls[1] == "https://fake/page/C:/1//0"
+    assert count(db, "catalog_item") == 1
+
+
+def test_crawl_with_every_partition_off_ends_ok_without_requests(db: psycopg.Connection) -> None:
+    """Sin nada que rastrear la corrida termina en paz y no guarda un barrido vacío."""
+    src = FakeCatalog({"C:/2/": [page_of(1)]}, paths={"C:/2/": "/Mercado/"})
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert (result.status, result.pages) == ("ok", 0)
+    assert transport.kinds() == ["partitions"]
+    cur = repo.get_cursor(db, "exito")
+    assert (cur.sweep_no, cur.partitions) == (0, ())
+
+
+def test_crawl_resumes_a_cursor_saved_with_plain_keys(db: psycopg.Connection) -> None:
+    """Un barrido guardado antes del perfil (solo claves) sigue donde iba."""
+    cur = repo.get_cursor(db, "exito")
+    repo.save_cursor(
+        db, replace(cur, sweep_no=1, partitions=("C:/1/", "C:/2/"), partition_idx=1, page=0)
+    )
+    src = FakeCatalog(
+        {"C:/1/": [page_of(1)], "C:/2/": [page_of(1, 5)]},
+        paths={"C:/1/": "/Tecnología/", "C:/2/": "/Mercado/"},
+    )
+    d, transport = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).status == "ok"
+    assert transport.urls == ["https://fake/page/C:/2//0"]
 
 
 def test_crawl_accepts_catalog_pages_over_the_cycle_body_cap(db: psycopg.Connection) -> None:

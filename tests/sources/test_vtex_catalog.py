@@ -18,6 +18,7 @@ from discountz.infra.http import FakeHttp, Files, HttpResponse, Method, Params
 from discountz.sources.base import (
     Capability,
     CatalogPage,
+    CatalogPartition,
     ListingFound,
     NoCredentials,
     SourceContext,
@@ -176,12 +177,13 @@ def test_partitions_split_large_leaf_by_price() -> None:
     assert sum(counts) == len(prices)
 
 
-def test_catalog_partitions_are_root_categories() -> None:
+def test_catalog_partitions_are_root_categories_with_their_path() -> None:
     tree = load_fixture("vtex", "exito-category-tree")
     url = "https://www.exito.com/io/api/catalog_system/pub/category/tree/1"
     fake = FakeHttp({url: tree})
     parts = VtexSource(STORES["exito"]).catalog_partitions(ctx(fake))
-    assert "C:/34185084/" in parts  # Tecnología
+    assert CatalogPartition("C:/34185084/", "/Tecnología/") in parts
+    assert CatalogPartition("C:/34185082/", "/Mercado/") in parts
     assert len(parts) == len(json.loads(tree.body))
 
 

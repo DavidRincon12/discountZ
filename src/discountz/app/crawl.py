@@ -47,12 +47,13 @@ from discountz.domain.model import AlertKind, ListingRef, Maturity, Offer, Selle
 from discountz.domain.money import format_money
 from discountz.domain.scheduling import CrawlBudget
 from discountz.domain.segments import Observation, SegmentStatus, gap_h
-from discountz.domain.topics import TopicParams, assign_topic
+from discountz.domain.topics import TopicParams, assign_topic, crawl_wanted
 from discountz.infra import db
 from discountz.infra.http import CATALOG_MAX_BODY_BYTES, HttpClient, PacedClient
 from discountz.infra.log import event
 from discountz.sources.base import (
     CardFacts,
+    CatalogPartition,
     CrawlSource,
     CredentialStore,
     ListingFailed,
@@ -208,13 +209,16 @@ class _Run:
             self.check_breaker()
             c = self.cursor
             if not c.partitions:
-                parts = self.guarded(lambda: self.deps.source.catalog_partitions(self.ctx))
-                if not parts:
+                found = self.guarded(lambda: self.deps.source.catalog_partitions(self.ctx))
+                if not found:
                     return "partial"
+                keys = self.wanted(found)
+                if not keys:  # todo fuera del perfil: nada que barrer, sin guardar un barrido vacío
+                    return "ok"
                 self.cursor = replace(
                     c,
                     sweep_no=c.sweep_no + 1,
-                    partitions=tuple(parts),
+                    partitions=keys,
                     partition_idx=0,
                     page=0,
                     sweep_started_at=self.now,
@@ -242,6 +246,14 @@ class _Run:
                     return "ok"
             self.save_cursor()
         return "ok"
+
+    def wanted(self, parts: Sequence[CatalogPartition]) -> tuple[str, ...]:
+        """Claves de las particiones que entran en el perfil de temas (ADR 0013)."""
+        rules, params = self.deps.topics.rules, self.deps.topics.params
+        keys = tuple(p.key for p in parts if crawl_wanted(rules, params, self.code, p.path))
+        if skipped := len(parts) - len(keys):
+            event(log, "crawl_partitions_skipped", source=self.code, count=skipped)
+        return keys
 
     def finish_sweep(self) -> None:
         started = self.cursor.sweep_started_at or self.now

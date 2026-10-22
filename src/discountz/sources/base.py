@@ -160,6 +160,18 @@ class Source(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogPartition:
+    """Partición del recorrido: la clave que entiende la fuente y la ruta de su categoría.
+
+    La ruta decide si entra en el perfil (`crawl_wanted`); `/` es «todo el catálogo». El
+    cursor guarda solo la clave.
+    """
+
+    key: str
+    path: str = "/"
+
+
+@dataclass(frozen=True, slots=True)
 class CatalogPage:
     """Una página del recorrido. `split` no vacío ⇒ la partición se reemplaza por esas."""
 
@@ -180,7 +192,7 @@ class CardFacts:
 class CatalogSource(Protocol):
     descriptor: SourceDescriptor
 
-    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]: ...
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[CatalogPartition]: ...
     def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage: ...
     def fetch_changed(self, ctx: SourceContext, since: datetime, page: int) -> CatalogPage: ...
     def fetch_catalog_items(

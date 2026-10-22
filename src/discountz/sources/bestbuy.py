@@ -28,6 +28,7 @@ from discountz.sources.base import (
     Capability,
     CardFacts,
     CatalogPage,
+    CatalogPartition,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -241,8 +242,8 @@ class BestBuySource:
     def fetch_leads(self, ctx: SourceContext) -> list[Lead]:
         return []
 
-    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]:
-        return ["all"]
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[CatalogPartition]:
+        return [CatalogPartition("all")]
 
     def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
         if partition != "all":
