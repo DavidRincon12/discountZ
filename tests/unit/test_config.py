@@ -17,6 +17,7 @@ from discountz.config import (
     load_settings,
 )
 from discountz.domain.errors import ConfigError
+from discountz.domain.money import Currency
 from discountz.domain.params import DEFAULT_CATEGORIES, GlobalParams
 
 SECRET = "123456:SECRETO-de-prueba"  # noqa: S105 - falso, de prueba
@@ -120,6 +121,20 @@ def test_negative_threshold_fails_without_leaking(tmp_path: Path) -> None:
     assert "t_good_bp" in msg
     assert "-1200" not in msg
     assert SECRET not in msg and "CANARYPASS" not in msg
+
+
+def test_quality_floors_come_from_the_toml(tmp_path: Path) -> None:
+    path = _bad_toml(tmp_path, "min_price_cop = 100000", "min_price_cop = 150000")
+    glob = load_params(path).glob
+    assert glob.min_price[Currency.COP] == 150_000
+    assert glob.min_price[Currency.USD] == 2_500
+    assert glob.catalog_min_saving == {Currency.COP: 30_000, Currency.USD: 500}
+
+
+def test_daily_cards_come_from_the_toml(tmp_path: Path) -> None:
+    assert load_params().daily_cards == 8
+    path = _bad_toml(tmp_path, "daily_per_source = 8", "daily_per_source = 5")
+    assert load_params(path).daily_cards == 5
 
 
 def test_unknown_category_fails(tmp_path: Path) -> None:

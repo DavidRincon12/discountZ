@@ -23,6 +23,12 @@ jump_window_d = 7
 gap_before_d = 7
 min_abs_cop = 10000
 min_abs_usd = 500
+# Calidad de las ofertas (2026-10-22): el «antes» del rastreo y lo que llega por casillero cuestan
+# al menos esto, y el rastreo exige este ahorro (los seguimientos siguen con min_abs).
+min_price_cop = 100000
+min_price_usd = 2500
+catalog_min_saving_cop = 30000
+catalog_min_saving_usd = 500
 rarity_tol_bp = 50
 improve_bp = 300
 rearm_h = 24
@@ -313,6 +319,11 @@ max_batch = 1
 # Canales de ofertas de Telegram (spec de canales §2): cada canal como máximo cada N minutos.
 [channels]
 interval_min = 3
+
+# Tarjetas por fuente del rastreo o canal al día de Bogotá; los errores de precio no cuentan. El
+# resto llega a las 21:00 en el resumen de la noche (ADR 0012).
+[cards]
+daily_per_source = 8
 
 # Rastreo de catálogo (spec del rastreo §2.3): separado del presupuesto de /seguir. Una corrida
 # por hora; `max_per_run` ≈ tope de 24 h / 24. `hot_share_bp`: parte para la capa caliente.

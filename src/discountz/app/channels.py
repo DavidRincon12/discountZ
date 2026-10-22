@@ -9,6 +9,10 @@ Los feeds cuyos ids no crecen con la publicación (`ordered_ids=False`: DealNews
 Amazon) se leen enteros en cada lectura, sin `after`: se saltan los ids ya guardados en
 `channel_post`. Su primera lectura, como la de un canal, no envía nada: guarda lo que hay como
 visto (`baseline`).
+
+Lo que llega por casillero (`ChannelPost.casillero`) con precio bajo o de mercado tampoco se
+envía: queda visto igual (calidad de las ofertas, 2026-10-22). Pasado el tope de tarjetas del
+canal en el día, una oferta nueva espera el resumen de la noche (`app.held`, ADR 0012).
 """
 
 from __future__ import annotations
@@ -24,14 +28,17 @@ import psycopg
 
 from discountz.app.collect import SourceRun
 from discountz.app.compose import ALERT_TTL, is_quiet
+from discountz.app.held import Slot, admit
 from discountz.app.links import LinkResolver
-from discountz.app.render import channel_card, render_channel_deal, reply_markup
+from discountz.app.render import channel_card, held_channel_line, render_channel_deal, reply_markup
 from discountz.config import AppParams, Topics
 from discountz.domain.community import ChannelPost, assign_channel_topic, find_duplicate
 from discountz.domain.errors import BudgetExhausted, HardBlock, ParseError, SourceError
 from discountz.domain.health import BreakerEvent, BreakerState, breaker_transition, effective_state
-from discountz.domain.model import normalize_title
+from discountz.domain.model import AlertKind, normalize_title
+from discountz.domain.money import Currency
 from discountz.domain.scheduling import SourceBudget
+from discountz.domain.topics import GROCERY_TOPIC
 from discountz.infra import db
 from discountz.infra.log import event
 from discountz.sources.base import ChannelPage, ChannelSource, NoCredentials, Source, SourceContext
@@ -51,6 +58,20 @@ class ChannelsResult:
     sent: int
     duplicates: int
     skipped: int
+    held: int = 0  # pasado el tope del día: esperan el resumen de la noche
+
+
+@dataclass(frozen=True, slots=True)
+class _Step:
+    """Lo que comparten todos los canales en una pasada del ciclo."""
+
+    conn: psycopg.Connection
+    now: datetime
+    topics: Topics
+    recent: list[db.RecentPost]  # originales de la ventana de duplicados; crece con cada una
+    silent: bool
+    min_price: Mapping[Currency, int]  # lo que llega por casillero cuesta al menos esto
+    daily_cards: int  # tarjetas por canal al día
 
 
 @dataclass(slots=True)
@@ -59,6 +80,7 @@ class _Tally:
     sent: int = 0
     duplicates: int = 0
     skipped: int = 0
+    held: int = 0
 
 
 def due_channels(
@@ -102,15 +124,22 @@ def run_channels(
 
     `resolve` cambia el enlace de cada oferta nueva por el de la tienda (`app.links`).
     """
-    recent = list(db.recent_channel_posts(conn, now - RECENT_WINDOW))
-    silent = is_quiet(now, params.quiet_start, params.quiet_end)
+    step = _Step(
+        conn,
+        now,
+        topics,
+        list(db.recent_channel_posts(conn, now - RECENT_WINDOW)),
+        is_quiet(now, params.quiet_start, params.quiet_end),
+        params.glob.min_price,
+        params.daily_cards,
+    )
     total = _Tally()
     requests = 0
     for r in runs:
         before = r.http.used
         tally = _Tally()
         try:
-            _run_one(conn, r, now, topics, rnd, deadline, recent, silent, tally, resolve)
+            _run_one(step, r, rnd, deadline, tally, resolve)
         except Exception as exc:  # aislamiento por canal: el ciclo sigue
             r.failed = True
             event(log, "channel_failed", logging.ERROR, source=r.code, error=type(exc).__name__)
@@ -125,25 +154,24 @@ def run_channels(
             sent=tally.sent,
             duplicates=tally.duplicates,
             skipped=tally.skipped,
+            held=tally.held,
         )
         total.sent += tally.sent
         total.duplicates += tally.duplicates
         total.skipped += tally.skipped
-    return ChannelsResult(requests, total.sent, total.duplicates, total.skipped)
+        total.held += tally.held
+    return ChannelsResult(requests, total.sent, total.duplicates, total.skipped, total.held)
 
 
 def _run_one(
-    conn: psycopg.Connection,
+    step: _Step,
     r: SourceRun,
-    now: datetime,
-    topics: Topics,
     rnd: random.Random,
     deadline: float,
-    recent: list[db.RecentPost],
-    silent: bool,
     tally: _Tally,
     resolve: LinkResolver | None,
 ) -> None:
+    conn, now = step.conn, step.now
     source = cast(ChannelSource, r.source)
     ordered = source.descriptor.ordered_ids
     cursor = db.get_channel_cursor(conn, r.code)
@@ -159,9 +187,7 @@ def _run_one(
     if not ordered:
         first = cursor is None
         since = None if source.descriptor.refeatures else now - MAX_AGE
-        _read_unordered(
-            conn, r.code, pages, now, topics, recent, silent, tally, streak, first, since
-        )
+        _read_unordered(step, r.code, pages, tally, streak, first, since)
     elif cursor is None:  # primera lectura: solo se fija el punto de partida
         top = max((p.max_id for p in pages if p.max_id is not None), default=None)
         if top is not None:
@@ -176,7 +202,7 @@ def _run_one(
                 for post in sorted(page.posts, key=lambda p: p.post_id):
                     if post.post_id <= cursor.last_id:  # defensa: `after` ya debería excluirlo
                         continue
-                    _handle(conn, r.code, post, now, topics, recent, silent, tally)
+                    _handle(step, r.code, post, tally)
                 tally.skipped += page.skipped
                 last_id = max(last_id, page.max_id or last_id)
                 db.save_channel_cursor(conn, r.code, last_id, now, unparsed_streak=streak)
@@ -192,13 +218,9 @@ def _resolved(page: ChannelPage, resolve: LinkResolver) -> ChannelPage:
 
 
 def _read_unordered(
-    conn: psycopg.Connection,
+    step: _Step,
     code: str,
     pages: Sequence[ChannelPage],
-    now: datetime,
-    topics: Topics,
-    recent: list[db.RecentPost],
-    silent: bool,
     tally: _Tally,
     streak: int,
     first: bool,
@@ -217,25 +239,24 @@ def _read_unordered(
         return
     top = max((p.max_id for p in pages if p.max_id is not None), default=None)
     fresh = [p for page in pages for p in page.posts if since is None or p.published_at >= since]
-    seen = db.channel_post_ids(conn, code, [p.post_id for p in fresh])
-    with conn.transaction():
+    seen = db.channel_post_ids(step.conn, code, [p.post_id for p in fresh])
+    with step.conn.transaction():
         for post in sorted(fresh, key=lambda p: (p.published_at, p.post_id)):
             if post.post_id in seen:
                 continue
             seen.add(post.post_id)
             if first:
-                _mark(conn, code, post, now, topics)
+                _mark(step, code, post, assign_channel_topic(post, step.topics.channel_rules))
             else:
-                _handle(conn, code, post, now, topics, recent, silent, tally, max_age=None)
-        db.save_channel_cursor(conn, code, top or 0, now, unparsed_streak=streak)
+                _handle(step, code, post, tally, max_age=None)
+        db.save_channel_cursor(step.conn, code, top or 0, step.now, unparsed_streak=streak)
 
 
-def _mark(
-    conn: psycopg.Connection, code: str, post: ChannelPost, now: datetime, topics: Topics
-) -> None:
-    """Guarda la publicación como vista sin enviarla (primera lectura de un feed sin orden)."""
+def _mark(step: _Step, code: str, post: ChannelPost, topic: str) -> None:
+    """Guarda la publicación como vista sin enviarla: la primera lectura de un feed sin orden o
+    lo que no compensa por casillero. No cuenta como original para los duplicados."""
     db.insert_channel_post(
-        conn,
+        step.conn,
         code,
         post.post_id,
         published_at=post.published_at,
@@ -243,11 +264,17 @@ def _mark(
         price_minor=post.price.minor,
         currency=post.price.currency.value,
         coupon=post.coupon,
-        topic=assign_channel_topic(post, topics.channel_rules),
+        topic=topic,
         duplicate_of=None,
-        now=now,
+        now=step.now,
         baseline=True,
     )
+
+
+def _worth_by_casillero(post: ChannelPost, topic: str, min_price: Mapping[Currency, int]) -> bool:
+    """Por casillero no compensan lo barato ni el mercado; lo que envía directo a Colombia
+    no tiene este filtro (calidad de las ofertas, 2026-10-22)."""
+    return topic != GROCERY_TOPIC and post.price.minor >= min_price[post.price.currency]
 
 
 def _fetch(
@@ -299,23 +326,24 @@ def _on_error(
 
 
 def _handle(
-    conn: psycopg.Connection,
+    step: _Step,
     code: str,
     post: ChannelPost,
-    now: datetime,
-    topics: Topics,
-    recent: list[db.RecentPost],
-    silent: bool,
     tally: _Tally,
     *,
     max_age: timedelta | None = MAX_AGE,
 ) -> None:
+    conn, now = step.conn, step.now
     tally.posts += 1
     if max_age is not None and post.published_at < now - max_age:
         tally.skipped += 1
         return
-    dup = find_duplicate(post, recent)
-    topic = assign_channel_topic(post, topics.channel_rules)
+    topic = assign_channel_topic(post, step.topics.channel_rules)
+    if post.casillero and not _worth_by_casillero(post, topic, step.min_price):
+        _mark(step, code, post, topic)
+        tally.skipped += 1
+        return
+    dup = find_duplicate(post, step.recent)
     title_norm = normalize_title(post.title)
     inserted = db.insert_channel_post(
         conn,
@@ -335,21 +363,27 @@ def _handle(
         return
     if not inserted:
         return
-    msg = render_channel_deal(post, topic)
-    db.enqueue(
-        conn,
-        "alert",
-        msg.html,
-        priority=PRIORITY,
-        dedup_key=f"canal:{code}:{post.post_id}",
-        now=now,
-        ttl=ALERT_TTL,
-        reply_markup=reply_markup(msg.buttons) if msg.buttons else None,
-        silent=silent,
-        topic=topic,
-        card=channel_card(post, topic),
-    )
-    recent.append(
+    slot = Slot(code, topic, AlertKind.COMMUNITY_DEAL, None)
+    if admit(conn, slot, now, step.daily_cards, held_channel_line(post)):
+        msg = render_channel_deal(post, topic)
+        db.enqueue(
+            conn,
+            "alert",
+            msg.html,
+            priority=PRIORITY,
+            dedup_key=f"canal:{code}:{post.post_id}",
+            now=now,
+            ttl=ALERT_TTL,
+            reply_markup=reply_markup(msg.buttons) if msg.buttons else None,
+            silent=step.silent,
+            topic=topic,
+            card=channel_card(post, topic),
+        )
+        tally.sent += 1
+    else:
+        tally.held += 1
+    # Retenida también es la original: la misma oferta en otro canal es un duplicado.
+    step.recent.append(
         db.RecentPost(
             f"{code}:{post.post_id}",
             title_norm,
@@ -358,4 +392,3 @@ def _handle(
             post.coupon,
         )
     )
-    tally.sent += 1

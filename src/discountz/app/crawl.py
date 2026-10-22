@@ -17,7 +17,15 @@ from typing import Any, Literal
 
 import psycopg
 
-from discountz.app.render import esc, render_catalog_alert, reply_markup, source_name, truncate
+from discountz.app.held import Slot, admit
+from discountz.app.render import (
+    esc,
+    held_catalog_line,
+    render_catalog_alert,
+    reply_markup,
+    source_name,
+    truncate,
+)
 from discountz.config import AppParams, Topics
 from discountz.domain.catalog import (
     CatalogCandidate,
@@ -542,6 +550,11 @@ class _Run:
             if alert_id is None or delivery != "new":
                 return
             card = _card(self.code, f.topic, title, url, facts, cand, f.peers)
+            slot = Slot(self.code, f.topic, kind, cand.drop_bp)
+            cards = self.deps.params.daily_cards
+            if not admit(self.conn, slot, self.now, cards, held_catalog_line(card)):
+                db.mark_alert_held(self.conn, alert_id)  # va al resumen de la noche
+                return
             msg = render_catalog_alert(card, prev.id, topic.title)
             is_error = kind is AlertKind.PRICE_ERROR
             outbox_id = db.enqueue(

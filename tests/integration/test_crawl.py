@@ -19,10 +19,12 @@ from discountz.app.crawl import (
     run_crawl,
     run_crawl_reconnecting,
 )
+from discountz.app.held import Slot, admit
 from discountz.config import load_params, load_topics
 from discountz.domain.catalog import CatalogObservation, CatalogState
 from discountz.domain.errors import ParseError, Unavailable
 from discountz.domain.model import (
+    AlertKind,
     ExtractionPath,
     Lead,
     ListingRef,
@@ -503,8 +505,8 @@ def test_crawl_logs_the_http_status_of_a_source_error(
 
 
 def test_crawl_confirmation_mismatch_drops_candidate(db: psycopg.Connection) -> None:
-    seed_history(db, "123", 99_900)
-    src = FakeCatalog({"C:/1/": [[obs("123", 59_900)]]}, offers={"123": offer("123", 61_100)})
+    seed_history(db, "123", 199_900)
+    src = FakeCatalog({"C:/1/": [[obs("123", 119_900)]]}, offers={"123": offer("123", 122_300)})
     d, _ = deps(db, src, Clock())
     result = run_crawl(d, T, minutes=60)
     assert result.alerts == 0
@@ -514,11 +516,11 @@ def test_crawl_confirmation_mismatch_drops_candidate(db: psycopg.Connection) -> 
 
 def test_crawl_confirms_with_cheapest_in_stock_seller(db: psycopg.Connection) -> None:
     """Vendedor por defecto agotado y otro con stock: la confirmación usa la regla del recorrido."""
-    seed_history(db, "123", 99_900)
-    gone = replace(offer("123", 59_900), in_stock=False)
+    seed_history(db, "123", 199_900)
+    gone = replace(offer("123", 119_900), in_stock=False)
     src = FakeCatalog(
-        {"C:/1/": [[obs("123", 59_900)]]},
-        offers={"123": offer("123", 59_900)},
+        {"C:/1/": [[obs("123", 119_900)]]},
+        offers={"123": offer("123", 119_900)},
         default_offers={"123": gone},
     )
     d, _ = deps(db, src, Clock())
@@ -526,9 +528,9 @@ def test_crawl_confirms_with_cheapest_in_stock_seller(db: psycopg.Connection) ->
 
 
 def test_crawl_confirm_failure_keeps_candidate_for_next_run(db: psycopg.Connection) -> None:
-    seed_history(db, "123", 99_900)
+    seed_history(db, "123", 199_900)
     src = FakeCatalog(
-        {"C:/1/": [[obs("123", 59_900)]]}, offers={"123": offer("123", 59_900)}, fail_confirms=1
+        {"C:/1/": [[obs("123", 119_900)]]}, offers={"123": offer("123", 119_900)}, fail_confirms=1
     )
     d, _ = deps(db, src, Clock())
     assert run_crawl(d, T, minutes=60).alerts == 0
@@ -541,14 +543,14 @@ def test_crawl_confirm_failure_keeps_candidate_for_next_run(db: psycopg.Connecti
 def test_crawl_ean_duplicate_is_skipped(db: psycopg.Connection) -> None:
     ean = "7701234567890"
     start = T - timedelta(days=5)
-    state = CatalogState(59_900, 99_900, 99_900, start, start, 3, None, None, None)
+    state = CatalogState(119_900, 199_900, 199_900, start, start, 3, None, None, None)
     repo.save_catalog_page(
         db, "carulla", [CatalogRow("9", ean, "tecnologia", "COP", state, False)], T
     )
-    repo.mark_catalog_alert(db, "carulla", "9", 59_900, T - timedelta(hours=1))
-    seed_history(db, "123", 99_900, ean=ean)
+    repo.mark_catalog_alert(db, "carulla", "9", 119_900, T - timedelta(hours=1))
+    seed_history(db, "123", 199_900, ean=ean)
     src = FakeCatalog(
-        {"C:/1/": [[obs("123", 59_900, ean=ean)]]}, offers={"123": offer("123", 59_900)}
+        {"C:/1/": [[obs("123", 119_900, ean=ean)]]}, offers={"123": offer("123", 119_900)}
     )
     d, transport = deps(db, src, Clock())
     result = run_crawl(d, T, minutes=60)
@@ -606,24 +608,24 @@ def test_crawl_spreads_the_daily_budget_over_the_hours_left(db: psycopg.Connecti
 
 
 def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
-    seed_history(db, "123", 99_900)
-    src = FakeCatalog({"C:/1/": [[obs("123", 59_900)]]}, offers={"123": offer("123", 59_900)})
+    seed_history(db, "123", 199_900)
+    src = FakeCatalog({"C:/1/": [[obs("123", 119_900)]]}, offers={"123": offer("123", 119_900)})
     d, _ = deps(db, src, Clock())
     result = run_crawl(d, T, minutes=60)
     assert result.alerts == 1
     (row,) = repo.claim_outbox(db, 10, T)
     assert row.topic == "tecnologia"
-    assert row.priority == 5  # máx(2, 9 − 4004 // 1000)
+    assert row.priority == 5  # máx(2, 9 − 4002 // 1000)
     assert row.card == {
         "store": "exito",
         "topic": "tecnologia",
         "title": "Celular 123 256 GB",
         "url": "https://www.exito.com/celular-123/p",
         "image_url": "https://exitocol.vteximg.com.br/arquivos/ids/123/a.jpg",
-        "price_minor": 59_900,
-        "usual_minor": 99_900,
+        "price_minor": 119_900,
+        "usual_minor": 199_900,
         "currency": "COP",
-        "drop_bp": 4004,
+        "drop_bp": 4002,
         "min_days": 5,
         "kind": "catalog_drop",
         "reference_label": "Antes",
@@ -634,12 +636,12 @@ def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
     alert = db.execute("SELECT kind, delivery FROM discountz.alert").fetchone()
     assert alert == ("catalog_drop", "queued")
     s = repo.load_catalog_states(db, "exito", ["123"])["123"]
-    assert (s.last_alert_at, s.last_alert_minor) == (T, 59_900)
+    assert (s.last_alert_at, s.last_alert_minor) == (T, 119_900)
 
 
 def test_crawl_price_error_also_posts_line_in_category(db: psycopg.Connection) -> None:
-    seed_history(db, "123", 99_900)
-    src = FakeCatalog({"C:/1/": [[obs("123", 19_900)]]}, offers={"123": offer("123", 19_900)})
+    seed_history(db, "123", 199_900)
+    src = FakeCatalog({"C:/1/": [[obs("123", 39_900)]]}, offers={"123": offer("123", 39_900)})
     d, _ = deps(db, src, Clock())
     run_crawl(d, T, minutes=60)
     rows = {r.topic: r for r in repo.claim_outbox(db, 10, T)}
@@ -648,6 +650,36 @@ def test_crawl_price_error_also_posts_line_in_category(db: psycopg.Connection) -
     assert rows["errores"].card is not None
     assert rows["tecnologia"].card is None
     assert "Errores de precio" in rows["tecnologia"].body_html
+
+
+def test_crawl_alert_past_the_daily_cap_waits_for_the_digest(db: psycopg.Connection) -> None:
+    cap = load_params().daily_cards
+    for i in range(cap):
+        admit(db, Slot("exito", "hogar", AlertKind.CATALOG_DROP, 1000 + 100 * i), T, cap, "• x")
+    seed_history(db, "123", 199_900)
+    src = FakeCatalog({"C:/1/": [[obs("123", 119_900)]]}, offers={"123": offer("123", 119_900)})
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 0
+    assert count(db, "outbox") == 0
+    assert db.execute("SELECT delivery FROM discountz.alert").fetchone() == ("held",)
+    row = db.execute("SELECT topic, line FROM discountz.offer_log WHERE NOT carded").fetchone()
+    assert row is not None and row[0] == "tecnologia"
+    assert "Celular 123 256 GB</a> · <b>$119.900</b>" in row[1]
+
+
+def test_crawl_same_promotion_goes_out_once(db: psycopg.Connection) -> None:
+    """Dos tallas o colores al mismo descuento en la misma tienda y tema: una sola tarjeta."""
+    seed_history(db, "123", 199_900)
+    seed_history(db, "124", 199_900)
+    src = FakeCatalog(
+        {"C:/1/": [[obs("123", 119_900), obs("124", 119_900)]]},
+        offers={"123": offer("123", 119_900), "124": offer("124", 119_900)},
+    )
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 1
+    assert count(db, "outbox") == 1
+    deliveries = db.execute("SELECT delivery FROM discountz.alert ORDER BY id").fetchall()
+    assert deliveries == [("queued",), ("held",)]
 
 
 def test_crawl_stops_when_breaker_opens_meanwhile_and_keeps_it(db: psycopg.Connection) -> None:

@@ -18,11 +18,14 @@ from discountz.app.render import (
     DailyView,
     FlashSeen,
     channel_card,
+    held_catalog_line,
+    held_channel_line,
     render_alert,
     render_catalog_alert,
     render_channel_deal,
     render_daily,
     render_health,
+    render_held_digest,
     render_list,
     render_storm,
     render_summary,
@@ -33,7 +36,14 @@ from discountz.domain.community import ChannelPost
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
-from discountz.infra.db import CatalogDaily, SearchItem, SourceStatus, StatusSnapshot, WatchItem
+from discountz.infra.db import (
+    CatalogDaily,
+    HeldOffer,
+    SearchItem,
+    SourceStatus,
+    StatusSnapshot,
+    WatchItem,
+)
 
 GOLDEN = Path(__file__).parent.parent / "golden"
 SEEN = datetime(2026, 10, 13, 15, 2, tzinfo=UTC)  # 10:02 en Bogotá
@@ -585,7 +595,15 @@ def test_channel_card_fields() -> None:
         "kind": "community_deal",
         "coupon": "T6YLVQZS",
         "badge": "Clubgratis · sin verificar",
+        "casillero": False,
     }
+
+
+def test_channel_deal_says_casillero_only_when_the_post_does() -> None:
+    """Las ofertas de Amazon de los canales suelen enviar directo a Colombia (David, 2026-10-22)."""
+    assert CASILLERO not in render_channel_deal(_channel_post(), "deportes").html
+    assert CASILLERO in render_channel_deal(_channel_post(casillero=True), "deportes").html
+    assert CASILLERO in render_channel_deal(_channel_post(**SLICKDEALS), "tecnologia").html
 
 
 # ───────────── Ofertas de feeds sin verificar (DealNews y Slickdeals Amazon)
@@ -602,6 +620,7 @@ DEALNEWS = {
     "hashtags": ("skin", "care"),
     "link": SafeUrl.parse(DEALNEWS_URL, frozenset({"www.dealnews.com"})),
     "post_url": SafeUrl.parse(DEALNEWS_URL, frozenset({"www.dealnews.com"})),
+    "casillero": True,
 }
 SLICKDEALS = {
     "channel": "slickdeals_amazon",
@@ -614,6 +633,7 @@ SLICKDEALS = {
     "post_url": SafeUrl.parse(
         "https://slickdeals.net/f/20089260-25w-waylite", frozenset({"slickdeals.net"})
     ),
+    "casillero": True,
 }
 
 
@@ -670,3 +690,65 @@ def test_storm_message_lists_the_errors_of_one_store_and_is_loud() -> None:
     assert "Nevera &amp; congelador" in msg.html
     assert not msg.silent
     assert visible_length(msg.html) <= MAX_VISIBLE
+
+
+# ───────────── Resumen de la noche (ADR 0012)
+
+
+def test_held_catalog_line() -> None:
+    assert held_catalog_line(CARD_C01) == (
+        '• <a href="https://www.exito.com/celular-moto-g85/p">Celular &lt;Moto&gt; G85 256 GB</a>'
+        " · <b>$59.900</b> antes <s>$99.900</s> (-40,0 %)"
+    )
+
+
+def test_held_price_error_line_is_marked() -> None:
+    line = held_catalog_line(CARD_C01 | {"kind": "price_error", "drop_bp": 8000})
+    assert line.startswith("• 🔥 <a ")
+
+
+def test_held_channel_line() -> None:
+    assert held_channel_line(_channel_post()) == (
+        '• <a href="https://joylink.io/clubgratis/x">Arcweg traje de baño para hombre 7 pulgadas'
+        "</a> · <b>US$4,99</b> · cupón <code>T6YLVQZS</code>"
+    )
+
+
+def _held(source: str, drop: int | None, line: str, i: int = 0) -> HeldOffer:
+    return HeldOffer(i, source, drop, line)
+
+
+def test_held_digest_matches_golden() -> None:
+    lunchbox = (
+        '• <a href="https://www.exito.com/l/p">Lonchera Totto</a>'
+        " · <b>$103.900</b> antes <s>$129.900</s> (-20,0 %)"
+    )
+    rows = [
+        _held("exito", 4004, held_catalog_line(CARD_C01), 1),
+        _held("exito", 2001, lunchbox, 2),
+        _held("tg_clubgratis", None, held_channel_line(_channel_post()), 3),
+    ]
+    assert render_held_digest(rows, 8) == [golden("held_digest.html")]
+
+
+def test_held_digest_counts_what_does_not_fit_per_source() -> None:
+    rows = [_held("exito", 1000 - i, f"• oferta {i}", i) for i in range(45)]
+    (body,) = render_held_digest(rows, 8)
+    assert "• oferta 39" in body and "• oferta 40" not in body
+    assert body.endswith("… y 5 más de Éxito")
+
+
+def test_held_digest_splits_into_messages_that_fit() -> None:
+    sources = ("exito", "alkosto", "jumbo")
+    rows = [_held(s, 1000, f"• {'x' * 110} {s} {i}", i) for s in sources for i in range(40)]
+    bodies = render_held_digest(rows, 8)
+    assert len(bodies) > 1
+    assert all(visible_length(b) <= MAX_VISIBLE for b in bodies)
+    joined = "\n".join(bodies)
+    assert all(f"jumbo {i}" in joined for i in range(40))
+    assert all(b.startswith("<b>") for b in bodies[1:])  # cada uno dice de qué fuente sigue
+
+
+def test_held_digest_of_one_offer_says_so_in_singular() -> None:
+    (body,) = render_held_digest([_held("exito", 2000, "• x")], 8)
+    assert body.startswith("🌙 <b>Resumen de la noche</b> · 1 oferta\n")

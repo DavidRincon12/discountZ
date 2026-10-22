@@ -49,10 +49,8 @@ t_bp = 2500
 g_bp = 7000
 category = "otros"
 
-[topics.mercado]
+[topics.mercado]  # sin t_bp ni g_bp: el rastreo no alerta mercado (calidad de las ofertas, 2026-10-22)
 title = "🛒 Mercado"
-t_bp = 2500
-g_bp = 7000
 category = "otros"
 
 [topics.deportes]

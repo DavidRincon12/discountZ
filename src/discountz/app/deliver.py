@@ -167,10 +167,15 @@ def link_buttons_only(markup: Mapping[str, Any] | None) -> dict[str, Any] | None
 
 
 def card_png(card: Mapping[str, Any], photo: bytes | None) -> bytes:
+    return render_card(card_data(card), photo)
+
+
+def card_data(card: Mapping[str, Any]) -> CardData:
+    """`outbox.card` → datos de la tarjeta. Sin «casillero» (rastreo y filas viejas): USD lo es."""
     store = str(card["store"])
     currency = Currency(str(card["currency"]))
     topic = str(card["topic"])
-    data = CardData(
+    return CardData(
         store_name=source_name(store),
         store_color=STORE_COLORS.get(store, DEFAULT_COLOR),
         topic_title=_topic_titles().get(topic, topic),
@@ -183,8 +188,8 @@ def card_png(card: Mapping[str, Any], photo: bytes | None) -> bytes:
         coupon=str(card["coupon"]) if card.get("coupon") else None,
         reference_label=str(card.get("reference_label") or "Antes"),
         note=str(card["note"]) if card.get("note") else None,
+        casillero=bool(card.get("casillero", currency is Currency.USD)),
     )
-    return render_card(data, photo)
 
 
 def deliver(

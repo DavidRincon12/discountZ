@@ -205,6 +205,7 @@ def parse_slickdeals_amazon(body: bytes) -> ChannelPage:
                 image_url=image,
                 link=target,
                 post_url=thread,
+                casillero=True,
             )
         )
     return ChannelPage(

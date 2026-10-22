@@ -34,6 +34,14 @@ def _min_abs() -> Mapping[Currency, int]:
     return MappingProxyType({Currency.COP: 10_000, Currency.USD: 500})
 
 
+def _min_price() -> Mapping[Currency, int]:
+    return MappingProxyType({Currency.COP: 100_000, Currency.USD: 2_500})
+
+
+def _catalog_min_saving() -> Mapping[Currency, int]:
+    return MappingProxyType({Currency.COP: 30_000, Currency.USD: 500})
+
+
 @dataclass(frozen=True, slots=True)
 class GlobalParams:
     h_min: timedelta = 12 * HOUR
@@ -59,6 +67,10 @@ class GlobalParams:
     jump_window: timedelta = 7 * DAY
     gap_before: timedelta = 7 * DAY
     min_abs: Mapping[Currency, int] = field(default_factory=_min_abs)
+    # Calidad de las ofertas (2026-10-22): precio mínimo del «antes» del rastreo y de lo que llega
+    # por casillero, y ahorro mínimo del rastreo (el de los seguimientos sigue en `min_abs`).
+    min_price: Mapping[Currency, int] = field(default_factory=_min_price)
+    catalog_min_saving: Mapping[Currency, int] = field(default_factory=_catalog_min_saving)
     rarity_tol_bp: int = 50
     improve_bp: int = 300
     rearm: timedelta = 24 * HOUR

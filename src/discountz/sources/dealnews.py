@@ -154,6 +154,7 @@ def parse_dealnews_feed(body: bytes, now: datetime) -> ChannelPage:
                 image_url=_image(item),
                 link=link,
                 post_url=link,
+                casillero=True,
             )
         )
     return ChannelPage(

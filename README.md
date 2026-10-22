@@ -162,6 +162,17 @@ Las dos están en VTEX, como Éxito y Olímpica, y se leen igual (sin secretos n
 1. **Migración `0008`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala.
 2. Nada más: el job `crawl` ya trae las dos en su matriz. Jumbo (~45 mil productos con stock, 38 % de supermercado) da unas 6 vueltas al día y Pepe Ganga (~13 mil) una por hora. Las tarjetas llegan cuando un producto lleva 24 h con precio estable.
 
+### 16. Calidad de las ofertas
+
+Desde el 22 de octubre de 2026 llegan menos ofertas y mejores (ADR 0012):
+
+- **Rastreo de tiendas y eBay.** El «antes» cuesta al menos 100.000 COP o US$25 y el ahorro es de al menos 30.000 COP o US$5. Mercado no alerta. Un «error de precio» necesita los mismos 3 días de historia y solo vale para productos de la tienda, no del marketplace.
+- **Casillero.** «🇺🇸 Compra por casillero» sale siempre en eBay, Slickdeals y DealNews, y en los canales de Telegram solo si la publicación lo dice: lo de Amazon en esos canales suele enviar directo a Colombia. Lo que llega por casillero con precio menor a US$25, o de mercado, no se envía; lo que envía directo no tiene ese filtro.
+- **Tope diario.** Cada fuente manda en tarjeta sus primeras 8 ofertas del día (hora de Bogotá); los errores de precio no cuentan. En las tiendas, las demás tallas o colores de una misma promoción (mismo tema y descuento a ±0,5 % en 24 h) tampoco salen en tarjeta. Lo demás llega a las 21:00 en el «Resumen de la noche», una línea por oferta, por fuente y de mayor a menor ahorro.
+
+1. **Migración `0010`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala. Mientras no corra, el ciclo y el rastreo se saltan con aviso.
+2. Los valores se ajustan en `config/discountz.toml`: `min_price_*` y `catalog_min_saving_*` en `[pricing]`, y `daily_per_source` en `[cards]`.
+
 ### Si algo falla
 
 - Sin resumen diario de las 08:00: revisa *Actions → cycle* (workflows desactivados, secreto caducado o Supabase pausado).

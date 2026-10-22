@@ -112,6 +112,20 @@ def test_parse_matches_expected(code: str, name: str) -> None:
     assert all(len(p.title) <= 200 for p in result.posts)
 
 
+@pytest.mark.parametrize(
+    ("code", "name", "marked"),
+    [
+        ("tg_descuentostech", "descuentostech", {52264, 52268}),  # «*Casillero»
+        ("tg_clubgratis", "clubgratis", {59506}),  # «COMPRA CON CASILLERO 🇺🇸»
+        ("tg_cajitatech", "cajitatech", set()),
+    ],
+)
+def test_casillero_only_when_the_post_says_so(code: str, name: str, marked: set[int]) -> None:
+    """Lo de Amazon en los canales suele enviar directo a Colombia (David, 2026-10-22)."""
+    result = parse_channel_page(code, load_fixture("telegram", name).body, NOW)
+    assert {p.post_id for p in result.posts if p.casillero} == marked
+
+
 def test_real_fixture_hashtags_and_links() -> None:
     result = parse_channel_page("tg_cajitatech", load_fixture("telegram", "cajitatech").body, NOW)
     first = result.posts[0]

@@ -27,6 +27,7 @@ TOPIC_CODES: tuple[str, ...] = (
     "otros",
 )
 DEFAULT_TOPIC = "otros"
+GROCERY_TOPIC = "mercado"  # ni el rastreo ni lo que llega por casillero lo alertan
 ANY_SOURCE = "*"
 
 # Categorías de la v1 (seguimientos y búsquedas) → tema donde caen sus alertas (spec §5.1).
@@ -45,7 +46,7 @@ CATEGORY_TOPIC: Mapping[str, str] = MappingProxyType(
 class TopicParams:
     code: str
     title: str
-    t_bp: int | None  # umbral de bajada normal; None = el tema no recibe CATALOG_DROP
+    t_bp: int | None  # umbral de bajada normal; None (errores, mercado) = el rastreo no alerta
     g_bp: int | None  # umbral de posible error de precio
     category: str  # categoría de la v1 que reciben los listings de este tema
 

@@ -595,10 +595,10 @@ def test_cycle_marks_slickdeals_amazon_then_delivers_its_new_deal(
     for i, code in enumerate(load_topics().params, start=10):
         repo.save_topic(conn, code, code, i)
     feed = load_fixture("slickdeals", "frontpage")
-    guid = feed.body.index(b">thread-20089260</guid>")
+    guid = feed.body.index(b">thread-20153970</guid>")  # US$51: por casillero sí compensa
     start = feed.body.rindex(b"<item>", 0, guid)
     end = feed.body.index(b"</item>", guid) + len(b"</item>")
-    before = feed.body[:start] + feed.body[end:]  # la portada antes del hilo 20089260
+    before = feed.body[:start] + feed.body[end:]  # la portada antes del hilo 20153970
     buf = io.BytesIO()
     Image.new("RGB", (200, 200), (10, 120, 200)).save(buf, "JPEG")
 
@@ -626,11 +626,11 @@ def test_cycle_marks_slickdeals_amazon_then_delivers_its_new_deal(
     assert data["message_thread_id"] == str(repo.topic_threads(conn)["tecnologia"])
     keyboard = json.loads(data["reply_markup"])["inline_keyboard"]
     assert [(b["text"], b["url"]) for row in keyboard for b in row] == [
-        ("Ver oferta", "https://www.amazon.com/dp/B0GX12H56R"),
+        ("Ver oferta", "https://www.amazon.com/dp/B0CCP8KYGG"),
         (
             "Ver en Slickdeals",
-            "https://slickdeals.net/f/20089260-25w-waylite-magnetic-wireless-iphone-charger-w-"
-            "kickstand-6-6-usb-c-cable-2-colors-8-49-free-shipping-w-prime-or-on-35",
+            "https://slickdeals.net/f/20153970-50-99-8bitdo-retro-87-key-mechanical-keyboard-w-"
+            "bluetooth-2-4ghz-usb-c-n-edition-at-amazon",
         ),
     ]
 

@@ -42,6 +42,8 @@ def deal(
     coupon: str | None = None,
     age: timedelta = timedelta(minutes=5),
     price: int = 1200,
+    hashtags: tuple[str, ...] = ("cocina",),
+    casillero: bool = False,
 ) -> ChannelPost:
     return ChannelPost(
         channel=channel,
@@ -51,9 +53,10 @@ def deal(
         price=Money(price, Currency.USD),
         coupon=coupon,
         store=None,
-        hashtags=("cocina",),
+        hashtags=hashtags,
         image_url=None,
         link=SafeUrl.parse(f"https://t.me/x/{post_id}", frozenset({"t.me"})),
+        casillero=casillero,
     )
 
 
@@ -332,6 +335,80 @@ def test_failing_channel_does_not_stop_the_others(
     assert club.failed and not caj.failed
     assert [k for k, _, _ in outbox(db)] == ["canal:tg_cajitatech:101"]
     assert result.sent == 1
+
+
+# ───────────── Tope de tarjetas por canal al día (ADR 0012)
+
+
+def test_past_the_daily_cap_the_deal_waits_for_the_digest(db: psycopg.Connection) -> None:
+    code = "tg_cajitatech"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    titles = [
+        "Teclado mecánico",
+        "Mouse inalámbrico",
+        "Monitor gamer",
+        "Audífonos Bluetooth",
+        "Parlante portátil",
+        "Disco SSD",
+        "Cargador USB-C",
+        "Cámara web",
+        "Silla ergonómica",
+    ]
+    assert len(titles) == PARAMS.daily_cards + 1
+    posts = [deal(code, 101 + i, title=t) for i, t in enumerate(titles)]
+    result = run(db, FakeChannel(code, [page(*posts)]))
+    assert (result.sent, result.held) == (PARAMS.daily_cards, 1)
+    assert len(outbox(db)) == PARAMS.daily_cards
+    held = db.execute("SELECT line FROM discountz.offer_log WHERE NOT carded").fetchone()
+    assert held is not None and titles[-1] in held[0]
+    # Retenida, sigue siendo la original: la misma oferta en otro canal no sale en tarjeta.
+    repo.save_channel_cursor(db, "tg_clubgratis", 59500, T - timedelta(hours=1))
+    same = FakeChannel("tg_clubgratis", [page(deal("tg_clubgratis", 59501, title=titles[-1]))])
+    assert run(db, same).duplicates == 1
+
+
+# ───────────── Lo que llega por casillero (calidad de las ofertas, 2026-10-22)
+
+
+def test_casillero_deal_under_min_price_is_not_sent(db: psycopg.Connection) -> None:
+    """Por casillero, menos de US$25 no compensa; lo que envía directo a Colombia sí pasa."""
+    code = "tg_descuentostech"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    cheap = deal(code, 101, price=2499, casillero=True)
+    keyboard = deal(code, 102, price=2500, title="Teclado mecánico", casillero=True)
+    direct = deal(code, 103, price=800, title="Mouse inalámbrico")
+    result = run(db, FakeChannel(code, [page(cheap, keyboard, direct)]))
+    assert [k for k, _, _ in outbox(db)] == [f"canal:{code}:102", f"canal:{code}:103"]
+    assert (result.sent, result.skipped) == (2, 1)
+
+
+def test_casillero_grocery_is_not_sent(db: psycopg.Connection) -> None:
+    code = "tg_clubgratis"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    tags = ("mercado",)
+    coffee = deal(code, 101, title="Café molido 2 lb", price=3000, hashtags=tags, casillero=True)
+    cookies = deal(code, 102, title="Galletas Oreo x 12 paquetes", price=3000, hashtags=tags)
+    result = run(db, FakeChannel(code, [page(coffee, cookies)]))
+    assert outbox(db) == [(f"canal:{code}:102", "mercado", "community_deal")]
+    assert (result.sent, result.skipped) == (1, 1)
+
+
+def test_filtered_deal_is_kept_as_seen_and_not_an_original(db: psycopg.Connection) -> None:
+    """En un feed sin orden no se recuenta en cada lectura ni tapa la misma oferta en un canal
+    que envía directo."""
+    code = "slickdeals_amazon"
+    repo.save_channel_cursor(db, code, 1, T - timedelta(minutes=10))
+    knives = page(deal(code, 400, casillero=True))
+    assert run(db, FakeChannel(code, [knives])).skipped == 1
+    assert repo.channel_post_ids(db, code, [400]) == {400}
+    later = T + timedelta(minutes=30)
+    assert run(db, FakeChannel(code, [knives]), now=later).skipped == 0
+    repo.save_channel_cursor(db, "tg_descuentoshome", 100, T - timedelta(hours=1))
+    home = FakeChannel("tg_descuentoshome", [page(deal("tg_descuentoshome", 101))])
+    assert (run(db, home, now=later).sent, outbox(db)) == (
+        1,
+        [("canal:tg_descuentoshome:101", "hogar", "community_deal")],
+    )
 
 
 # ───────────── Feeds sin orden de ids (DealNews y Slickdeals Amazon)

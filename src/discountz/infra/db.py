@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -1402,6 +1402,14 @@ def mark_alerts_queued(conn: psycopg.Connection, alert_ids: Sequence[int], outbo
     )
 
 
+def mark_alert_held(conn: psycopg.Connection, alert_id: int) -> None:
+    """La alerta no sale en tarjeta: espera el resumen de la noche (ADR 0012)."""
+    conn.execute(
+        "UPDATE discountz.alert SET delivery = 'held' WHERE id = %s AND delivery = 'new'",
+        (alert_id,),
+    )
+
+
 def release_outbox(conn: psycopg.Connection, outbox_ids: Sequence[int]) -> None:
     """Devuelve a `pending` mensajes reclamados que no se intentaron (sin sumar intentos)."""
     conn.execute(
@@ -2138,7 +2146,7 @@ def save_channel_cursor(
 
 
 def recent_channel_posts(conn: psycopg.Connection, since: datetime) -> list[RecentPost]:
-    """Publicaciones enviadas desde `since` (ni los duplicados ni las marcadas cuentan)."""
+    """Originales desde `since`, en tarjeta o en el resumen (ni los duplicados ni las marcadas)."""
     rows = conn.execute(
         """SELECT channel || ':' || post_id, title_norm, price_minor, currency, coupon
              FROM discountz.channel_post
@@ -2178,7 +2186,8 @@ def insert_channel_post(
 ) -> bool:
     """Registra la publicación; `False` si ya estaba (relectura de una página).
 
-    `baseline`: vista en la primera lectura de un feed sin orden de ids y nunca enviada.
+    `baseline`: vista y nunca enviada (primera lectura de un feed sin orden de ids, o lo que no
+    compensa por casillero); no cuenta como original para los duplicados.
     """
     cur = conn.execute(
         """INSERT INTO discountz.channel_post (channel, post_id, published_at, title_norm,
@@ -2204,4 +2213,108 @@ def insert_channel_post(
 
 def delete_old_channel_posts(conn: psycopg.Connection, before: datetime) -> int:
     cur = conn.execute("DELETE FROM discountz.channel_post WHERE seen_at < %s", (before,))
+    return cur.rowcount
+
+
+# ───────────── Tope diario y resumen de la noche (ADR 0012)
+
+
+@dataclass(frozen=True, slots=True)
+class OfferEntry:
+    source: str
+    day: date  # día de Bogotá del tope
+    topic: str
+    kind: str
+    drop_bp: int | None
+    line: str | None  # None: salió en tarjeta; si no, su línea en el resumen
+
+
+@dataclass(frozen=True, slots=True)
+class HeldOffer:
+    id: int
+    source: str
+    drop_bp: int | None
+    line: str
+
+
+def log_offer(conn: psycopg.Connection, entry: OfferEntry, now: datetime) -> None:
+    conn.execute(
+        """INSERT INTO discountz.offer_log (source, day, topic, kind, drop_bp, carded, line,
+               created_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+        (
+            entry.source,
+            entry.day,
+            entry.topic,
+            entry.kind,
+            entry.drop_bp,
+            entry.line is None,
+            entry.line,
+            now,
+        ),
+    )
+
+
+def count_cards(conn: psycopg.Connection, source: str, day: date) -> int:
+    """Tarjetas de la fuente en el día, sin los errores de precio."""
+    row = _one(
+        conn,
+        """SELECT count(*) FROM discountz.offer_log
+            WHERE source = %s AND day = %s AND carded AND kind <> 'price_error'""",
+        (source, day),
+    )
+    return int(_required(row)[0])
+
+
+def carded_promotion(
+    conn: psycopg.Connection,
+    source: str,
+    topic: str,
+    kind: str,
+    drop_bp: int,
+    since: datetime,
+    tol_bp: int,
+) -> bool:
+    """¿Salió en tarjeta desde `since` otra de la misma fuente, tema y clase, con el ahorro a
+    ±`tol_bp`?"""
+    row = _one(
+        conn,
+        """SELECT EXISTS (SELECT 1 FROM discountz.offer_log
+            WHERE source = %s AND topic = %s AND kind = %s AND carded AND created_at >= %s
+              AND abs(drop_bp - %s) <= %s)""",
+        (source, topic, kind, since, drop_bp, tol_bp),
+    )
+    return bool(_required(row)[0])
+
+
+def held_offers(conn: psycopg.Connection, before: datetime) -> list[HeldOffer]:
+    """Lo retenido antes de `before` que no ha salido en un resumen: por fuente y de mayor a
+    menor ahorro (sin ahorro, en el orden en que llegó)."""
+    rows = conn.execute(
+        """SELECT id, source, drop_bp, line FROM discountz.offer_log
+            WHERE NOT carded AND digested_at IS NULL AND created_at < %s
+            ORDER BY source, drop_bp DESC NULLS LAST, created_at, id""",
+        (before,),
+    ).fetchall()
+    return [HeldOffer(int(r[0]), r[1], r[2], r[3]) for r in rows]
+
+
+def has_held_offers(conn: psycopg.Connection, before: datetime) -> bool:
+    row = _one(
+        conn,
+        """SELECT EXISTS (SELECT 1 FROM discountz.offer_log
+            WHERE NOT carded AND digested_at IS NULL AND created_at < %s)""",
+        (before,),
+    )
+    return bool(_required(row)[0])
+
+
+def mark_offers_digested(conn: psycopg.Connection, ids: Sequence[int], now: datetime) -> None:
+    conn.execute(
+        "UPDATE discountz.offer_log SET digested_at = %s WHERE id = ANY(%s)", (now, list(ids))
+    )
+
+
+def delete_old_offer_log(conn: psycopg.Connection, before: datetime) -> int:
+    cur = conn.execute("DELETE FROM discountz.offer_log WHERE created_at < %s", (before,))
     return cur.rowcount

@@ -75,6 +75,8 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _HASHTAG_RE = re.compile(r"#(\w+)")
 _PRICE_HINT_RE = re.compile(r"\$\s*\d|💰|USD\s*\$?\s*\d")
 _LEADING_JUNK_RE = re.compile(r"^[^\w\"'¡¿]+")
+# «*Casillero» (DescuentosTech), «COMPRA CON CASILLERO 🇺🇸» (Clubgratis)
+_CASILLERO_RE = re.compile(r"\bcasilleros?\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -382,6 +384,7 @@ def parse_channel_page(code: str, body: bytes, now: datetime) -> ChannelPage:
                 hashtags=hashtags,
                 image_url=raw.image_url,
                 link=_safe(deal.link, link_hosts) or fallback,
+                casillero=_CASILLERO_RE.search(raw.text) is not None,
             )
         )
     # Un post filtrado por `REQUIRES_COUPON` sí se entendió: no cuenta como formato roto.

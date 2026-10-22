@@ -12,6 +12,7 @@ import pytest
 from discountz.app.collect import Collector, SourceRun
 from discountz.app.crawl import run_crawl
 from discountz.app.cycle import _daily
+from discountz.app.held import Slot, admit
 from discountz.app.maintenance import (
     MB,
     daily_summary,
@@ -22,6 +23,7 @@ from discountz.app.maintenance import (
 from discountz.app.render import render_daily
 from discountz.config import Canary, load_params
 from discountz.domain.health import BreakerState
+from discountz.domain.model import AlertKind
 from discountz.domain.scheduling import Task
 from discountz.infra import db as repo
 from discountz.infra.http import FakeHttp, PacedClient
@@ -339,3 +341,21 @@ def test_daily_maintenance_logs_db_size_in_mb(
         _daily(db, now, load_params())
     line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("maintenance "))
     assert f"db_mb={repo.db_size(db) // MB}" in line.split()
+
+
+def test_maintenance_deletes_offer_log_after_7_days(db: psycopg.Connection) -> None:
+    for age in (timedelta(days=8), timedelta(days=6)):
+        admit(db, Slot("exito", "hogar", AlertKind.CATALOG_DROP, 2000), T - age, 8, "• x")
+    run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    left = db.execute("SELECT created_at FROM discountz.offer_log").fetchall()
+    assert left == [(T - timedelta(days=6),)]
+
+
+def test_daily_step_sends_the_held_digest_after_21h(db: psycopg.Connection) -> None:
+    repo.set_maintenance_state(db, T.date() + DAY, 10 * MB, False)  # ni mantenimiento…
+    repo.set_summary_on(db, T.date() + DAY)  # …ni resumen diario en esta prueba
+    admit(db, Slot("exito", "hogar", AlertKind.CATALOG_DROP, 2000), T, 0, "• lonchera")
+    nine = T.replace(hour=2, minute=10) + DAY  # 21:10 del mismo día en Bogotá
+    _daily(db, nine, load_params())
+    rows = db.execute("SELECT purpose, body_html FROM discountz.outbox").fetchall()
+    assert [p for p, _ in rows] == ["digest"] and "• lonchera" in rows[0][1]

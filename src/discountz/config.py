@@ -151,6 +151,10 @@ class _Pricing(_Strict):
     gap_before_d: Pos
     min_abs_cop: NonNeg
     min_abs_usd: NonNeg
+    min_price_cop: NonNeg
+    min_price_usd: NonNeg
+    catalog_min_saving_cop: NonNeg
+    catalog_min_saving_usd: NonNeg
     rarity_tol_bp: Bp
     improve_bp: Bp
     rearm_h: Pos
@@ -211,6 +215,10 @@ class _Channels(_Strict):
     interval_min: Pos = 10
 
 
+class _Cards(_Strict):
+    daily_per_source: NonNeg = 8
+
+
 class _Ebay(_Strict):
     ship_to_zip: Annotated[str, Field(pattern=r"^[0-9]{5}$")] = "33166"
     items_per_partition: Annotated[int, Field(ge=1, le=200)] = 75
@@ -228,6 +236,7 @@ class _Params(_Strict):
     events: list[_Event] = Field(default_factory=list)
     crawl: dict[str, _Crawl] = Field(default_factory=dict)
     channels: _Channels = Field(default_factory=_Channels)
+    cards: _Cards = Field(default_factory=_Cards)
     ebay: _Ebay = Field(default_factory=_Ebay)
 
 
@@ -254,6 +263,7 @@ class AppParams:
     crawl: Mapping[str, CrawlBudget] = MappingProxyType({})
     channel_interval: timedelta = timedelta(minutes=10)  # cada canal como máximo cada N
     ebay: EbayParams = EbayParams()
+    daily_cards: int = 8  # tarjetas por fuente al día; el resto va al resumen (ADR 0012)
 
 
 def _days(n: int) -> timedelta:
@@ -307,6 +317,10 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
         jump_window=_days(p.jump_window_d),
         gap_before=_days(p.gap_before_d),
         min_abs=MappingProxyType({Currency.COP: p.min_abs_cop, Currency.USD: p.min_abs_usd}),
+        min_price=MappingProxyType({Currency.COP: p.min_price_cop, Currency.USD: p.min_price_usd}),
+        catalog_min_saving=MappingProxyType(
+            {Currency.COP: p.catalog_min_saving_cop, Currency.USD: p.catalog_min_saving_usd}
+        ),
         rarity_tol_bp=p.rarity_tol_bp,
         improve_bp=p.improve_bp,
         rearm=_hours(p.rearm_h),
@@ -369,6 +383,7 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
             }
         ),
         channel_interval=timedelta(minutes=raw.channels.interval_min),
+        daily_cards=raw.cards.daily_per_source,
         ebay=EbayParams(
             ship_to_zip=raw.ebay.ship_to_zip,
             items_per_partition=raw.ebay.items_per_partition,

@@ -74,7 +74,7 @@ def test_topics_toml_matches_spec() -> None:
     assert (p["tecnologia"].t_bp, p["tecnologia"].g_bp) == (1200, 5000)
     assert (p["electro"].t_bp, p["electro"].g_bp) == (1500, 5000)
     assert (p["moda"].t_bp, p["moda"].g_bp) == (3000, 7500)
-    assert (p["mercado"].t_bp, p["mercado"].g_bp) == (2500, 7000)
+    assert (p["mercado"].t_bp, p["mercado"].g_bp) == (None, None)  # sin alertas (calidad, 22-oct)
     assert (p["belleza"].t_bp, p["belleza"].g_bp) == (2500, 7000)
     assert (p["otros"].t_bp, p["otros"].g_bp) == (2000, 6000)
     assert (p["errores"].t_bp, p["errores"].g_bp) == (None, None)
