@@ -5,7 +5,7 @@
 - Rastreo de catálogo (ADR 0004): Éxito, Panamericana, Jumbo y Pepe Ganga (VTEX), Alkosto (ADR 0009) y eBay (ADR 0008, `MODEL_LOW`). David decidió apagar Carulla y Olímpica el 2026-10-22 (`/fuente off`): casi todo mercado y falsos errores de precio.
 - Canales de Telegram (ADR 0005: DescuentosTech, DescuentosHome, Clubgratis, cajitatech, OFERTU) y Amazon de Slickdeals «sin verificar» (ADR 0006). DealNews apagado (406 desde Actions). Best Buy y Walmart fuera; Amazon da CAPTCHA.
 - Dos chats: el grupo (todo, temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas y resúmenes de ofertas).
-- Suite: 912 unitarias y 209 de integración en verde el 2026-10-22.
+- Suite: 912 unitarias y 210 de integración en verde el 2026-10-22.
 
 ## Último cambio
 - Rama `claude/project-thread-xs8ugi` (calidad de las ofertas, informe «Calidad de las ofertas de discountZ» del 2026-10-22: ~450 ofertas al día): «casillero» solo si el post lo dice; rastreo con «antes» ≥ 100.000 COP/US$25, ahorro ≥ 30.000/US$5, sin mercado y error de precio solo de la tienda con 3 días; lo de casillero < US$25 o de mercado no sale; 8 tarjetas por fuente al día y una por promoción, el resto en el resumen de las 21:00 (ADR 0012, migración 0010, esquema 10). Meta: ~60 tarjetas al día.

@@ -101,7 +101,9 @@ def send_digest(conn: psycopg.Connection, now: datetime, params: AppParams) -> i
     rows = db.held_offers(conn, _cutoff(now))
     bodies = render_held_digest(rows, params.daily_cards)
     quiet = is_quiet(now, params.quiet_start, params.quiet_end)
-    day = local(now).date().isoformat()
+    # La primera retenida distingue un segundo resumen del mismo día: una corrida del rastreo
+    # que empezó antes de las 21:00 puede guardar lo suyo después del primero.
+    batch = f"{local(now).date().isoformat()}:{min((r.id for r in rows), default=0)}"
     with conn.transaction():
         for i, body in enumerate(bodies):
             db.enqueue(
@@ -109,7 +111,7 @@ def send_digest(conn: psycopg.Connection, now: datetime, params: AppParams) -> i
                 "digest",
                 body,
                 priority=DIGEST_PRIORITY,
-                dedup_key=f"held:{day}:{i}",
+                dedup_key=f"held:{batch}:{i}",
                 now=now,
                 ttl=DIGEST_TTL,
                 silent=quiet or i > 0,

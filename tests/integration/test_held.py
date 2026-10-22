@@ -99,7 +99,7 @@ def test_digest_goes_after_21h_with_what_waited_until_then(db: psycopg.Connectio
     assert digest_due(db, nine)
     assert send_digest(db, nine, PARAMS) == 1
     ((key, body, silent),) = digests(db)
-    assert key == "held:2026-10-22:0" and not silent
+    assert key.startswith("held:2026-10-22:") and not silent
     assert body.index("• tarde") < body.index("• mañana")  # de mayor a menor ahorro
     assert not digest_due(db, nine + timedelta(minutes=2))
     later = datetime(2026, 10, 23, 2, 40, tzinfo=UTC)  # 21:40: ya para mañana
@@ -109,6 +109,19 @@ def test_digest_goes_after_21h_with_what_waited_until_then(db: psycopg.Connectio
     assert digest_due(db, tomorrow)
     assert send_digest(db, tomorrow, PARAMS) == 1
     assert "• noche" in digests(db)[-1][1] and "• tarde" not in digests(db)[-1][1]
+
+
+def test_late_commits_from_before_21h_go_out_in_another_digest(db: psycopg.Connection) -> None:
+    """Una corrida del rastreo fija su hora al empezar: lo de las 20:30 puede guardarse a las
+    21:10, después del resumen. Sale en otro resumen, no se pierde."""
+    admit(db, slot(drop=1500), T, 0, "• mañana")
+    nine = datetime(2026, 10, 23, 2, 5, tzinfo=UTC)  # 21:05 en Bogotá
+    assert send_digest(db, nine, PARAMS) == 1
+    admit(db, slot(drop=2500), datetime(2026, 10, 23, 1, 30, tzinfo=UTC), 0, "• rezagada")
+    assert digest_due(db, nine + timedelta(minutes=5))
+    assert send_digest(db, nine + timedelta(minutes=5), PARAMS) == 1
+    bodies = [body for _, body, _ in digests(db)]
+    assert len(bodies) == 2 and "• rezagada" in bodies[1]
 
 
 def test_nothing_held_means_no_digest(db: psycopg.Connection) -> None:
