@@ -158,6 +158,7 @@ class _Run:
         )
         self.ctx = SourceContext(self.http, deps.credentials, end, now)
         self.pages = self.items = self.changes = self.alerts = 0
+        self.off_profile = 0  # candidatos de temas que no van en tarjeta (ADR 0013)
         self.parse_streak = 0
         self.ok_pages = 0
         self.stored: int | None = None  # publicaciones guardadas, para el tope de eBay
@@ -372,8 +373,12 @@ class _Run:
             self.items += 1
             self.changes += int(changed)
             best = self.best_candidate(prev, o, cand, peers, topic)
-            if best is not None:
-                found.append(best)
+            if best is None:
+                continue
+            if params[topic].mode != "card":  # fuera del perfil: se guarda sin confirmar
+                self.off_profile += 1
+                continue
+            found.append(best)
         fresh = _cheapest_per_model([f for f in found if not self.duplicate(f)])
         # Un candidato no mueve su estado hasta que la confirmación responda: si falla por red,
         # bloqueo o corte, la próxima lectura lo vuelve a detectar (revisión final, hallazgo 2).
@@ -728,6 +733,7 @@ def _run_crawl(deps: CrawlDeps, now: datetime, end: float) -> CrawlResult:
         requests=result.requests,
         alerts=result.alerts,
         count=result.items,
+        skipped=run.off_profile,
     )
     return result
 

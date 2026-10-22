@@ -677,6 +677,34 @@ def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
     assert (s.last_alert_at, s.last_alert_minor) == (T, 119_900)
 
 
+def test_drop_in_a_non_card_topic_is_not_confirmed(db: psycopg.Connection) -> None:
+    """Belleza está fuera del perfil: la bajada no se confirma ni alerta (ADR 0013)."""
+    seed_history(db, "123", 199_900)
+    drop = CatalogObservation(
+        "123", Money(119_900, Currency.COP), "/Belleza/Maquillaje/", None, SellerClass.FIRST_PARTY
+    )
+    src = FakeCatalog({"C:/1/": [[drop]]}, offers={"123": offer("123", 119_900)})
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.alerts == 0
+    assert "listings" not in transport.kinds()
+    assert count(db, "alert") == 0
+    # La fila sí se guarda con el precio nuevo, como cualquier lectura sin candidato.
+    where = "external_id = '123' AND topic = 'belleza' AND price_minor = 119900"
+    assert count(db, "catalog_item", where) == 1
+
+
+def test_drop_in_a_card_topic_still_alerts(db: psycopg.Connection) -> None:
+    """La misma bajada en Tecnología sigue saliendo como tarjeta."""
+    seed_history(db, "123", 199_900)
+    src = FakeCatalog({"C:/1/": [[obs("123", 119_900)]]}, offers={"123": offer("123", 119_900)})
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.alerts == 1
+    assert "listings" in transport.kinds()
+    assert count(db, "alert") == 1
+
+
 def test_crawl_price_error_also_posts_line_in_category(db: psycopg.Connection) -> None:
     seed_history(db, "123", 199_900)
     src = FakeCatalog({"C:/1/": [[obs("123", 39_900)]]}, offers={"123": offer("123", 39_900)})
