@@ -575,6 +575,7 @@ git commit -m "feat(intereses): los canales envían lo que coincide con un inter
 **Files:**
 - Modify: `src/discountz/domain/commands.py` (`InterestList`, `InterestAdd`, `InterestDrop`, parser y ayuda), `src/discountz/domain/community.py` (`topic_for_title(title: str, rules: Sequence[ChannelRule]) -> str`), `src/discountz/app/inbox.py` (manejadores)
 - Modify: `README.md` (sección «18. Intereses»), `CLAUDE.md`, `docs/estado.md`
+- Modify: `config/topics.toml` (`hogar`, `deportes` y `otros` pasan a `mode = "interest"`; el PR 1 los dejó en `card` para no perder sus ofertas mientras no hubiera intereses, revisión final del PR 1) y `tests/unit/test_config.py` (`test_load_topics_reads_profile_modes`, que va primero en rojo)
 - Test: `tests/unit/test_commands.py`, `tests/unit/test_community.py`, `tests/integration/test_inbox.py`
 
 **Interfaces:**

@@ -3,7 +3,11 @@
 # Reglas: gana el prefijo más largo; a igual largo, la de la fuente antes que la comodín "*".
 # Las rutas se normalizan (minúsculas, sin tildes) antes de comparar.
 # `mode` es el perfil de David (spec del perfil §1.1): `card` sale en tarjeta; `interest` se rastrea
-# pero solo sale si coincide con un interés; `off` no se rastrea. Sin `mode`, `card`.
+# pero solo sale si coincide con un interés; `off` no se rastrea. Sin `mode`, `card`. Hogar,
+# Deportes y Otros pasan a `interest` cuando lleguen los intereses (PR 2). En `errores` y
+# `comunidad_us` no aplica: un error de precio sigue el modo del tema del producto y las alertas
+# de Slickdeals no pasan por el perfil. Al cambiar un `mode`, cambia también
+# `test_load_topics_reads_profile_modes` (tests/unit/test_config.py), que fija este perfil.
 
 # Categorías de primer nivel que caen en «Otros» a propósito (servicios, donaciones, internas).
 intentional_otros = [
@@ -37,7 +41,7 @@ category = "hogar"
 
 [topics.hogar]
 title = "🛋️ Hogar y muebles"
-mode = "interest"
+mode = "card"
 t_bp = 2000
 g_bp = 6000
 category = "hogar"
@@ -63,7 +67,7 @@ category = "otros"
 
 [topics.deportes]
 title = "⚽ Deportes"
-mode = "interest"
+mode = "card"
 t_bp = 2000
 g_bp = 6000
 category = "otros"
@@ -102,7 +106,7 @@ category = "otros"
 
 [topics.otros]
 title = "📦 Otros"
-mode = "interest"
+mode = "card"
 t_bp = 2000
 g_bp = 6000
 category = "otros"
