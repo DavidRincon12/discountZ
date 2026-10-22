@@ -14,8 +14,11 @@ from discountz.domain.money import Currency, Money
 from discountz.domain.topics import (
     CATEGORY_TOPIC,
     TOPIC_CODES,
+    TopicMode,
+    TopicParams,
     TopicRule,
     assign_topic,
+    crawl_wanted,
     normalize_path,
 )
 from discountz.domain.urls import SafeUrl
@@ -283,3 +286,47 @@ def test_jumbo_only_roots_do_not_leak_to_other_stores() -> None:
     assert assign_topic(rules, "jumbo", "/Jardín/Matas/") == "hogar"
     assert assign_topic(rules, "exito", "/Especiales/Ollas/") == "otros"
     assert assign_topic(rules, "pepeganga", "/Jardín/Matas/") == "otros"
+
+
+# ───────────── Perfil: qué particiones del catálogo se recorren (spec del perfil §1.3)
+
+_WANT_RULES = (
+    TopicRule("*", "/tecnologia/", "tecnologia"),
+    TopicRule("*", "/hogar/", "hogar"),
+    TopicRule("*", "/mercado/", "mercado"),
+    TopicRule("*", "/belleza/", "belleza"),
+    TopicRule("panamericana", "/belleza/herramientas/", "ferreteria"),
+)
+
+
+def _params(modes: dict[str, TopicMode]) -> dict[str, TopicParams]:
+    return {c: TopicParams(c, c, 1200, 5000, "otros", modes.get(c, "card")) for c in TOPIC_CODES}
+
+
+_WANT_PARAMS = _params(
+    {"hogar": "interest", "otros": "interest", "mercado": "off", "belleza": "off"}
+)
+
+
+def test_crawl_wanted_root_path_is_always_crawled() -> None:
+    assert crawl_wanted(_WANT_RULES, _WANT_PARAMS, "exito", "/")
+
+
+def test_crawl_wanted_skips_off_topic_root() -> None:
+    assert not crawl_wanted(_WANT_RULES, _WANT_PARAMS, "exito", "/Mercado/")
+
+
+def test_crawl_wanted_keeps_card_and_interest_roots() -> None:
+    assert crawl_wanted(_WANT_RULES, _WANT_PARAMS, "exito", "/Tecnología/")
+    assert crawl_wanted(_WANT_RULES, _WANT_PARAMS, "exito", "/Hogar/")
+
+
+def test_crawl_wanted_keeps_root_with_deeper_wanted_rule() -> None:
+    assert crawl_wanted(_WANT_RULES, _WANT_PARAMS, "panamericana", "/Belleza/")
+    assert not crawl_wanted(_WANT_RULES, _WANT_PARAMS, "exito", "/Belleza/")
+
+
+def test_crawl_wanted_unknown_root_follows_otros() -> None:
+    assert crawl_wanted(_WANT_RULES, _WANT_PARAMS, "exito", "/Algo nuevo/")
+    off_otros = _params({"otros": "off"})
+    assert not crawl_wanted(_WANT_RULES, off_otros, "exito", "/Algo nuevo/")

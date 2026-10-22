@@ -84,3 +84,25 @@ def assign_topic(rules: Sequence[TopicRule], source: str, category_path: str) ->
         if best is None or key[:2] > best[:2]:
             best = key
     return best[2] if best is not None else DEFAULT_TOPIC
+
+
+def crawl_wanted(
+    rules: Sequence[TopicRule], params: Mapping[str, TopicParams], source: str, path: str
+) -> bool:
+    """¿Se recorre esta partición del catálogo? (spec del perfil §1.3).
+
+    Sí si no es una categoría (`/`), si su tema no está `off` o si una regla más profunda la
+    lleva a un tema rastreado (`panamericana:/hogar/ferreteria/` mantiene `/hogar/`).
+    """
+    route = normalize_path(path)
+    if route == "/":
+        return True
+    if params[assign_topic(rules, source, route)].mode != "off":
+        return True
+    return any(
+        r.source in (source, ANY_SOURCE)
+        and len(r.prefix) > len(route)
+        and r.prefix.startswith(route)
+        and params[r.topic].mode != "off"
+        for r in rules
+    )
