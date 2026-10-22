@@ -11,6 +11,7 @@
 - Rama `claude/project-thread-vv86tl` (limpieza de la BD): migración 0011 (esquema 11) borra `catalog_price_change`, que no se escribía desde el PR #31, y el catálogo de Carulla y Olímpica si siguen apagadas; se quita `CatalogRow.price_changed`. El tope diario y los filtros de calidad (ADR 0012, esquema 10) quedaron en el PR #32.
 
 ## Siguiente paso
+- En curso (Native): plan `docs/superpowers/plans/2026-10-22-perfil-e-intereses.md` (spec `docs/superpowers/specs/2026-10-22-perfil-e-intereses-design.md`, ledger en `.superpowers/sdd/`); Tasks 1-3 hechas, sigue la 4. PR 1 = Tasks 1-5; PR 2 = Tasks 6-12 tras fusionar el PR 1.
 - Al fusionar: *Actions → migrate* con `to = head` (sin eso el ciclo y el rastreo se saltan) y luego `VACUUM FULL discountz.catalog_item` en el SQL Editor, solo y si cabe (`/mnt/project-files/limpieza-bd/consultas.sql`, mide antes y después).
 - Medir la calidad 2-3 días con `/mnt/project-files/calidad-tiendas/consulta-todas.sql` (contar también `alert.delivery = 'held'` y `offer_log`) y ajustar `[pricing]` o `[cards]` si David lo pide.
 - Ideas del informe aún sin hacer: `/interes <palabras>` (salta el tope), comparar por EAN con otras tiendas, botón 👎 que silencia marca o categoría.
