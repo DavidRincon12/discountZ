@@ -337,6 +337,36 @@ def test_failing_channel_does_not_stop_the_others(
     assert result.sent == 1
 
 
+# ───────────── Tope de tarjetas por canal al día (ADR 0012)
+
+
+def test_past_the_daily_cap_the_deal_waits_for_the_digest(db: psycopg.Connection) -> None:
+    code = "tg_cajitatech"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    titles = [
+        "Teclado mecánico",
+        "Mouse inalámbrico",
+        "Monitor gamer",
+        "Audífonos Bluetooth",
+        "Parlante portátil",
+        "Disco SSD",
+        "Cargador USB-C",
+        "Cámara web",
+        "Silla ergonómica",
+    ]
+    assert len(titles) == PARAMS.daily_cards + 1
+    posts = [deal(code, 101 + i, title=t) for i, t in enumerate(titles)]
+    result = run(db, FakeChannel(code, [page(*posts)]))
+    assert (result.sent, result.held) == (PARAMS.daily_cards, 1)
+    assert len(outbox(db)) == PARAMS.daily_cards
+    held = db.execute("SELECT line FROM discountz.offer_log WHERE NOT carded").fetchone()
+    assert held is not None and titles[-1] in held[0]
+    # Retenida, sigue siendo la original: la misma oferta en otro canal no sale en tarjeta.
+    repo.save_channel_cursor(db, "tg_clubgratis", 59500, T - timedelta(hours=1))
+    same = FakeChannel("tg_clubgratis", [page(deal("tg_clubgratis", 59501, title=titles[-1]))])
+    assert run(db, same).duplicates == 1
+
+
 # ───────────── Lo que llega por casillero (calidad de las ofertas, 2026-10-22)
 
 

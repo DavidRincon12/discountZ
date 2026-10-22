@@ -11,7 +11,8 @@ Amazon) se leen enteros en cada lectura, sin `after`: se saltan los ids ya guard
 visto (`baseline`).
 
 Lo que llega por casillero (`ChannelPost.casillero`) con precio bajo o de mercado tampoco se
-envía: queda visto igual (calidad de las ofertas, 2026-10-22).
+envía: queda visto igual (calidad de las ofertas, 2026-10-22). Pasado el tope de tarjetas del
+canal en el día, una oferta nueva espera el resumen de la noche (`app.held`, ADR 0012).
 """
 
 from __future__ import annotations
@@ -27,13 +28,14 @@ import psycopg
 
 from discountz.app.collect import SourceRun
 from discountz.app.compose import ALERT_TTL, is_quiet
+from discountz.app.held import Slot, admit
 from discountz.app.links import LinkResolver
-from discountz.app.render import channel_card, render_channel_deal, reply_markup
+from discountz.app.render import channel_card, held_channel_line, render_channel_deal, reply_markup
 from discountz.config import AppParams, Topics
 from discountz.domain.community import ChannelPost, assign_channel_topic, find_duplicate
 from discountz.domain.errors import BudgetExhausted, HardBlock, ParseError, SourceError
 from discountz.domain.health import BreakerEvent, BreakerState, breaker_transition, effective_state
-from discountz.domain.model import normalize_title
+from discountz.domain.model import AlertKind, normalize_title
 from discountz.domain.money import Currency
 from discountz.domain.scheduling import SourceBudget
 from discountz.domain.topics import GROCERY_TOPIC
@@ -56,6 +58,7 @@ class ChannelsResult:
     sent: int
     duplicates: int
     skipped: int
+    held: int = 0  # pasado el tope del día: esperan el resumen de la noche
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,9 +68,10 @@ class _Step:
     conn: psycopg.Connection
     now: datetime
     topics: Topics
-    recent: list[db.RecentPost]  # enviadas en la ventana de duplicados; crece con cada envío
+    recent: list[db.RecentPost]  # originales de la ventana de duplicados; crece con cada una
     silent: bool
     min_price: Mapping[Currency, int]  # lo que llega por casillero cuesta al menos esto
+    daily_cards: int  # tarjetas por canal al día
 
 
 @dataclass(slots=True)
@@ -76,6 +80,7 @@ class _Tally:
     sent: int = 0
     duplicates: int = 0
     skipped: int = 0
+    held: int = 0
 
 
 def due_channels(
@@ -126,6 +131,7 @@ def run_channels(
         list(db.recent_channel_posts(conn, now - RECENT_WINDOW)),
         is_quiet(now, params.quiet_start, params.quiet_end),
         params.glob.min_price,
+        params.daily_cards,
     )
     total = _Tally()
     requests = 0
@@ -148,11 +154,13 @@ def run_channels(
             sent=tally.sent,
             duplicates=tally.duplicates,
             skipped=tally.skipped,
+            held=tally.held,
         )
         total.sent += tally.sent
         total.duplicates += tally.duplicates
         total.skipped += tally.skipped
-    return ChannelsResult(requests, total.sent, total.duplicates, total.skipped)
+        total.held += tally.held
+    return ChannelsResult(requests, total.sent, total.duplicates, total.skipped, total.held)
 
 
 def _run_one(
@@ -355,20 +363,26 @@ def _handle(
         return
     if not inserted:
         return
-    msg = render_channel_deal(post, topic)
-    db.enqueue(
-        conn,
-        "alert",
-        msg.html,
-        priority=PRIORITY,
-        dedup_key=f"canal:{code}:{post.post_id}",
-        now=now,
-        ttl=ALERT_TTL,
-        reply_markup=reply_markup(msg.buttons) if msg.buttons else None,
-        silent=step.silent,
-        topic=topic,
-        card=channel_card(post, topic),
-    )
+    slot = Slot(code, topic, AlertKind.COMMUNITY_DEAL, None)
+    if admit(conn, slot, now, step.daily_cards, held_channel_line(post)):
+        msg = render_channel_deal(post, topic)
+        db.enqueue(
+            conn,
+            "alert",
+            msg.html,
+            priority=PRIORITY,
+            dedup_key=f"canal:{code}:{post.post_id}",
+            now=now,
+            ttl=ALERT_TTL,
+            reply_markup=reply_markup(msg.buttons) if msg.buttons else None,
+            silent=step.silent,
+            topic=topic,
+            card=channel_card(post, topic),
+        )
+        tally.sent += 1
+    else:
+        tally.held += 1
+    # Retenida también es la original: la misma oferta en otro canal es un duplicado.
     step.recent.append(
         db.RecentPost(
             f"{code}:{post.post_id}",
@@ -378,4 +392,3 @@ def _handle(
             post.coupon,
         )
     )
-    tally.sent += 1

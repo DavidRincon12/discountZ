@@ -21,6 +21,7 @@ from discountz.app.collect import SYSTEM_TTL, Collector, SourceRun
 from discountz.app.compose import compose_alerts
 from discountz.app.confirm import confirm_candidates
 from discountz.app.deliver import deliver, make_photo_fetcher
+from discountz.app.held import digest_due, send_digest
 from discountz.app.inbox import process_inbox
 from discountz.app.links import make_link_resolver
 from discountz.app.maintenance import (
@@ -257,7 +258,8 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
 
 
 def _daily(conn: psycopg.Connection, now: datetime, params: AppParams) -> None:
-    """Paso 14: errores registrados, el ciclo sigue (el resumen sale en esta misma entrega)."""
+    """Paso 14: mantenimiento, resumen diario y resumen de la noche (ADR 0012); errores
+    registrados, el ciclo sigue (los resúmenes salen en esta misma entrega)."""
     try:
         if maintenance_due(conn, now):
             report = run_maintenance(conn, now, params)
@@ -269,6 +271,8 @@ def _daily(conn: psycopg.Connection, now: datetime, params: AppParams) -> None:
             )
         if summary_due(conn, now):
             send_daily_summary(conn, now)
+        if digest_due(conn, now):
+            send_digest(conn, now, params)
     except Exception as exc:
         event(log, "maintenance_failed", logging.ERROR, error=type(exc).__name__)
 

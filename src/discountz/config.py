@@ -215,6 +215,10 @@ class _Channels(_Strict):
     interval_min: Pos = 10
 
 
+class _Cards(_Strict):
+    daily_per_source: NonNeg = 8
+
+
 class _Ebay(_Strict):
     ship_to_zip: Annotated[str, Field(pattern=r"^[0-9]{5}$")] = "33166"
     items_per_partition: Annotated[int, Field(ge=1, le=200)] = 75
@@ -232,6 +236,7 @@ class _Params(_Strict):
     events: list[_Event] = Field(default_factory=list)
     crawl: dict[str, _Crawl] = Field(default_factory=dict)
     channels: _Channels = Field(default_factory=_Channels)
+    cards: _Cards = Field(default_factory=_Cards)
     ebay: _Ebay = Field(default_factory=_Ebay)
 
 
@@ -258,6 +263,7 @@ class AppParams:
     crawl: Mapping[str, CrawlBudget] = MappingProxyType({})
     channel_interval: timedelta = timedelta(minutes=10)  # cada canal como máximo cada N
     ebay: EbayParams = EbayParams()
+    daily_cards: int = 8  # tarjetas por fuente al día; el resto va al resumen (ADR 0012)
 
 
 def _days(n: int) -> timedelta:
@@ -377,6 +383,7 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
             }
         ),
         channel_interval=timedelta(minutes=raw.channels.interval_min),
+        daily_cards=raw.cards.daily_per_source,
         ebay=EbayParams(
             ship_to_zip=raw.ebay.ship_to_zip,
             items_per_partition=raw.ebay.items_per_partition,

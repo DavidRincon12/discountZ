@@ -33,6 +33,7 @@ ALLOWED_FIELDS = frozenset(
         "posts",
         "duplicates",
         "skipped",
+        "held",
         "db_mb",
     }
 )

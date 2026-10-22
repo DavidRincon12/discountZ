@@ -131,6 +131,12 @@ def test_quality_floors_come_from_the_toml(tmp_path: Path) -> None:
     assert glob.catalog_min_saving == {Currency.COP: 30_000, Currency.USD: 500}
 
 
+def test_daily_cards_come_from_the_toml(tmp_path: Path) -> None:
+    assert load_params().daily_cards == 8
+    path = _bad_toml(tmp_path, "daily_per_source = 8", "daily_per_source = 5")
+    assert load_params(path).daily_cards == 5
+
+
 def test_unknown_category_fails(tmp_path: Path) -> None:
     path = _bad_toml(tmp_path, "[categories.ropa]", "[categories.juguetes]")
     with pytest.raises(ConfigError, match="categor"):

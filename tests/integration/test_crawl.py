@@ -19,10 +19,12 @@ from discountz.app.crawl import (
     run_crawl,
     run_crawl_reconnecting,
 )
+from discountz.app.held import Slot, admit
 from discountz.config import load_params, load_topics
 from discountz.domain.catalog import CatalogObservation, CatalogState
 from discountz.domain.errors import ParseError, Unavailable
 from discountz.domain.model import (
+    AlertKind,
     ExtractionPath,
     Lead,
     ListingRef,
@@ -648,6 +650,36 @@ def test_crawl_price_error_also_posts_line_in_category(db: psycopg.Connection) -
     assert rows["errores"].card is not None
     assert rows["tecnologia"].card is None
     assert "Errores de precio" in rows["tecnologia"].body_html
+
+
+def test_crawl_alert_past_the_daily_cap_waits_for_the_digest(db: psycopg.Connection) -> None:
+    cap = load_params().daily_cards
+    for i in range(cap):
+        admit(db, Slot("exito", "hogar", AlertKind.CATALOG_DROP, 1000 + 100 * i), T, cap, "• x")
+    seed_history(db, "123", 199_900)
+    src = FakeCatalog({"C:/1/": [[obs("123", 119_900)]]}, offers={"123": offer("123", 119_900)})
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 0
+    assert count(db, "outbox") == 0
+    assert db.execute("SELECT delivery FROM discountz.alert").fetchone() == ("held",)
+    row = db.execute("SELECT topic, line FROM discountz.offer_log WHERE NOT carded").fetchone()
+    assert row is not None and row[0] == "tecnologia"
+    assert "Celular 123 256 GB</a> · <b>$119.900</b>" in row[1]
+
+
+def test_crawl_same_promotion_goes_out_once(db: psycopg.Connection) -> None:
+    """Dos tallas o colores al mismo descuento en la misma tienda y tema: una sola tarjeta."""
+    seed_history(db, "123", 199_900)
+    seed_history(db, "124", 199_900)
+    src = FakeCatalog(
+        {"C:/1/": [[obs("123", 119_900), obs("124", 119_900)]]},
+        offers={"123": offer("123", 119_900), "124": offer("124", 119_900)},
+    )
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).alerts == 1
+    assert count(db, "outbox") == 1
+    deliveries = db.execute("SELECT delivery FROM discountz.alert ORDER BY id").fetchall()
+    assert deliveries == [("queued",), ("held",)]
 
 
 def test_crawl_stops_when_breaker_opens_meanwhile_and_keeps_it(db: psycopg.Connection) -> None:

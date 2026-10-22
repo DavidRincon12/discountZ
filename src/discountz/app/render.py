@@ -16,11 +16,13 @@ from typing import Any
 from discountz.domain.community import ChannelPost
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money, format_money
-from discountz.infra.db import CatalogDaily, SearchItem, StatusSnapshot, WatchItem
+from discountz.infra.db import CatalogDaily, HeldOffer, SearchItem, StatusSnapshot, WatchItem
 from discountz.sources.telegram_channels import CHANNELS
 
 MAX_VISIBLE = 4096
 MAX_TITLE = 120
+DIGEST_TITLE = 80  # títulos en el resumen de la noche
+DIGEST_SOURCE_MAX = 40  # líneas por fuente en el resumen; las demás se cuentan
 LIST_TITLE = 40
 LIST_PAGE = 15
 DB_LIMIT_MB = 500
@@ -273,12 +275,7 @@ def render_catalog_alert(
     price = Money(int(card["price_minor"]), currency)
     usual = Money(int(card["usual_minor"]), currency)
     store = str(card["store"])
-    label = str(card.get("reference_label") or "Antes")
-    reference = (
-        f"antes <s>{format_money(usual)}</s>"
-        if label == "Antes"
-        else f"{esc(label[:1].lower() + label[1:])} {format_money(usual)}"
-    )
+    reference = _catalog_reference(card, usual)
     lines = [
         f"<b>{_HEADERS[kind]}</b> · #{card['topic']} · {esc(source_name(store))}",
         f"<b>{esc(truncate(str(card['title']), CAPTION_TITLE))}</b>",
@@ -302,6 +299,13 @@ def render_catalog_alert(
         ],
     ]
     return RenderedMessage("\n".join(lines), buttons)
+
+
+def _catalog_reference(card: Mapping[str, Any], usual: Money) -> str:
+    label = str(card.get("reference_label") or "Antes")
+    if label == "Antes":
+        return f"antes <s>{format_money(usual)}</s>"
+    return f"{esc(label[:1].lower() + label[1:])} {format_money(usual)}"
 
 
 CHANNEL_TITLE = 120  # spec de canales §5
@@ -551,3 +555,63 @@ def _catalog_line(c: CatalogDaily) -> str:
         topics = ", ".join(f"{esc(t)} {n}" for t, n in sorted(c.alerts_by_topic.items()))
         line += f" · alertas por tema: {topics}"
     return line
+
+
+# ───────────── Resumen de la noche (ADR 0012)
+
+
+def _digest_link(url: str, title: str) -> str:
+    return f'<a href="{esc(url)}">{esc(truncate(title, DIGEST_TITLE))}</a>'
+
+
+def held_catalog_line(card: Mapping[str, Any]) -> str:
+    """Línea del resumen para una alerta del rastreo que no salió en tarjeta."""
+    currency = Currency(str(card["currency"]))
+    price = Money(int(card["price_minor"]), currency)
+    usual = Money(int(card["usual_minor"]), currency)
+    mark = "🔥 " if card["kind"] == AlertKind.PRICE_ERROR.value else ""
+    return (
+        f"• {mark}{_digest_link(str(card['url']), str(card['title']))}"
+        f" · <b>{format_money(price)}</b> {_catalog_reference(card, usual)}"
+        f" (-{pct(int(card['drop_bp']))})"
+    )
+
+
+def held_channel_line(post: ChannelPost) -> str:
+    """Línea del resumen para una oferta de canal que no salió en tarjeta."""
+    line = f"• {_digest_link(str(post.link), post.title)} · <b>{format_money(post.price)}</b>"
+    if post.coupon:
+        line += f" · cupón <code>{esc(post.coupon)}</code>"
+    return line
+
+
+def render_held_digest(rows: Sequence[HeldOffer], daily_cards: int) -> list[str]:
+    """Lo que no salió en tarjeta, por fuente en el orden de `rows`, en mensajes de 4.096
+    visibles; cada mensaje después del primero empieza diciendo de qué fuente sigue."""
+    if not rows:
+        return []
+    sections: dict[str, list[str]] = {}
+    for r in rows:
+        sections.setdefault(r.source, []).append(r.line)
+    total = len(rows)
+    current = [
+        f"🌙 <b>Resumen de la noche</b> · {total} oferta{'' if total == 1 else 's'}",
+        f"<i>Lo que no salió en tarjeta: {daily_cards} por fuente al día y una por promoción.</i>",
+    ]
+    bodies: list[str] = []
+    for source, lines in sections.items():
+        name = esc(source_name(source))
+        shown = lines[:DIGEST_SOURCE_MAX]
+        if len(lines) > len(shown):
+            shown.append(f"… y {len(lines) - len(shown)} más de {name}")
+        heading = ["", f"<b>{name}</b> · {len(lines)}"]
+        for line in shown:
+            block = [*heading, line]
+            if visible_length("\n".join([*current, *block])) > MAX_VISIBLE:
+                bodies.append("\n".join(current))
+                block = [heading[1] if heading else f"<b>{name}</b> (sigue)", line]
+                current = []
+            current.extend(block)
+            heading = []
+    bodies.append("\n".join(current))
+    return bodies
