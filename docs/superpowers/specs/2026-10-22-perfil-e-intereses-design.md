@@ -74,7 +74,7 @@ El catálogo que deja de recorrerse se borra solo con la retención de siempre, 
 
 ### 1.4 Lo que no cambia
 
-`/seguir` y `/buscar` son pedidos explícitos y no pasan por el perfil. Las alertas de la v1 de Slickdeals (`comunidad_us`) tampoco, pero esa fuente se apaga por sus términos (§7).
+`/seguir` y `/buscar` son pedidos explícitos y no pasan por el perfil. Las alertas de la v1 de Slickdeals (`comunidad_us`) tampoco (§7).
 
 ## 2. Errores y bordes del PR 1
 
@@ -214,7 +214,7 @@ ALTER TABLE offer_log ADD COLUMN interest text;  -- nombre del interés que la s
 
 ## 7. Slickdeals
 
-Los términos de Slickdeals (vigentes desde el 5 de marzo de 2026) prohíben acceder a sus servicios por medios automáticos sin permiso escrito y mostrar sus ofertas en otra app; su robots.txt cierra el RSS que se lee hoy. El feed oficial de FeedBurner responde, pero los términos siguen aplicando. Por la decisión de David («probar FeedBurner; si no, apagar»), se apagan `slickdeals` y `slickdeals_amazon` con `/fuente off`. El código queda; el PR 1 lo anota en `docs/estado.md`.
+Los términos de Slickdeals (vigentes desde el 5 de marzo de 2026) prohíben acceder a sus servicios por medios automáticos sin permiso escrito y mostrar sus ofertas en otra app; su robots.txt cierra el RSS que se lee hoy. El feed oficial de FeedBurner responde, pero los términos siguen aplicando. David decidió el 2026-10-22 dejar `slickdeals` y `slickdeals_amazon` encendidas por ahora, asumiendo el riesgo como con Alkosto y eBay; el PR 1 lo anota en `docs/estado.md`. Sus alertas de la v1 (`comunidad_us`) siguen sin pasar por el perfil; `slickdeals_amazon` es un canal y sí pasa por él.
 
 ## 8. ADR
 
