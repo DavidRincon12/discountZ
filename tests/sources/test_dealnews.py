@@ -84,6 +84,11 @@ def test_real_feed_reads_every_priced_deal() -> None:
     assert {p.channel for p in page.posts} == {"dealnews"}
 
 
+def test_feed_deals_are_bought_through_the_casillero() -> None:
+    page = parse_dealnews_feed(load_fixture("dealnews", "amazon").body, NOW)
+    assert all(p.casillero for p in page.posts)
+
+
 def test_real_feed_first_deal_keeps_the_dealnews_link_untouched() -> None:
     first, second = parse_dealnews_feed(load_fixture("dealnews", "amazon").body, NOW).posts[:2]
     assert first.post_id == 22269285

@@ -18,7 +18,7 @@ from types import MappingProxyType
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 from discountz.domain.model import AlertKind
-from discountz.domain.money import Currency, Money, format_money
+from discountz.domain.money import Money, format_money
 
 FONTS_DIR = Path(__file__).resolve().parents[3] / "assets" / "fonts"
 SIZE = 1080
@@ -78,6 +78,7 @@ class CardData:
     coupon: str | None = None
     reference_label: str = "Antes"  # eBay §4.2: «Mediana de N publicaciones del mismo modelo»
     note: str | None = None  # reemplaza la línea «Mínimo en N días» (eBay: vendedor y envío)
+    casillero: bool = False  # línea «EE. UU. · Compra por casillero»
 
 
 @cache
@@ -178,7 +179,7 @@ def render_card(data: CardData, photo: bytes | None) -> bytes:
         _community_lines(draw, data, color)
     else:
         _catalog_lines(draw, data, data.usual)
-    if data.price.currency is Currency.USD:
+    if data.casillero:
         draw.text(
             (60, 1035),
             "EE. UU. · Compra por casillero",

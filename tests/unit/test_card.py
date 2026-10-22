@@ -102,12 +102,29 @@ def test_validate_photo_accepts_png_and_webp() -> None:
     assert validate_photo(photo(fmt="WEBP")) is not None
 
 
-def test_card_usd_shows_casillero_line() -> None:
+def test_card_shows_casillero_line_only_when_marked() -> None:
     usd = replace(C01, price=Money(1_999, Currency.USD), usual=Money(9_999, Currency.USD))
-    cop_img = png(render_card(C01, None))
-    usd_img = png(render_card(usd, None))
     line = (60, 1000, 700, 1050)  # bajo «Mínimo en N días»
-    assert distance(average_hash(cop_img.crop(line)), average_hash(usd_img.crop(line))) > 0
+    cop_img = png(render_card(C01, None)).crop(line)
+    plain = png(render_card(usd, None)).crop(line)
+    marked = png(render_card(replace(usd, casillero=True), None)).crop(line)
+    assert distance(average_hash(cop_img), average_hash(plain)) == 0
+    assert distance(average_hash(plain), average_hash(marked)) > 0
+
+
+def test_card_data_casillero_comes_from_the_card() -> None:
+    from discountz.app.deliver import card_data
+
+    usd = {
+        "store": "ebay_us",
+        "topic": "tecnologia",
+        "price_minor": 1_999,
+        "currency": "USD",
+        "kind": "catalog_drop",
+    }
+    assert card_data(usd).casillero is True  # sin la clave (tarjetas del rastreo): USD = casillero
+    assert card_data(usd | {"casillero": False}).casillero is False
+    assert card_data(usd | {"currency": "COP"}).casillero is False
 
 
 def test_card_price_error_banner() -> None:

@@ -585,7 +585,15 @@ def test_channel_card_fields() -> None:
         "kind": "community_deal",
         "coupon": "T6YLVQZS",
         "badge": "Clubgratis · sin verificar",
+        "casillero": False,
     }
+
+
+def test_channel_deal_says_casillero_only_when_the_post_does() -> None:
+    """Las ofertas de Amazon de los canales suelen enviar directo a Colombia (David, 2026-10-22)."""
+    assert CASILLERO not in render_channel_deal(_channel_post(), "deportes").html
+    assert CASILLERO in render_channel_deal(_channel_post(casillero=True), "deportes").html
+    assert CASILLERO in render_channel_deal(_channel_post(**SLICKDEALS), "tecnologia").html
 
 
 # ───────────── Ofertas de feeds sin verificar (DealNews y Slickdeals Amazon)
@@ -602,6 +610,7 @@ DEALNEWS = {
     "hashtags": ("skin", "care"),
     "link": SafeUrl.parse(DEALNEWS_URL, frozenset({"www.dealnews.com"})),
     "post_url": SafeUrl.parse(DEALNEWS_URL, frozenset({"www.dealnews.com"})),
+    "casillero": True,
 }
 SLICKDEALS = {
     "channel": "slickdeals_amazon",
@@ -614,6 +623,7 @@ SLICKDEALS = {
     "post_url": SafeUrl.parse(
         "https://slickdeals.net/f/20089260-25w-waylite", frozenset({"slickdeals.net"})
     ),
+    "casillero": True,
 }
 
 

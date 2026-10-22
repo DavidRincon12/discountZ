@@ -151,6 +151,12 @@ def test_real_feed_amazon_deals_become_unverified_posts() -> None:
     assert first.published_at == datetime.fromisoformat(EXP["first"]["published_at"])
 
 
+def test_amazon_deals_are_bought_through_the_casillero() -> None:
+    page = parse_slickdeals_amazon(load_fixture("slickdeals", "frontpage").body)
+    assert page.posts
+    assert all(p.casillero for p in page.posts)
+
+
 def test_amazon_exit_without_asin_or_price_is_a_format_signal() -> None:
     no_asin = '<a data-product-exitWebsite="amazon.com" href="https://slickdeals.net/click">x</a>'
     body = rss(item("Cosa $5", no_asin, thread=1), item("Sin precio", AMAZON_LINK, thread=2))

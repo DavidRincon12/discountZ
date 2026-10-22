@@ -36,6 +36,9 @@ class ChannelPost:
     image_url: SafeUrl | None
     link: SafeUrl
     post_url: SafeUrl | None = None  # la publicación en su fuente; None: `t.me/<canal>/<id>`
+    # Se compra por casillero: la fuente es de EE. UU. o la publicación lo dice. Lo de Amazon
+    # en los canales de Telegram suele enviar directo a Colombia (David, 2026-10-22).
+    casillero: bool = False
 
 
 # Pesos del tema (spec de canales §4.2): cada hashtag (lo escoge quien publica) pesa como el

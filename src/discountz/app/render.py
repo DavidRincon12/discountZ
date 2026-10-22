@@ -334,6 +334,7 @@ def channel_card(post: ChannelPost, topic: str) -> dict[str, Any]:
         "kind": AlertKind.COMMUNITY_DEAL.value,
         "coupon": post.coupon,
         "badge": f"{source_name(post.channel)} · sin verificar",
+        "casillero": post.casillero,
     }
 
 
@@ -352,7 +353,7 @@ def render_channel_deal(post: ChannelPost, topic: str) -> RenderedMessage:
     if post.coupon:
         lines.append(f"Cupón <code>{esc(post.coupon)}</code>")
     lines.append(f"📣 Visto en {esc(source_name(post.channel))} · sin verificar")
-    if post.price.currency is Currency.USD:
+    if post.casillero:
         lines.append(CASILLERO)
     in_channel = _channel_post_url(post)
     buttons = [[Button(post_button, url=in_channel)]]
