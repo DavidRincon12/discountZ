@@ -196,7 +196,10 @@ class _Run:
             if not more:
                 self.cursor = replace(self.cursor, changed_since=self.now)
             return
-        ids = db.hot_catalog_ids(self.conn, self.code, self.now - HOT_WINDOW, cap * d.max_batch)
+        # Lo de un tema apagado no se relee: no puede alertar y así vence con la retención.
+        off = [c for c, p in self.deps.topics.params.items() if p.mode == "off"]
+        since = self.now - HOT_WINDOW
+        ids = db.hot_catalog_ids(self.conn, self.code, since, cap * d.max_batch, off)
         for i in range(0, len(ids), d.max_batch):
             if self.http.used >= cap or not self.time_left():
                 return

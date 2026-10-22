@@ -407,6 +407,21 @@ def test_crawl_hot_tier_first_and_capped(db: psycopg.Connection) -> None:
     assert result.requests == len(kinds) == 20
 
 
+def test_crawl_hot_tier_skips_topics_out_of_the_profile(db: psycopg.Connection) -> None:
+    """Lo guardado de un tema apagado no se relee: no puede alertar y así vence con la retención
+    (ADR 0013)."""
+    changed = CatalogState(10_000, None, None, T, T, 1, T - timedelta(hours=1), None, None)
+    rows = [
+        CatalogRow("1", None, "belleza", "COP", changed),
+        CatalogRow("2", None, "tecnologia", "COP", changed),
+    ]
+    repo.save_catalog_page(db, "exito", rows, T - timedelta(hours=1))
+    src = FakeCatalog({"C:/1/": [page_of(1)]}, max_batch=1)
+    d, transport = deps(db, src, Clock())
+    run_crawl(d, T, minutes=60)
+    assert transport.kinds().count("items") == 1  # solo el de tecnología
+
+
 def test_crawl_hot_tier_uses_fetch_changed_when_supported(db: psycopg.Connection) -> None:
     src = FakeCatalog({"all": [page_of(1)]}, changed=[[obs("7", 9_000)]], supports_changed=True)
     d, _ = deps(db, src, Clock(step=1))
