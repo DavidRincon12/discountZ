@@ -173,6 +173,17 @@ Desde el 22 de octubre de 2026 llegan menos ofertas y mejores (ADR 0012):
 1. **Migración `0010`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala. Mientras no corra, el ciclo y el rastreo se saltan con aviso.
 2. Los valores se ajustan en `config/discountz.toml`: `min_price_*` y `catalog_min_saving_*` en `[pricing]`, y `daily_per_source` en `[cards]`.
 
+### 17. Perfil de temas
+
+Desde el 22 de octubre de 2026 cada tema tiene un modo (ADR 0013), en `mode` de `config/topics.toml`:
+
+- **En tarjeta** (`card`): Tecnología, Electrodomésticos, Ferretería y autos, Moda y calzado, Libros y papelería, Errores de precio y Comunidad EE. UU. Llegan como antes.
+- **Solo por interés** (`interest`): Hogar y muebles, Deportes y Otros. Se rastrean, pero no llegan en tarjeta; cuando lleguen los intereses (`/interes`), llegará lo que coincida con uno.
+- **Apagados** (`off`): Belleza y cuidado, Mercado, Bebés y juguetes, y Mascotas. Sus categorías no se rastrean en las tiendas ni en eBay, y sus ofertas de canales y feeds quedan vistas sin enviarse.
+
+1. **Nada que correr.** No hay migración: el perfil rige desde el primer ciclo y el primer rastreo después de fusionar.
+2. **Cambiar el perfil.** Edita `mode` en `config/topics.toml` y fusiona. `/seguir` y `/buscar` no pasan por el perfil.
+
 ### Si algo falla
 
 - Sin resumen diario de las 08:00: revisa *Actions → cycle* (workflows desactivados, secreto caducado o Supabase pausado).

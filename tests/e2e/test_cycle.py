@@ -502,17 +502,17 @@ def test_cycle_delivers_channel_deal_card(conn: psycopg.Connection) -> None:
     )
     for i, code in enumerate(load_topics().params, start=10):
         repo.save_topic(conn, code, code, i)
-    repo.save_channel_cursor(conn, "tg_cajitatech", 88179, now - timedelta(hours=1))
+    repo.save_channel_cursor(conn, "tg_cajitatech", 88176, now - timedelta(hours=1))
     page = load_fixture("telegram", "cajitatech")
     empty = load_fixture("telegram", "cajitatech-empty")
     base = "https://t.me/s/cajitatech?after="
     http = FakeHttp(
         {
-            f"{base}88179": HttpResponse(200, page.url, {}, page.body, 1),
+            f"{base}88176": HttpResponse(200, page.url, {}, page.body, 1),
             f"{base}88180": HttpResponse(200, empty.url, {}, empty.body, 1),
         }
     )
-    img = "https://cdn1.telesco.pe/file/FPmg2nETLET429O23i7sYwo82pkyIfum1pfxCFRZmQhagDMBbkki"
+    img = "https://cdn1.telesco.pe/file/MYCeMARoA5n3GWv0xZwGkytMIAfMBBh-2SYFJLukLehA-mDctcM7S9"
     buf = io.BytesIO()
     Image.new("RGB", (200, 200), (10, 120, 200)).save(buf, "JPEG")
     photos = _AnyPhoto(buf.getvalue())
@@ -524,7 +524,7 @@ def test_cycle_delivers_channel_deal_card(conn: psycopg.Connection) -> None:
     )
     run_cycle(replace(deps(conn, {"tg_cajitatech": http}, tg), photos=photos), now)
     assert [u for u in photos.urls if u.startswith(img)] == photos.urls and len(photos.urls) == 1
-    assert len(tg.uploads) == 1  # solo el post posterior al cursor: el 88180
+    assert len(tg.uploads) == 1  # tras el cursor solo 88177 (placa madre); 88178 y 88180: Hogar
     data, _ = tg.uploads[0]
     assert data is not None
     topic = conn.execute("SELECT topic FROM discountz.outbox WHERE purpose = 'alert'").fetchone()
@@ -546,9 +546,10 @@ def test_cycle_marks_dealnews_feed_then_delivers_its_new_deal(conn: psycopg.Conn
     for i, code in enumerate(load_topics().params, start=10):
         repo.save_topic(conn, code, code, i)
     feed = load_fixture("dealnews", "amazon")
-    start = feed.body.index(b"<item>")
-    end = feed.body.index(b"</item>", start) + len(b"</item>")
-    before = feed.body[:start] + feed.body[end:]  # el feed antes de la oferta 22269285
+    guid = feed.body.index(b"/22285975.html?iref=rss</guid>")  # dron de US$30: Tecnología
+    start = feed.body.rindex(b"<item>", 0, guid)
+    end = feed.body.index(b"</item>", guid) + len(b"</item>")
+    before = feed.body[:start] + feed.body[end:]  # el feed antes de la oferta 22285975
     buf = io.BytesIO()
     Image.new("RGB", (200, 200), (10, 120, 200)).save(buf, "JPEG")
 
@@ -573,13 +574,13 @@ def test_cycle_marks_dealnews_feed_then_delivers_its_new_deal(conn: psycopg.Conn
     data, _ = tg.uploads[0]
     assert data is not None
     assert "Visto en DealNews · sin verificar" in data["caption"]
-    assert data["message_thread_id"] == str(repo.topic_threads(conn)["belleza"])
+    assert data["message_thread_id"] == str(repo.topic_threads(conn)["tecnologia"])
     keyboard = json.loads(data["reply_markup"])["inline_keyboard"]
     assert [(b["text"], b["url"]) for row in keyboard for b in row] == [
         (
             "Ver en DealNews",
-            "https://www.dealnews.com/3-in-1-Ice-Depuffing-Wand-for-45-free-shipping"
-            "/22269285.html?iref=rss",
+            "https://www.dealnews.com/1080-p-Mini-Camera-Drone-2-Pack-for-30-free-shipping-w-Prime"
+            "/22285975.html?iref=rss",
         )
     ]
 

@@ -339,6 +339,10 @@ def _handle(
         tally.skipped += 1
         return
     topic = assign_channel_topic(post, step.topics.channel_rules)
+    if step.topics.params[topic].mode != "card":  # fuera del perfil (ADR 0013): solo queda vista
+        _mark(step, code, post, topic)
+        tally.skipped += 1
+        return
     if post.casillero and not _worth_by_casillero(post, topic, step.min_price):
         _mark(step, code, post, topic)
         tally.skipped += 1

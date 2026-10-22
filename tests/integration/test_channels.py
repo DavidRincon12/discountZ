@@ -5,15 +5,16 @@ from __future__ import annotations
 import random
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from types import MappingProxyType
 
 import psycopg
 import pytest
 
 from discountz.app.channels import ChannelsResult, due_channels, run_channels
 from discountz.app.collect import SourceRun
-from discountz.config import load_params, load_topics
+from discountz.config import Topics, load_params, load_topics
 from discountz.domain.community import ChannelPost
 from discountz.domain.errors import ParseError
 from discountz.domain.health import BreakerState, effective_state
@@ -30,7 +31,13 @@ pytestmark = pytest.mark.integration
 T = datetime(2026, 10, 17, 15, 0, tzinfo=UTC)
 CLOSED = BreakerState("closed", None, 0, 0, 0, 0)
 PARAMS = load_params()
-TOPICS = load_topics()
+PROFILE = load_topics()  # el perfil de David (ADR 0013)
+# La mecánica de los canales se prueba con todos los temas en tarjeta, para que no dependa de
+# los modos que David cambie; el perfil se prueba aparte con PROFILE.
+TOPICS = replace(
+    PROFILE,
+    params=MappingProxyType({c: replace(p, mode="card") for c, p in PROFILE.params.items()}),
+)
 URL = "https://t.me/s/fake"
 
 
@@ -99,9 +106,11 @@ def run_for(fake: FakeChannel, breaker: BreakerState = CLOSED) -> SourceRun:
     return SourceRun(fake, paced, budget, breaker, deque())  # type: ignore[arg-type]
 
 
-def run(conn: psycopg.Connection, *fakes: FakeChannel, now: datetime = T) -> ChannelsResult:
+def run(
+    conn: psycopg.Connection, *fakes: FakeChannel, now: datetime = T, topics: Topics = TOPICS
+) -> ChannelsResult:
     return run_channels(
-        conn, [run_for(f) for f in fakes], now, PARAMS, TOPICS, random.Random(1), 1e9
+        conn, [run_for(f) for f in fakes], now, PARAMS, topics, random.Random(1), 1e9
     )
 
 
@@ -409,6 +418,30 @@ def test_filtered_deal_is_kept_as_seen_and_not_an_original(db: psycopg.Connectio
         1,
         [("canal:tg_descuentoshome:101", "hogar", "community_deal")],
     )
+
+
+def test_post_in_a_non_card_topic_is_marked_without_sending(db: psycopg.Connection) -> None:
+    """Hogar solo llega por interés (ADR 0013): la silla queda vista, sin enviarse."""
+    code = "tg_descuentoshome"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    chair = deal(code, 101, title="Silla de comedor tapizada", hashtags=("hogar",))
+    result = run(db, FakeChannel(code, [page(chair)]), topics=PROFILE)
+    assert outbox(db) == []
+    assert (result.sent, result.skipped) == (0, 1)
+    row = db.execute(
+        "SELECT topic, baseline FROM discountz.channel_post WHERE channel = %s AND post_id = 101",
+        (code,),
+    ).fetchone()
+    assert row == ("hogar", True)
+
+
+def test_post_in_a_card_topic_is_still_sent(db: psycopg.Connection) -> None:
+    code = "tg_descuentoshome"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    drill = deal(code, 101, title="Taladro percutor inalámbrico 20V", hashtags=("herramientas",))
+    result = run(db, FakeChannel(code, [page(drill)]), topics=PROFILE)
+    assert outbox(db) == [(f"canal:{code}:101", "ferreteria", "community_deal")]
+    assert result.sent == 1
 
 
 # ───────────── Feeds sin orden de ids (DealNews y Slickdeals Amazon)
