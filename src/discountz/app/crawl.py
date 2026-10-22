@@ -355,7 +355,7 @@ class _Run:
             state, cand, changed = observe(prev, o, self.now, params[topic], self.deps.params.glob)
             currency = o.price.currency.value
             rows[o.external_id] = db.CatalogRow(
-                o.external_id, o.ean, topic, currency, state, changed, o.model_key
+                o.external_id, o.ean, topic, currency, state, o.model_key
             )
             self.items += 1
             self.changes += int(changed)
@@ -369,7 +369,7 @@ class _Run:
         for ext, row in real.items():
             prev = states.get(ext)
             if prev is not None:
-                rows[ext] = replace(row, state=prev, price_changed=False)
+                rows[ext] = replace(row, state=prev)
         db.save_catalog_page(self.conn, self.code, list(rows.values()), self.now)
         if fresh:
             self.confirm(fresh, real)

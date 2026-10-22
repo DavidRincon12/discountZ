@@ -206,20 +206,6 @@ def _item(conn: psycopg.Connection, ext: str, seen_days_ago: int, source: str = 
     return int(row[0])
 
 
-def _change(conn: psycopg.Connection, item_id: int, days_ago: int) -> None:
-    conn.execute(
-        """INSERT INTO discountz.catalog_price_change (item_id, at, price_minor)
-           VALUES (%s, %s, 900)""",
-        (item_id, T - days_ago * DAY),
-    )
-
-
-def _changes(conn: psycopg.Connection) -> int:
-    row = conn.execute("SELECT count(*) FROM discountz.catalog_price_change").fetchone()
-    assert row is not None
-    return int(row[0])
-
-
 def _crawled(conn: psycopg.Connection, source: str, days_ago: int) -> None:
     conn.execute(
         "INSERT INTO discountz.crawl_cursor (source, last_run_at) VALUES (%s, %s)",
@@ -227,17 +213,13 @@ def _crawled(conn: psycopg.Connection, source: str, days_ago: int) -> None:
     )
 
 
-def test_catalog_unseen_30d_and_legacy_changes_drained(db: psycopg.Connection) -> None:
-    """`catalog_price_change` ya no se escribe (llegó a 140 MB en 4 días): se vacía."""
+def test_catalog_unseen_30d_is_deleted(db: psycopg.Connection) -> None:
     _crawled(db, "exito", 0)
-    fresh = _item(db, "1", 0)
+    _item(db, "1", 0)
     _item(db, "2", 31)
-    for days in (0, 1, 60, 91):
-        _change(db, fresh, days)
     run_maintenance(db, T, load_params(), db_bytes=10 * MB)
     items = db.execute("SELECT external_id FROM discountz.catalog_item").fetchall()
     assert items == [("1",)]
-    assert _changes(db) == 0
 
 
 def test_unseen_items_of_a_paused_crawl_are_kept(db: psycopg.Connection) -> None:

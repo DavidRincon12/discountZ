@@ -75,7 +75,6 @@ def run_maintenance(
     retention += db.prune_discoveries(conn, now - timedelta(days=120), now - timedelta(days=365))
     with conn.transaction():
         retention += db.expire_auto_watches(conn, now)
-    retention += db.drain_catalog_changes(conn)
     retention += db.delete_unseen_catalog_items(conn, CATALOG_UNSEEN)
     retention += db.delete_old_channel_posts(conn, now - CHANNEL_POSTS_KEEP)
     retention += db.delete_old_offer_log(conn, now - OFFER_LOG_KEEP)
