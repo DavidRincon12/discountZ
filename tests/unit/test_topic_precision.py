@@ -15,9 +15,13 @@ from discountz.config import load_topics
 from discountz.domain.community import ChannelPost, assign_channel_topic
 from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
+from tests.profiles import SPEC_CARD
 
 LABELED = Path(__file__).parents[1] / "fixtures" / "topics" / "ofertas-etiquetadas.jsonl"
 MIN_PRECISION = 0.95
+# Ofertas con algún tema en tarjeta que el tema asignado deja fuera del perfil del spec y que,
+# por tanto, no llegan (revisión del PR 1, 2026-10-22). Una regla nueva no debe subirlo.
+MAX_HIDDEN = 34
 _LINK = SafeUrl.parse("https://t.me/canal/1", frozenset({"t.me"}))
 
 
@@ -46,3 +50,15 @@ def test_channel_topics_match_hand_labels() -> None:
     ]
     precision = 1 - len(misses) / len(rows)
     assert precision >= MIN_PRECISION, f"{precision:.1%}: {misses[:20]}"
+
+
+def test_profile_hides_few_card_offers() -> None:
+    rules = load_topics().channel_rules
+    rows = [json.loads(line) for line in LABELED.read_text(encoding="utf-8").splitlines()]
+    hidden = [
+        (row["titulo"], got, row["temas"])
+        for row in rows
+        if set(row["temas"]) & SPEC_CARD
+        and (got := assign_channel_topic(_post(row), rules)) not in SPEC_CARD
+    ]
+    assert len(hidden) <= MAX_HIDDEN, f"{len(hidden)}: {hidden[:20]}"
