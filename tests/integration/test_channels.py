@@ -5,16 +5,15 @@ from __future__ import annotations
 import random
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from types import MappingProxyType
 
 import psycopg
 import pytest
 
 from discountz.app.channels import ChannelsResult, due_channels, run_channels
 from discountz.app.collect import SourceRun
-from discountz.config import Topics, load_params, load_topics
+from discountz.config import Topics, load_params
 from discountz.domain.community import ChannelPost
 from discountz.domain.errors import ParseError
 from discountz.domain.health import BreakerState, effective_state
@@ -25,19 +24,17 @@ from discountz.infra.http import FakeHttp, HttpResponse, PacedClient
 from discountz.sources.base import ChannelPage, SourceContext, SourceDescriptor
 from discountz.sources.blocks import detect_block_common
 from discountz.sources.registry import load_all
+from tests.profiles import all_cards, spec_profile
 
 pytestmark = pytest.mark.integration
 
 T = datetime(2026, 10, 17, 15, 0, tzinfo=UTC)
 CLOSED = BreakerState("closed", None, 0, 0, 0, 0)
 PARAMS = load_params()
-PROFILE = load_topics()  # el perfil de David (ADR 0013)
-# La mecánica de los canales se prueba con todos los temas en tarjeta, para que no dependa de
-# los modos que David cambie; el perfil se prueba aparte con PROFILE.
-TOPICS = replace(
-    PROFILE,
-    params=MappingProxyType({c: replace(p, mode="card") for c, p in PROFILE.params.items()}),
-)
+# La mecánica de los canales se prueba con todos los temas en tarjeta; el perfil, con el del
+# spec (ADR 0013). Ninguna depende de los modos que David edite.
+TOPICS = all_cards()
+PROFILE = spec_profile()
 URL = "https://t.me/s/fake"
 
 

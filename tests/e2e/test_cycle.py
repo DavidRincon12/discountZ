@@ -35,6 +35,7 @@ from discountz.sources.slickdeals import RSS_URL
 from discountz.sources.vtex import STORES
 from tests.factories import offer
 from tests.integration.conftest import connect_extra, db, empty_db_url  # noqa: F401
+from tests.profiles import spec_profile
 from tests.unit.series import T
 
 pytestmark = pytest.mark.integration
@@ -142,6 +143,7 @@ def deps(
         sleep=clock.sleep,
         rnd=random.Random(7),
         healthchecks=Healthchecks(None, tg),
+        topics=spec_profile(),
     )
 
 

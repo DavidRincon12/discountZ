@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
@@ -390,9 +391,9 @@ def test_load_topics_rejects_unknown_mode(tmp_path: Path) -> None:
     from discountz.config import load_topics
 
     src = Path("config/topics.toml").read_text(encoding="utf-8")
-    old = '[topics.hogar]\ntitle = "🛋️ Hogar y muebles"\nmode = "interest"\n'
-    assert old in src
+    bad, n = re.subn(r'^mode = "[a-z]+"$', 'mode = "quiza"', src, count=1, flags=re.MULTILINE)
+    assert n == 1
     path = tmp_path / "topics.toml"
-    path.write_text(src.replace(old, old.replace('"interest"', '"quiza"')), "utf-8")
-    with pytest.raises(ConfigError, match=r"topics\.hogar"):
+    path.write_text(bad, "utf-8")
+    with pytest.raises(ConfigError, match=r"\.mode"):
         load_topics(path)

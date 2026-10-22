@@ -20,7 +20,7 @@ from discountz.app.crawl import (
     run_crawl_reconnecting,
 )
 from discountz.app.held import Slot, admit
-from discountz.config import load_params, load_topics
+from discountz.config import load_params
 from discountz.domain.catalog import CatalogObservation, CatalogState
 from discountz.domain.errors import ParseError, Unavailable
 from discountz.domain.model import (
@@ -54,6 +54,7 @@ from discountz.sources.base import (
     SourceDescriptor,
 )
 from discountz.sources.blocks import detect_block_common
+from tests.profiles import spec_profile
 
 pytestmark = pytest.mark.integration
 T = datetime(2026, 10, 16, 12, tzinfo=UTC)
@@ -258,7 +259,7 @@ def deps(
         source=source,
         http=transport,
         credentials=NoCredentials(),
-        topics=load_topics(),
+        topics=spec_profile(),
         params=load_params(),
         budget=CrawlBudget(0, 0, max_per_run, 100_000, 2500),
         holder=holder,
