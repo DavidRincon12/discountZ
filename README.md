@@ -186,7 +186,7 @@ Desde el 22 de octubre de 2026 cada tema tiene un modo (ADR 0013), en `mode` de 
 
 ### 18. Intereses
 
-Un interés es una lista de frases, en español y en inglés. Si una aparece en el título de una oferta (palabras seguidas, sin importar mayúsculas, tildes ni plural), la oferta llega en tarjeta con la línea «🎯 nombre del interés» aunque su tema esté en «solo por interés», aunque la fuente ya haya enviado sus 8 tarjetas del día y sin los mínimos de precio y de ahorro. Sigue exigiendo un descuento real contra el histórico. Llegan hasta 3 tarjetas por interés al día; las demás van al resumen de las 21:00.
+Un interés es una lista de frases, en español y en inglés. Si una aparece en el título de una oferta (palabras seguidas, sin importar mayúsculas, tildes ni plural) antes de «para», «con», «sin», «for», «with» o «compatible» («Mochila para portátil» es un morral, no un portátil), la oferta llega en tarjeta con la línea «🎯 nombre del interés» aunque su tema esté en «solo por interés», aunque la fuente ya haya enviado sus 8 tarjetas del día y sin los mínimos de precio y de ahorro. Sigue exigiendo un descuento real contra el histórico. Llegan hasta 3 tarjetas por interés al día; después, lo que igual llegaría sin el interés usa el cupo de la fuente y lo demás va al resumen de las 21:00.
 
 1. **Al fusionar.** *Actions → migrate → Run workflow* con `to = head` (esquema 12) y luego *Actions → setup-bot*, para ver `/interes` en el menú. Mientras no migres, el ciclo avisa que hay una migración pendiente y no procesa.
 2. **La lista base.** 55 intereses de tecnología, herramientas, papelería, ropa, hogar y deportes en `config/interests.toml`. Se cambian con un PR; `check-config` revisa el archivo.
