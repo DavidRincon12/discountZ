@@ -17,6 +17,7 @@ from discountz.config import Topics, load_params
 from discountz.domain.community import ChannelPost
 from discountz.domain.errors import ParseError
 from discountz.domain.health import BreakerState, effective_state
+from discountz.domain.interests import Interest, compile_interest
 from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
 from discountz.infra import db as repo
@@ -104,11 +105,14 @@ def run_for(fake: FakeChannel, breaker: BreakerState = CLOSED) -> SourceRun:
 
 
 def run(
-    conn: psycopg.Connection, *fakes: FakeChannel, now: datetime = T, topics: Topics = TOPICS
+    conn: psycopg.Connection,
+    *fakes: FakeChannel,
+    now: datetime = T,
+    topics: Topics = TOPICS,
+    interests: tuple[Interest, ...] = (),
 ) -> ChannelsResult:
-    return run_channels(
-        conn, [run_for(f) for f in fakes], now, PARAMS, topics, random.Random(1), 1e9
-    )
+    runs = [run_for(f) for f in fakes]
+    return run_channels(conn, runs, now, PARAMS, topics, random.Random(1), 1e9, interests=interests)
 
 
 def page(
@@ -439,6 +443,50 @@ def test_post_in_a_card_topic_is_still_sent(db: psycopg.Connection) -> None:
     result = run(db, FakeChannel(code, [page(drill)]), topics=PROFILE)
     assert outbox(db) == [(f"canal:{code}:101", "ferreteria", "community_deal")]
     assert result.sent == 1
+
+
+DESK = compile_interest("Escritorio", "hogar", ["escritorio", "standing desk"])
+METER = compile_interest("Multímetro", "ferreteria", ["multimetro", "multimeter"])
+
+
+def test_interest_post_in_a_non_card_topic_is_sent(db: psycopg.Connection) -> None:
+    """Hogar va solo por interés: el escritorio sale en tarjeta con «🎯 Escritorio»."""
+    code = "tg_descuentoshome"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    desk = deal(code, 101, title="Escritorio elevable eléctrico", hashtags=("hogar",))
+    chair = deal(code, 102, title="Silla de comedor tapizada", hashtags=("hogar",))
+    result = run(db, FakeChannel(code, [page(desk, chair)]), topics=PROFILE, interests=(DESK,))
+    assert outbox(db) == [(f"canal:{code}:101", "hogar", "community_deal")]
+    assert (result.sent, result.skipped) == (1, 1)
+    row = db.execute("SELECT body_html, card->>'interest' FROM discountz.outbox").fetchone()
+    assert row is not None
+    assert "🎯 Escritorio" in row[0] and row[1] == "Escritorio"
+    logged = db.execute("SELECT interest FROM discountz.offer_log").fetchall()
+    assert logged == [("Escritorio",)]
+
+
+def test_interest_post_skips_the_casillero_floor(db: psycopg.Connection) -> None:
+    """Por casillero a US$19 no compensa, salvo que coincida con un interés."""
+    code = "tg_descuentostech"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    meter = deal(code, 101, title="AstroAI Digital Multimeter", price=1900, casillero=True)
+    knives = deal(code, 102, price=1900, casillero=True)
+    result = run(db, FakeChannel(code, [page(meter, knives)]), interests=(METER,))
+    assert [k for k, _, _ in outbox(db)] == [f"canal:{code}:101"]
+    assert (result.sent, result.skipped) == (1, 1)
+
+
+def test_duplicate_interest_post_is_not_resent(db: psycopg.Connection) -> None:
+    """La misma oferta en otro canal sigue siendo un duplicado aunque coincida con un interés."""
+    repo.save_channel_cursor(db, "tg_clubgratis", 59500, T - timedelta(hours=1))
+    repo.save_channel_cursor(db, "tg_cajitatech", 88160, T - timedelta(hours=1))
+    title, tags = "Escritorio elevable", ("hogar",)
+    club = deal("tg_clubgratis", 59510, title=title, coupon="DESK10", hashtags=tags)
+    caj = deal("tg_cajitatech", 88168, title=title, coupon="desk10", hashtags=tags)
+    fakes = FakeChannel("tg_clubgratis", [page(club)]), FakeChannel("tg_cajitatech", [page(caj)])
+    result = run(db, *fakes, topics=PROFILE, interests=(DESK,))
+    assert [k for k, _, _ in outbox(db)] == ["canal:tg_clubgratis:59510"]
+    assert (result.sent, result.duplicates) == (1, 1)
 
 
 # ───────────── Feeds sin orden de ids (DealNews y Slickdeals Amazon)

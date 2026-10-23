@@ -35,6 +35,7 @@ from discountz.config import AppParams, Topics
 from discountz.domain.community import ChannelPost, assign_channel_topic, find_duplicate
 from discountz.domain.errors import BudgetExhausted, HardBlock, ParseError, SourceError
 from discountz.domain.health import BreakerEvent, BreakerState, breaker_transition, effective_state
+from discountz.domain.interests import Interest, match_interest
 from discountz.domain.model import AlertKind, normalize_title
 from discountz.domain.money import Currency
 from discountz.domain.scheduling import SourceBudget
@@ -72,6 +73,8 @@ class _Step:
     silent: bool
     min_price: Mapping[Currency, int]  # lo que llega por casillero cuesta al menos esto
     daily_cards: int  # tarjetas por canal al día
+    interests: Sequence[Interest] = ()  # lo que coincide sale aunque el perfil o el casillero no
+    interest_cap: int = 3  # tarjetas por interés al día
 
 
 @dataclass(slots=True)
@@ -119,6 +122,8 @@ def run_channels(
     deadline: float,
     *,
     resolve: LinkResolver | None = None,
+    interests: Sequence[Interest] = (),
+    interest_cap: int = 3,
 ) -> ChannelsResult:
     """Lee cada canal de `runs` y encola sus ofertas nuevas; actualiza breaker y contadores.
 
@@ -132,6 +137,8 @@ def run_channels(
         is_quiet(now, params.quiet_start, params.quiet_end),
         params.glob.min_price,
         params.daily_cards,
+        interests,
+        interest_cap,
     )
     total = _Tally()
     requests = 0
@@ -339,11 +346,13 @@ def _handle(
         tally.skipped += 1
         return
     topic = assign_channel_topic(post, step.topics.channel_rules)
-    if step.topics.params[topic].mode != "card":  # fuera del perfil (ADR 0013): solo queda vista
-        _mark(step, code, post, topic)
+    hit = match_interest(post.title, step.interests)
+    interest = hit.name if hit is not None else None  # salta el perfil y el casillero (§3.3)
+    if interest is None and step.topics.params[topic].mode != "card":  # fuera del perfil
+        _mark(step, code, post, topic)  # (ADR 0013): solo queda vista
         tally.skipped += 1
         return
-    if post.casillero and not _worth_by_casillero(post, topic, step.min_price):
+    if interest is None and post.casillero and not _worth_by_casillero(post, topic, step.min_price):
         _mark(step, code, post, topic)
         tally.skipped += 1
         return
@@ -367,9 +376,10 @@ def _handle(
         return
     if not inserted:
         return
-    slot = Slot(code, topic, AlertKind.COMMUNITY_DEAL, None)
-    if admit(conn, slot, now, step.daily_cards, held_channel_line(post)):
-        msg = render_channel_deal(post, topic)
+    slot = Slot(code, topic, AlertKind.COMMUNITY_DEAL, None, interest)
+    line = held_channel_line(post)
+    if admit(conn, slot, now, step.daily_cards, line, step.interest_cap):
+        msg = render_channel_deal(post, topic, interest)
         db.enqueue(
             conn,
             "alert",
@@ -381,7 +391,7 @@ def _handle(
             reply_markup=reply_markup(msg.buttons) if msg.buttons else None,
             silent=step.silent,
             topic=topic,
-            card=channel_card(post, topic),
+            card=channel_card(post, topic, interest),
         )
         tally.sent += 1
     else:

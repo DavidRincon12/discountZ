@@ -327,7 +327,7 @@ def _channel_labels(post: ChannelPost) -> tuple[str, str]:
     return f"OFERTA DE {name.upper()}", f"Ver en {name}"
 
 
-def channel_card(post: ChannelPost, topic: str) -> dict[str, Any]:
+def channel_card(post: ChannelPost, topic: str, interest: str | None = None) -> dict[str, Any]:
     """Datos de la tarjeta `community` de una oferta de canal (se guardan en `outbox.card`)."""
     return {
         "store": post.channel,
@@ -341,10 +341,13 @@ def channel_card(post: ChannelPost, topic: str) -> dict[str, Any]:
         "coupon": post.coupon,
         "badge": f"{source_name(post.channel)} · sin verificar",
         "casillero": post.casillero,
+        "interest": interest,
     }
 
 
-def render_channel_deal(post: ChannelPost, topic: str) -> RenderedMessage:
+def render_channel_deal(
+    post: ChannelPost, topic: str, interest: str | None = None
+) -> RenderedMessage:
     """Pie de foto de una oferta de canal (spec de canales §5); cabe en 1.024."""
     header, post_button = _channel_labels(post)
     head = f"<b>{header}</b> · #{topic}"
@@ -356,6 +359,8 @@ def render_channel_deal(post: ChannelPost, topic: str) -> RenderedMessage:
         "",
         f"<b>{format_money(post.price)}</b>",
     ]
+    if interest:  # lo sacó un interés (spec del perfil §3.3)
+        lines.insert(2, f"🎯 {esc(interest)}")
     if post.coupon:
         lines.append(f"Cupón <code>{esc(post.coupon)}</code>")
     lines.append(f"📣 Visto en {esc(source_name(post.channel))} · sin verificar")

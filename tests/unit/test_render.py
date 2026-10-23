@@ -571,6 +571,17 @@ def test_render_channel_deal_matches_golden(kw: dict[str, object], topic: str, n
     assert render_channel_deal(_channel_post(**kw), topic).html == golden(name)
 
 
+def test_channel_deal_with_interest_matches_golden() -> None:
+    post = _channel_post(
+        **CHANNEL_COP | {"title": 'Monitor gamer 27" 165 Hz', "price": Money(899_900, Currency.COP)}
+    )
+    assert render_channel_deal(post, "tecnologia", "Monitor").html == golden(
+        "channel_deal_interest.html"
+    )
+    assert channel_card(post, "tecnologia", "Monitor")["interest"] == "Monitor"
+    assert channel_card(post, "tecnologia")["interest"] is None
+
+
 def test_render_channel_deal_buttons() -> None:
     assert render_channel_deal(_channel_post(), "deportes").buttons == [
         [Button("Ver oferta", url="https://joylink.io/clubgratis/x")],
@@ -609,6 +620,7 @@ def test_channel_card_fields() -> None:
         "coupon": "T6YLVQZS",
         "badge": "Clubgratis · sin verificar",
         "casillero": False,
+        "interest": None,
     }
 
 

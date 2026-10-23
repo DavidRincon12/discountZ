@@ -7,6 +7,7 @@ from datetime import UTC, datetime, time, timedelta
 from functools import partial
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from discountz.__main__ import main
@@ -474,4 +475,22 @@ def test_check_config_fails_on_bad_interests(
     bad = _interests_file(tmp_path, BAD_INTERESTS["short_term"][0])
     monkeypatch.setattr("discountz.__main__.load_interests", partial(load_interests, bad))
     assert main(["check-config"]) == 2
+    assert "3 letras" in capsys.readouterr().err
+
+
+def test_run_fails_on_bad_interests_before_connecting(
+    env: None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """El ciclo lee los intereses con el resto de la configuración: falla antes de tocar la BD."""
+    bad = _interests_file(tmp_path, BAD_INTERESTS["short_term"][0])
+    monkeypatch.setattr("discountz.__main__.load_interests", partial(load_interests, bad))
+
+    def no_db(*_: object) -> None:
+        raise psycopg.OperationalError("sin BD")
+
+    monkeypatch.setattr("discountz.__main__._connect_with_retry", no_db)
+    assert main(["run"]) == 2
     assert "3 letras" in capsys.readouterr().err

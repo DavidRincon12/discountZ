@@ -18,7 +18,14 @@ from pydantic import SecretStr
 
 from discountz.app import cycle as cycle_module
 from discountz.app.cycle import CycleDeps, run_cycle
-from discountz.config import Settings, load_canaries, load_params, load_topics
+from discountz.config import (
+    InterestsConfig,
+    Settings,
+    load_canaries,
+    load_params,
+    load_topics,
+)
+from discountz.domain.interests import compile_interest
 from discountz.domain.money import Currency
 from discountz.domain.scheduling import plan_run
 from discountz.infra import db as repo
@@ -537,6 +544,36 @@ def test_cycle_delivers_channel_deal_card(conn: psycopg.Connection) -> None:
     ]
     assert buttons == ["Ver oferta", "Ver en el canal"]
     assert repo.get_channel_cursor(conn, "tg_cajitatech") == repo.ChannelCursor(88180, now)
+
+
+def test_cycle_sends_a_channel_deal_that_matches_an_interest(conn: psycopg.Connection) -> None:
+    """Hogar va solo por interés: el carro rodante (88180) sale con su línea 🎯 (spec del perfil
+    §3.3) y el filtro antipolvo (88178), también de Hogar, queda visto."""
+    now = datetime(2026, 10, 17, 15, 40, tzinfo=UTC)
+    conn.execute(
+        "UPDATE discountz.bot_state SET last_maintenance_on = %s, last_summary_on = %s",
+        (now.date(), now.date()),
+    )
+    repo.save_channel_cursor(conn, "tg_cajitatech", 88176, now - timedelta(hours=1))
+    page = load_fixture("telegram", "cajitatech")
+    empty = load_fixture("telegram", "cajitatech-empty")
+    base = "https://t.me/s/cajitatech?after="
+    http = FakeHttp(
+        {
+            f"{base}88176": HttpResponse(200, page.url, {}, page.body, 1),
+            f"{base}88180": HttpResponse(200, empty.url, {}, empty.body, 1),
+        }
+    )
+    cart = compile_interest("Carro rodante", "hogar", ["carro rodante"])
+    d = replace(
+        deps(conn, {"tg_cajitatech": http}, telegram()), interests=InterestsConfig(3, (cart,))
+    )
+    run_cycle(d, now)
+    rows = conn.execute(
+        "SELECT dedup_key, body_html FROM discountz.outbox WHERE purpose = 'alert' ORDER BY id"
+    ).fetchall()
+    assert [r[0] for r in rows] == ["canal:tg_cajitatech:88177", "canal:tg_cajitatech:88180"]
+    assert "🎯 Carro rodante" in rows[1][1]
 
 
 def test_cycle_marks_dealnews_feed_then_delivers_its_new_deal(conn: psycopg.Connection) -> None:
