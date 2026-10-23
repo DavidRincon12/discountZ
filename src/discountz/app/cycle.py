@@ -182,6 +182,8 @@ def _inbox(deps: CycleDeps, now: datetime) -> int:
             INBOX_SECONDS,
             sources=deps.sources,
             monotonic=deps.monotonic,
+            topics=deps.topics,
+            interests=deps.interests,
         )
     except TelegramError as exc:  # Telegram caído: el ciclo sigue sin comandos
         event(log, "inbox_unavailable", code=str(exc))

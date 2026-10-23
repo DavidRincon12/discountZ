@@ -17,6 +17,7 @@ INTEREST_TOPICS = tuple(c for c in TOPIC_CODES if c not in ("errores", "comunida
 MAX_TERMS = 10
 MAX_TERM_CHARS = 40
 MIN_WORD_LETTERS = 3  # un término de una sola palabra más corta coincidiría con cualquier cosa
+MAX_PERSONAL = 100  # intereses de /interes, además de la semilla
 
 Words = tuple[str, ...]
 

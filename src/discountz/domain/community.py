@@ -168,6 +168,12 @@ def _title_scores(title: str, index: _Index, scores: Counter[str]) -> None:
             i += 1
 
 
+def _best(scores: Counter[str], index: _Index) -> str:
+    if not scores:
+        return DEFAULT_TOPIC
+    return min(scores, key=lambda t: (-scores[t], index.order[t]))
+
+
 def assign_channel_topic(post: ChannelPost, rules: Sequence[ChannelRule]) -> str:
     """Tema con más peso entre hashtags y título; a igual peso, la regla anterior (§4.2)."""
     index = _index(tuple(rules))
@@ -176,6 +182,12 @@ def assign_channel_topic(post: ChannelPost, rules: Sequence[ChannelRule]) -> str
         if (topic := _hashtag_topic(tag, index)) is not None:
             scores[topic] += HASHTAG_WEIGHT
     _title_scores(post.title, index, scores)
-    if not scores:
-        return DEFAULT_TOPIC
-    return min(scores, key=lambda t: (-scores[t], index.order[t]))
+    return _best(scores, index)
+
+
+def topic_for_title(title: str, rules: Sequence[ChannelRule]) -> str:
+    """El tema que tendría una oferta de canal con ese título y sin hashtags (`/interes`)."""
+    index = _index(tuple(rules))
+    scores: Counter[str] = Counter()
+    _title_scores(title, index, scores)
+    return _best(scores, index)

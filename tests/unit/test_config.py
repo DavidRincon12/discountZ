@@ -376,15 +376,13 @@ def test_crawl_start_gives_up_after_the_reconnects(monkeypatch: pytest.MonkeyPat
 
 
 def test_load_topics_reads_profile_modes() -> None:
-    """Fija el perfil de `config/topics.toml` (README §17): quien cambie un `mode`, cambia esto.
-
-    Hasta que lleguen los intereses (PR 2), Hogar, Deportes y Otros siguen en tarjeta.
-    """
+    """Fija el perfil de `config/topics.toml` (README §17): quien cambie un `mode`, cambia esto."""
     modes = {code: p.mode for code, p in load_topics().params.items()}
     off = {"belleza", "mercado", "bebes", "mascotas"}
+    interest = {"hogar", "deportes", "otros"}
     assert {c for c, m in modes.items() if m == "off"} == off
-    assert {c for c, m in modes.items() if m == "interest"} == set()
-    assert {c for c, m in modes.items() if m == "card"} == set(modes) - off
+    assert {c for c, m in modes.items() if m == "interest"} == interest
+    assert {c for c, m in modes.items() if m == "card"} == set(modes) - off - interest
 
 
 def _topics_with_unknown_mode(folder: Path) -> Path:

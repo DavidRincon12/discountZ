@@ -4,16 +4,18 @@
 - v1 en producción desde el 2026-10-14 (Supabase, `DISCOUNTZ_ACTIVO=true`); cron-job.org dispara el ciclo cada ~2 min y el rastreo cada hora.
 - Rastreo de catálogo (ADR 0004): Éxito, Panamericana, Jumbo y Pepe Ganga (VTEX), Alkosto (ADR 0009) y eBay (ADR 0008, `MODEL_LOW`). Carulla y Olímpica apagadas y sin catálogo (migración 0011).
 - Canales de Telegram (ADR 0005: DescuentosTech, DescuentosHome, Clubgratis, cajitatech, OFERTU) y Amazon de Slickdeals «sin verificar» (ADR 0006). DealNews apagado (406 desde Actions). Best Buy y Walmart fuera; Amazon da CAPTCHA.
-- Perfil de temas (ADR 0013): Belleza, Mercado, Bebés y Mascotas apagados (no se rastrean ni se releen, y sus ofertas de canales quedan vistas); el resto en tarjeta. Hogar, Deportes y Otros pasan a «solo por interés» con el PR 2.
+- Perfil de temas (ADR 0013): Belleza, Mercado, Bebés y Mascotas apagados (no se rastrean ni se releen, y sus ofertas de canales quedan vistas); Hogar, Deportes y Otros solo por interés; el resto en tarjeta.
+- Intereses (esquema 12): 55 de la semilla (`config/interests.toml`) más los de `/interes`; lo que coincide sale con «🎯», sin perfil, tope de la fuente ni mínimos de precio, hasta 3 por interés al día.
 - Dos chats: el grupo (todo, temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas y resúmenes de ofertas).
-- Suite: 921 unitarias y 220 de integración en verde el 2026-10-22.
+- Suite: 962 unitarias y 241 de integración en verde el 2026-10-23.
 
 ## Último cambio
-- Rama `claude/project-thread-rmnaug` (PR 1 del perfil, sin migración): `mode` por tema en `config/topics.toml`; el rastreo salta las categorías apagadas (`CatalogPartition` + `crawl_wanted`), no las relee en la capa caliente y no confirma temas fuera de tarjeta; los canales solo envían temas en tarjeta; `check-config` valida el perfil.
+- Rama `claude/project-thread-rmnaug` (PR 2 del perfil, migración `0012`): coincidencia de intereses (`domain/interests.py`), semilla bilingüe, tope por interés en `app/held.py`, intereses en el rastreo (`CatalogObservation.title`) y en los canales, comando `/interes` y Hogar, Deportes y Otros en `interest`. Plan `docs/superpowers/plans/2026-10-22-perfil-e-intereses.md` terminado (Native).
 
 ## Siguiente paso
-- PR 2 del perfil, en Native: intereses (`/interes`, ~55 semillas en español e inglés en `config/interests.toml`, migración 0012). Empieza en la Task 6 del plan `docs/superpowers/plans/2026-10-22-perfil-e-intereses.md` (spec `docs/superpowers/specs/2026-10-22-perfil-e-intereses-design.md`); la Task 12 pasa Hogar, Deportes y Otros a `interest`. Al fusionarlo: *Actions → migrate* con `to = head` y luego `setup-bot`.
-- Después, cada una con su spec: 9to5Toys (RSS), Woot (API oficial; el secreto `WOOT_API_KEY` ya está en GitHub) y Mercado Libre (falta la app de desarrollador de David).
+- Al fusionar el PR 2: *Actions → migrate* con `to = head` (esquema 12) y luego `setup-bot`; hasta migrar, el ciclo se salta con aviso y el rastreo termina en `skipped_schema`.
+- Siguiente sub-proyecto, con su propio spec: 9to5Toys (RSS). Luego Woot (API oficial; el secreto `WOOT_API_KEY` ya está en GitHub) y Mercado Libre (falta la app de desarrollador de David).
+- Revisar la semilla con David: los términos de una palabra (`ddr5`, `ryzen`, `rtx`, `mouse`…) también marcan productos compatibles (una placa madre «… DDR5» sale como «Memoria RAM»); se corrige con `exclude` («placa madre», «motherboard»).
 - Medir la calidad 2-3 días con `/mnt/project-files/calidad-tiendas/consulta-todas.sql` (contar también `alert.delivery = 'held'` y `offer_log`) y ajustar `[pricing]`, `[cards]` o los modos si David lo pide. Contar también lo que esconde el perfil: `channel_post` con `baseline` por `topic` y `crawl_done skipped=` por tienda.
 - Ideas sin hacer: comparar por EAN con otras tiendas y botón 👎 que silencia marca o categoría. G10 en `/buscar`: `check_batch` (`domain/guards.py`) no se llama.
 

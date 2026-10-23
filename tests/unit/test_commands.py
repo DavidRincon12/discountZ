@@ -10,6 +10,9 @@ from discountz.domain.commands import (
     Drop,
     Follow,
     Help,
+    InterestAdd,
+    InterestDrop,
+    InterestList,
     ListCmd,
     Search,
     Silence,
@@ -118,4 +121,45 @@ def test_bot_menu_lists_every_command_but_temas() -> None:
         assert not (isinstance(parsed, CommandRejected) and "desconocido" in parsed.reason)
     # /temas recrearía los temas que David apagó: no va en el menú.
     assert "temas" not in names
-    assert {"seguir", "buscar", "lista", "estado", "ayuda", "fuente"} <= set(names)
+    assert {"seguir", "buscar", "lista", "estado", "ayuda", "fuente", "interes"} <= set(names)
+
+
+def test_parse_interest_list() -> None:
+    assert parse_command("/interes") == InterestList()
+
+
+def test_parse_interest_add_with_synonyms_and_topic() -> None:
+    assert parse_command("/interes rtx 5070, rtx5070 #tecnologia") == InterestAdd(
+        "rtx 5070", ("rtx 5070", "rtx5070"), "tecnologia"
+    )
+    assert parse_command("/interes Kindle") == InterestAdd("Kindle", ("Kindle",), None)
+    assert parse_command("/interes #Ferretería taladro,  pulidora ,") == InterestAdd(
+        "taladro", ("taladro", "pulidora"), "ferreteria"
+    )
+
+
+def test_parse_interest_drop() -> None:
+    assert parse_command("/interes quitar 57") == InterestDrop(57)
+
+
+def test_parse_interest_rejects_bad_terms() -> None:
+    assert isinstance(parse_command("/interes ti"), CommandRejected)
+    eleven = ", ".join(f"t{i:03}" for i in range(11))
+    assert isinstance(parse_command(f"/interes {eleven}"), CommandRejected)
+    assert isinstance(parse_command("/interes " + "x" * 41), CommandRejected)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "/interes ,",
+        "/interes ssd #juegos",
+        "/interes ssd #errores",
+        "/interes ssd #tecnologia #hogar",
+        "/interes quitar",
+        "/interes quitar 0",
+        "/interes quitar tres",
+    ],
+)
+def test_parse_interest_rejects_bad_shapes(text: str) -> None:
+    assert isinstance(parse_command(text), CommandRejected)

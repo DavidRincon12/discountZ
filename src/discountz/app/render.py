@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from discountz.domain.community import ChannelPost
+from discountz.domain.interests import Interest
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money, format_money
 from discountz.infra.db import CatalogDaily, HeldOffer, SearchItem, StatusSnapshot, WatchItem
@@ -617,6 +618,42 @@ def render_held_digest(rows: Sequence[HeldOffer], daily_cards: int) -> list[str]
             if visible_length("\n".join([*current, *block])) > MAX_VISIBLE:
                 bodies.append("\n".join(current))
                 block = [heading[1] if heading else f"<b>{name}</b> (sigue)", line]
+                current = []
+            current.extend(block)
+            heading = []
+    bodies.append("\n".join(current))
+    return bodies
+
+
+INTERESTS_EMPTY = "No hay intereses. Agrega uno: /interes frase, sinónimo… [#tema]"
+
+
+def render_interests(items: Sequence[tuple[int, Interest]], titles: Mapping[str, str]) -> list[str]:
+    """`/interes`: con su número y por tema, en el orden en que aparecen (la semilla va agrupada
+    por tema); 🌱 marca los de la lista base. Mensajes de 4.096 visibles, como el resumen."""
+    if not items:
+        return [INTERESTS_EMPTY]
+    groups: dict[str, list[str]] = {}
+    for number, interest in items:
+        mark = "🌱 " if interest.personal_id is None else ""
+        groups.setdefault(interest.topic, []).append(f"{number}. {mark}{esc(interest.name)}")
+    seeds = sum(1 for _, i in items if i.personal_id is None)
+    mine = len(items) - seeds
+    current = [
+        f"🎯 <b>Intereses</b> · {seeds} de la lista base (🌱) y {mine} "
+        f"tuyo{'' if mine == 1 else 's'}",
+        "<i>Agrega uno: /interes frase, sinónimo… [#tema] · quita uno tuyo: "
+        "/interes quitar &lt;n&gt;</i>",
+    ]
+    bodies: list[str] = []
+    for code, lines in groups.items():
+        title = f"<b>{esc(titles.get(code, code))}</b>"
+        heading = ["", title]
+        for line in lines:
+            block = [*heading, line]
+            if visible_length("\n".join([*current, *block])) > MAX_VISIBLE:
+                bodies.append("\n".join(current))
+                block = [title if heading else f"{title} (sigue)", line]
                 current = []
             current.extend(block)
             heading = []

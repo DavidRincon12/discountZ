@@ -177,12 +177,22 @@ Desde el 22 de octubre de 2026 llegan menos ofertas y mejores (ADR 0012):
 
 Desde el 22 de octubre de 2026 cada tema tiene un modo (ADR 0013), en `mode` de `config/topics.toml`:
 
-- **En tarjeta** (`card`): Tecnología, Electrodomésticos, Ferretería y autos, Moda y calzado, y Libros y papelería. Llegan como antes, igual que las alertas de Comunidad EE. UU. (Slickdeals). Por ahora también Hogar y muebles, Deportes y Otros: pasan a «solo por interés» cuando lleguen los intereses (`/interes`).
-- **Solo por interés** (`interest`): se rastrean, pero solo llega lo que coincida con un interés.
+- **En tarjeta** (`card`): Tecnología, Electrodomésticos, Ferretería y autos, Moda y calzado, y Libros y papelería. Llegan como antes, igual que las alertas de Comunidad EE. UU. (Slickdeals).
+- **Solo por interés** (`interest`): Hogar y muebles, Deportes y Otros. Se rastrean, pero solo llega lo que coincida con un interés (paso 18).
 - **Apagados** (`off`): Belleza y cuidado, Mercado, Bebés y juguetes, y Mascotas. Sus categorías no se rastrean en las tiendas ni en eBay, y sus ofertas de canales y feeds quedan vistas sin enviarse. Un error de precio sigue el modo del tema del producto: el de un producto de belleza tampoco llega.
 
 1. **Nada que correr.** No hay migración. El perfil rige desde el primer ciclo después de fusionar; en el rastreo, desde la siguiente vuelta de cada tienda (la que va en curso termina con sus categorías).
 2. **Cambiar el perfil.** Edita `mode` en `config/topics.toml` y también `test_load_topics_reads_profile_modes` en `tests/unit/test_config.py`, que fija el perfil (sin ese cambio el CI queda en rojo); luego fusiona. `/seguir` y `/buscar` no pasan por el perfil.
+
+### 18. Intereses
+
+Un interés es una lista de frases, en español y en inglés. Si una aparece en el título de una oferta (palabras seguidas, sin importar mayúsculas, tildes ni plural), la oferta llega en tarjeta con la línea «🎯 nombre del interés» aunque su tema esté en «solo por interés», aunque la fuente ya haya enviado sus 8 tarjetas del día y sin los mínimos de precio y de ahorro. Sigue exigiendo un descuento real contra el histórico. Llegan hasta 3 tarjetas por interés al día; las demás van al resumen de las 21:00.
+
+1. **Al fusionar.** *Actions → migrate → Run workflow* con `to = head` (esquema 12) y luego *Actions → setup-bot*, para ver `/interes` en el menú. Mientras no migres, el ciclo avisa que hay una migración pendiente y no procesa.
+2. **La lista base.** 55 intereses de tecnología, herramientas, papelería, ropa, hogar y deportes en `config/interests.toml`. Se cambian con un PR; `check-config` revisa el archivo.
+3. **Ver la lista.** `/interes` la muestra por tema y con número; 🌱 marca los de la lista base.
+4. **Agregar uno tuyo.** `/interes rtx 5070, rtx5070 #tecnologia`: la primera frase es el nombre y todas las frases separadas por coma cuentan. Sin `#tema`, el tema sale de las palabras, como en los canales. Hasta 100 intereses tuyos, 10 frases por interés y 40 caracteres por frase; una frase de una sola palabra necesita al menos 3 letras.
+5. **Quitar uno tuyo.** `/interes quitar 57`, con el número de la lista. Los números no se corren al quitar otro interés.
 
 ### Si algo falla
 

@@ -26,6 +26,7 @@ from discountz.app.render import (
     render_daily,
     render_health,
     render_held_digest,
+    render_interests,
     render_list,
     render_storm,
     render_summary,
@@ -33,6 +34,7 @@ from discountz.app.render import (
     visible_length,
 )
 from discountz.domain.community import ChannelPost
+from discountz.domain.interests import compile_interest
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
@@ -777,3 +779,44 @@ def test_held_digest_splits_into_messages_that_fit() -> None:
 def test_held_digest_of_one_offer_says_so_in_singular() -> None:
     (body,) = render_held_digest([_held("exito", 2000, "• x")], 8)
     assert body.startswith("🌙 <b>Resumen de la noche</b> · 1 oferta\n")
+
+
+INTEREST_TITLES = {"tecnologia": "📱 Tecnología", "hogar": "🛋️ Hogar y muebles"}
+
+
+def test_interest_list_groups_by_topic_and_marks_seeds() -> None:
+    monitor = compile_interest("Monitor", "tecnologia", ["monitor"])
+    desk = compile_interest("Escritorio <alto>", "hogar", ["escritorio"])
+    mine = compile_interest("rtx 5070", "tecnologia", ["rtx 5070"], personal_id=1)
+    assert render_interests([(1, monitor), (2, desk), (56, mine)], INTEREST_TITLES) == [
+        "🎯 <b>Intereses</b> · 2 de la lista base (🌱) y 1 tuyo\n"
+        "<i>Agrega uno: /interes frase, sinónimo… [#tema] · quita uno tuyo: "
+        "/interes quitar &lt;n&gt;</i>\n"
+        "\n"
+        "<b>📱 Tecnología</b>\n"
+        "1. 🌱 Monitor\n"
+        "56. rtx 5070\n"
+        "\n"
+        "<b>🛋️ Hogar y muebles</b>\n"
+        "2. 🌱 Escritorio &lt;alto&gt;"
+    ]
+
+
+def test_interest_list_splits_at_the_telegram_limit() -> None:
+    seeds = [(n, compile_interest(f"Semilla {n:02}", "tecnologia", ["abc"])) for n in range(1, 56)]
+    mine = [
+        (55 + i, compile_interest("n" * 37 + f"{i:03}", "hogar", ["abc"], personal_id=i))
+        for i in range(1, 101)
+    ]
+    bodies = render_interests([*seeds, *mine], INTEREST_TITLES)
+    assert len(bodies) > 1
+    assert all(visible_length(b) <= MAX_VISIBLE for b in bodies)
+    assert all(b.startswith("<b>") for b in bodies[1:])  # cada mensaje dice de qué tema sigue
+    text = "\n".join(bodies)
+    assert all(f"\n{n}. " in text for n, _ in [*seeds, *mine])
+
+
+def test_interest_list_without_interests() -> None:
+    assert render_interests([], INTEREST_TITLES) == [
+        "No hay intereses. Agrega uno: /interes frase, sinónimo… [#tema]"
+    ]
