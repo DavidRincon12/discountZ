@@ -5,6 +5,7 @@ en el día de Bogotá; los errores de precio no cuentan. Una bajada o un error d
 misma tienda, tema y clase, con el ahorro a ±0,5 % de otro que ya salió en tarjeta en 24 h, es
 la misma promoción (tallas, colores, tonos) y tampoco sale en tarjeta. Lo que saca un interés
 no usa el tope de la fuente sino el suyo: `per_interest` tarjetas al día (spec del perfil §3.3).
+Con ese tope lleno, lo que también saldría sin el interés (`Slot.standalone`) usa el de la fuente.
 Lo retenido llega en el primer ciclo después de las 21:00 en un resumen con una línea por oferta.
 """
 
@@ -43,6 +44,7 @@ class Slot:
     kind: AlertKind
     drop_bp: int | None  # ahorro frente al «antes»; None en los canales
     interest: str | None = None  # el interés que la saca: su tope reemplaza al de la fuente
+    standalone: bool = False  # con interés: saldría sin él (tema en tarjeta y con los mínimos)
 
 
 def admit(
@@ -54,7 +56,7 @@ def admit(
     per_interest: int = 3,
 ) -> bool:
     """¿Sale en tarjeta? La registra: en tarjeta, o retenida con `line` para el resumen."""
-    reason = _hold_reason(conn, slot, now, daily_cards, per_interest)
+    reason, interest = _hold_reason(conn, slot, now, daily_cards, per_interest)
     entry = db.OfferEntry(
         slot.source,
         local(now).date(),
@@ -62,7 +64,7 @@ def admit(
         slot.kind.value,
         slot.drop_bp,
         None if reason is None else line,
-        slot.interest,
+        interest,
     )
     db.log_offer(conn, entry, now)
     if reason is not None:
@@ -72,7 +74,12 @@ def admit(
 
 def _hold_reason(
     conn: psycopg.Connection, slot: Slot, now: datetime, daily_cards: int, per_interest: int
-) -> str | None:
+) -> tuple[str | None, str | None]:
+    """Por qué se retiene (None: sale en tarjeta) y el interés cuyo tope usa.
+
+    Con el tope del interés lleno, lo que saldría sin él pasa al tope de la fuente y cuenta para
+    ella: un interés nunca le quita la tarjeta a una oferta del perfil (revisión final del PR 2).
+    """
     if (
         slot.kind in PROMO_KINDS
         and slot.drop_bp is not None
@@ -86,17 +93,18 @@ def _hold_reason(
             PROMO_TOL_BP,
         )
     ):
-        return "promotion"
+        return "promotion", slot.interest
     if slot.kind is AlertKind.PRICE_ERROR:
-        return None
+        return None, slot.interest
     day = local(now).date()
     if slot.interest is not None:
-        if db.count_interest_cards(conn, slot.interest, day) >= per_interest:
-            return "interest_cap"
-        return None
+        if db.count_interest_cards(conn, slot.interest, day) < per_interest:
+            return None, slot.interest
+        if not slot.standalone:
+            return "interest_cap", slot.interest
     if db.count_cards(conn, slot.source, day) >= daily_cards:
-        return "daily_cap"
-    return None
+        return "daily_cap", None
+    return None, None
 
 
 def _cutoff(now: datetime) -> datetime:

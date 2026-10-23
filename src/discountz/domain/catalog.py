@@ -107,7 +107,7 @@ def _candidate(
     u, p = state.usual_minor, obs.price.minor
     if u is None or p >= u or topic.t_bp is None or topic.g_bp is None:
         return None
-    if now - state.first_seen_at < WARMUP or (floors and not _worth(u, obs, glob)):
+    if now - state.first_seen_at < WARMUP or (floors and not _worth(u, obs.price, glob)):
         return None
     drop_bp = (u - p) * 10_000 // u
     kind: AlertKind | None = None
@@ -121,13 +121,19 @@ def _candidate(
     return CatalogCandidate(kind, obs.price, Money(u, obs.price.currency), drop_bp, days)
 
 
-def _worth(reference: int, obs: CatalogObservation, glob: GlobalParams) -> bool:
+def meets_floors(cand: CatalogCandidate, glob: GlobalParams) -> bool:
+    """¿Pasa los mínimos? Lo que coincide con un interés se detecta sin ellos (spec del perfil
+    §3.3); con su tope lleno, solo lo que los pasa usa el tope de la fuente."""
+    return _worth(cand.usual.minor, cand.price, glob)
+
+
+def _worth(reference: int, price: Money, glob: GlobalParams) -> bool:
     """Producto de al menos `min_price` y ahorro de al menos `catalog_min_saving` (calidad de las
     ofertas, 2026-10-22: lo barato era mercado y bagatelas)."""
-    currency = obs.price.currency
+    currency = price.currency
     return (
         reference >= glob.min_price[currency]
-        and reference - obs.price.minor >= glob.catalog_min_saving[currency]
+        and reference - price.minor >= glob.catalog_min_saving[currency]
     )
 
 
@@ -192,7 +198,7 @@ def model_candidate(
     if len(peers) < MIN_PEERS or topic.t_bp is None or topic.g_bp is None:
         return None
     median, p = median_low(peers), obs.price.minor
-    if p >= median or (floors and not _worth(median, obs, glob)):
+    if p >= median or (floors and not _worth(median, obs.price, glob)):
         return None
     drop_bp = (median - p) * 10_000 // median
     kind: AlertKind | None = None

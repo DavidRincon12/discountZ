@@ -348,12 +348,12 @@ def _handle(
     topic = assign_channel_topic(post, step.topics.channel_rules)
     hit = match_interest(post.title, step.interests)
     interest = hit.name if hit is not None else None  # salta el perfil y el casillero (§3.3)
-    if interest is None and step.topics.params[topic].mode != "card":  # fuera del perfil
-        _mark(step, code, post, topic)  # (ADR 0013): solo queda vista
-        tally.skipped += 1
-        return
-    if interest is None and post.casillero and not _worth_by_casillero(post, topic, step.min_price):
-        _mark(step, code, post, topic)
+    # Sin interés sale solo lo del perfil (ADR 0013) y, por casillero, lo que compensa.
+    alone = step.topics.params[topic].mode == "card" and (
+        not post.casillero or _worth_by_casillero(post, topic, step.min_price)
+    )
+    if interest is None and not alone:
+        _mark(step, code, post, topic)  # solo queda vista
         tally.skipped += 1
         return
     dup = find_duplicate(post, step.recent)
@@ -376,7 +376,7 @@ def _handle(
         return
     if not inserted:
         return
-    slot = Slot(code, topic, AlertKind.COMMUNITY_DEAL, None, interest)
+    slot = Slot(code, topic, AlertKind.COMMUNITY_DEAL, None, interest, alone)
     line = held_channel_line(post)
     if admit(conn, slot, now, step.daily_cards, line, step.interest_cap):
         msg = render_channel_deal(post, topic, interest)

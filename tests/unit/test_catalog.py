@@ -12,9 +12,11 @@ from hypothesis import strategies as st
 from discountz.domain.catalog import (
     MIN_PEERS,
     MIN_READS,
+    CatalogCandidate,
     CatalogObservation,
     CatalogState,
     median_low,
+    meets_floors,
     model_candidate,
     observe,
     split_price_band,
@@ -370,3 +372,16 @@ def test_model_candidate_without_floors_skips_the_minimum_saving() -> None:
     cand = model_candidate(None, T0, usd(600), [1_000] * 5, TECH, GLOB, floors=False)
     assert cand is not None
     assert cand.kind is AlertKind.MODEL_LOW
+
+
+def test_meets_floors_needs_the_min_price_and_the_min_saving() -> None:
+    """Lo que saldría sin un interés: «antes» de 100.000 y ahorro de 30.000 como mínimo."""
+
+    def cand(price: int, usual: int) -> CatalogCandidate:
+        cop = Currency.COP
+        return CatalogCandidate(AlertKind.CATALOG_DROP, Money(price, cop), Money(usual, cop), 0, 5)
+
+    assert meets_floors(cand(119_900, 199_900), PROD)
+    assert meets_floors(cand(70_000, 100_000), PROD)  # justo en los dos mínimos
+    assert not meets_floors(cand(59_900, 79_900), PROD)  # «antes» bajo el mínimo
+    assert not meets_floors(cand(180_000, 199_900), PROD)  # ahorro de 19.900

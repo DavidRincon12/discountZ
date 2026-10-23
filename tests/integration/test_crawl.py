@@ -1110,3 +1110,53 @@ def test_interest_match_skips_the_price_floor(db: psycopg.Connection) -> None:
     assert count(db, "alert") == 1
     (row,) = repo.claim_outbox(db, 10, T)
     assert row.card is not None and row.card["interest"] == "Multímetro"
+
+
+def fill_interest_cap(conn: psycopg.Connection, name: str, topic: str) -> None:
+    """Las 3 tarjetas del día del interés ya salieron de otra tienda."""
+    for i in range(3):
+        drop = 1000 + 100 * i
+        admit(conn, Slot("panamericana", topic, AlertKind.CATALOG_DROP, drop, name), T, 8, "• x")
+
+
+def test_full_interest_cap_leaves_a_card_topic_offer_to_the_source_cap(
+    db: psycopg.Connection,
+) -> None:
+    """Tecnología va en tarjeta y el multímetro pasa los mínimos: sale aunque su interés ya
+    gastó el tope, y cuenta para el tope de la tienda."""
+    fill_interest_cap(db, "Multímetro", "tecnologia")
+    seed_history(db, "123", 199_900)
+    meter = titled("123", 119_900, "Multímetro Digital UNI-T")
+    src = FakeCatalog({"C:/1/": [[meter]]}, offers={"123": offer("123", 119_900)})
+    d, _ = deps(db, src, Clock(), interests=(METER,))
+    assert run_crawl(d, T, minutes=60).alerts == 1
+    (row,) = repo.claim_outbox(db, 10, T)
+    assert row.card is not None and row.card["interest"] == "Multímetro"
+    last = "SELECT source, interest FROM discountz.offer_log ORDER BY id DESC"
+    assert db.execute(last).fetchone() == ("exito", None)
+
+
+def test_full_interest_cap_holds_an_offer_only_the_interest_brings(
+    db: psycopg.Connection,
+) -> None:
+    """Hogar va solo por interés: sin cupo en el interés, la silla espera al resumen."""
+    fill_interest_cap(db, "Silla de oficina", "hogar")
+    seed_history(db, "123", 199_900)
+    chair = titled("123", 119_900, "Silla Ergonómica Negra", "/Hogar/Muebles/")
+    src = FakeCatalog({"C:/1/": [[chair]]}, offers={"123": offer("123", 119_900)})
+    d, _ = deps(db, src, Clock(), interests=(SILLA,))
+    assert run_crawl(d, T, minutes=60).alerts == 0
+    assert db.execute("SELECT delivery FROM discountz.alert").fetchone() == ("held",)
+
+
+def test_full_interest_cap_holds_a_card_topic_offer_below_the_floors(
+    db: psycopg.Connection,
+) -> None:
+    """Bajo el precio mínimo solo la saca el interés: sin cupo en él, espera al resumen."""
+    fill_interest_cap(db, "Multímetro", "tecnologia")
+    seed_history(db, "123", 79_900)
+    meter = titled("123", 59_900, "Multímetro Digital UNI-T")
+    src = FakeCatalog({"C:/1/": [[meter]]}, offers={"123": offer("123", 59_900)})
+    d, _ = deps(db, src, Clock(), interests=(METER,))
+    assert run_crawl(d, T, minutes=60).alerts == 0
+    assert db.execute("SELECT delivery FROM discountz.alert").fetchone() == ("held",)

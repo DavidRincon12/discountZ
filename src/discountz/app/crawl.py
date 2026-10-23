@@ -31,6 +31,7 @@ from discountz.domain.catalog import (
     CatalogCandidate,
     CatalogObservation,
     CatalogState,
+    meets_floors,
     model_candidate,
     observe,
 )
@@ -581,7 +582,9 @@ class _Run:
             if alert_id is None or delivery != "new":
                 return
             card = _card(self.code, f.topic, title, url, facts, cand, f.peers, f.interest)
-            slot = Slot(self.code, f.topic, kind, cand.drop_bp, f.interest)
+            # Con el tope del interés lleno, lo que también saldría sin él usa el de la tienda.
+            alone = topic.mode == "card" and meets_floors(cand, self.deps.params.glob)
+            slot = Slot(self.code, f.topic, kind, cand.drop_bp, f.interest, alone)
             cards, per_interest = self.deps.params.daily_cards, self.deps.interest_cap
             line = held_catalog_line(card)
             if not admit(self.conn, slot, self.now, cards, line, per_interest):

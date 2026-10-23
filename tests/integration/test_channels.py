@@ -13,11 +13,13 @@ import pytest
 
 from discountz.app.channels import ChannelsResult, due_channels, run_channels
 from discountz.app.collect import SourceRun
+from discountz.app.held import Slot, admit
 from discountz.config import Topics, load_params
 from discountz.domain.community import ChannelPost
 from discountz.domain.errors import ParseError
 from discountz.domain.health import BreakerState, effective_state
 from discountz.domain.interests import Interest, compile_interest
+from discountz.domain.model import AlertKind
 from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
 from discountz.infra import db as repo
@@ -487,6 +489,48 @@ def test_duplicate_interest_post_is_not_resent(db: psycopg.Connection) -> None:
     result = run(db, *fakes, topics=PROFILE, interests=(DESK,))
     assert [k for k, _, _ in outbox(db)] == ["canal:tg_clubgratis:59510"]
     assert (result.sent, result.duplicates) == (1, 1)
+
+
+def fill_interest_cap(conn: psycopg.Connection, name: str, topic: str) -> None:
+    """Las 3 tarjetas del día del interés ya salieron de otra fuente."""
+    for i in range(3):
+        slot = Slot("exito", topic, AlertKind.CATALOG_DROP, 1000 + 100 * i, name)
+        admit(conn, slot, T, PARAMS.daily_cards, "• x")
+
+
+def test_full_interest_cap_leaves_a_card_topic_post_to_the_source_cap(
+    db: psycopg.Connection,
+) -> None:
+    """Ferretería va en tarjeta: el multímetro sale aunque su interés ya gastó el tope."""
+    code = "tg_descuentostech"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    fill_interest_cap(db, "Multímetro", "ferreteria")
+    meter = deal(code, 101, title="Multímetro digital UNI-T", hashtags=("herramientas",))
+    result = run(db, FakeChannel(code, [page(meter)]), topics=PROFILE, interests=(METER,))
+    assert outbox(db) == [(f"canal:{code}:101", "ferreteria", "community_deal")]
+    assert result.sent == 1
+    last = "SELECT source, interest FROM discountz.offer_log ORDER BY id DESC"
+    assert db.execute(last).fetchone() == (code, None)  # cuenta para el tope del canal
+
+
+def test_full_interest_cap_holds_a_post_only_the_interest_brings(db: psycopg.Connection) -> None:
+    """Hogar va solo por interés: sin cupo en el interés, el escritorio espera al resumen."""
+    code = "tg_descuentoshome"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    fill_interest_cap(db, "Escritorio", "hogar")
+    desk = deal(code, 101, title="Escritorio elevable eléctrico", hashtags=("hogar",))
+    result = run(db, FakeChannel(code, [page(desk)]), topics=PROFILE, interests=(DESK,))
+    assert (result.sent, result.held) == (0, 1)
+
+
+def test_full_interest_cap_holds_a_cheap_casillero_post(db: psycopg.Connection) -> None:
+    """Por casillero a US$19 solo la saca el interés: sin cupo en él, espera al resumen."""
+    code = "tg_descuentostech"
+    repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
+    fill_interest_cap(db, "Multímetro", "ferreteria")
+    meter = deal(code, 101, title="AstroAI Digital Multimeter", price=1900, casillero=True)
+    result = run(db, FakeChannel(code, [page(meter)]), interests=(METER,))
+    assert (result.sent, result.held) == (0, 1)
 
 
 # ───────────── Feeds sin orden de ids (DealNews y Slickdeals Amazon)
