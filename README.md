@@ -179,8 +179,8 @@ Desde el 22 de octubre de 2026 llegan menos ofertas y mejores (ADR 0012):
 
 Desde el 22 de octubre de 2026 cada tema tiene un modo (ADR 0013), en `mode` de `config/topics.toml`:
 
-- **En tarjeta** (`card`): Tecnología, Electrodomésticos, Ferretería y autos, Moda y calzado, y Libros y papelería. Llegan como antes, igual que las alertas de Comunidad EE. UU. (Slickdeals).
-- **Solo por interés** (`interest`): Hogar y muebles, Deportes y Otros. Se rastrean, pero solo llega lo que coincida con un interés (paso 18).
+- **En tarjeta** (`card`): Tecnología, Electrodomésticos, Hogar y muebles, Deportes, Ferretería y autos, Moda y calzado, Libros y papelería y Otros. Llegan como antes, igual que las alertas de Comunidad EE. UU. (Slickdeals).
+- **Solo por interés** (`interest`): ninguno por ahora (Hogar y muebles, Deportes y Otros pasaron a tarjeta el 23 de octubre). Un tema en este modo se rastrea, pero solo llega lo que coincida con un interés (paso 18).
 - **Apagados** (`off`): Belleza y cuidado, Mercado, Bebés y juguetes, y Mascotas. Sus categorías no se rastrean en las tiendas ni en eBay, y sus ofertas de canales y feeds quedan vistas sin enviarse. Un error de precio sigue el modo del tema del producto: el de un producto de belleza tampoco llega.
 
 1. **Nada que correr.** No hay migración. El perfil rige desde el primer ciclo después de fusionar; en el rastreo, desde la siguiente vuelta de cada tienda (la que va en curso termina con sus categorías).
