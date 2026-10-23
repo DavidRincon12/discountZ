@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
+from pydantic import SecretStr
 
 from discountz.app.channels import ChannelsResult, due_channels, run_channels
 from discountz.app.collect import SourceRun
@@ -24,7 +25,7 @@ from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
 from discountz.infra import db as repo
 from discountz.infra.http import FakeHttp, HttpResponse, PacedClient
-from discountz.sources.base import ChannelPage, SourceContext, SourceDescriptor
+from discountz.sources.base import ChannelPage, NoCredentials, SourceContext, SourceDescriptor
 from discountz.sources.blocks import detect_block_common
 from discountz.sources.registry import load_all
 from tests.profiles import all_cards, spec_profile
@@ -292,6 +293,7 @@ def test_channel_due_every_three_minutes(db: psycopg.Connection) -> None:
         "tg_ofertu",
         "dealnews",
         "slickdeals_amazon",
+        "woot",
     }
     repo.save_channel_cursor(db, "tg_cajitatech", 100, T)
     assert "tg_cajitatech" not in due(T + timedelta(minutes=2))
@@ -641,12 +643,37 @@ def test_unordered_first_read_without_deals_sets_no_baseline(db: psycopg.Connect
 
 def test_channel_waits_for_its_budget_interval(db: psycopg.Connection) -> None:
     def due(now: datetime) -> set[str]:
-        feeds = {"dealnews", "slickdeals_amazon"}
+        feeds = {"dealnews", "slickdeals_amazon", "woot"}
         return feeds & set(
             due_channels(db, load_all(), PARAMS.budgets, {}, now, PARAMS.channel_interval)
         )
 
-    for code in ("dealnews", "slickdeals_amazon"):
+    for code in ("dealnews", "slickdeals_amazon", "woot"):
         repo.save_channel_cursor(db, code, 1, T)
     assert due(T + timedelta(minutes=10)) == {"dealnews"}  # Slickdeals: cada 30 min
-    assert due(T + timedelta(minutes=30)) == {"dealnews", "slickdeals_amazon"}
+    assert due(T + timedelta(minutes=15)) == {"dealnews", "woot"}  # Woot: cada 15 min
+    assert due(T + timedelta(minutes=30)) == {"dealnews", "slickdeals_amazon", "woot"}
+
+
+@dataclass
+class _KeyedChannel(FakeChannel):
+    """Canal que, como Woot, pide su clave a las credenciales del ciclo."""
+
+    keys: list[str] = field(default_factory=list)
+
+    def fetch_posts(self, ctx: SourceContext, after_id: int | None) -> ChannelPage:
+        self.keys.append(ctx.credentials.bearer("woot").get_secret_value())
+        return super().fetch_posts(ctx, after_id)
+
+
+class _WootKey(NoCredentials):
+    def bearer(self, provider: str) -> SecretStr:
+        return SecretStr(f"clave-{provider}")
+
+
+def test_channels_receive_the_cycle_credentials(db: psycopg.Connection) -> None:
+    fake = _KeyedChannel("woot", [page(deal("woot", 1))])
+    run_channels(
+        db, [run_for(fake)], T, PARAMS, TOPICS, random.Random(1), 1e9, credentials=_WootKey()
+    )
+    assert fake.keys == ["clave-woot"]
