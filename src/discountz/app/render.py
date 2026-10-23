@@ -54,6 +54,7 @@ SOURCE_NAMES = {
     "dealnews": "DealNews",
     "slickdeals_amazon": "Slickdeals",
     "ebay_us": "eBay",
+    "woot": "Woot",
 }
 
 _HEADERS = {
