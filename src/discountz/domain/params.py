@@ -35,7 +35,7 @@ def _min_abs() -> Mapping[Currency, int]:
 
 
 def _min_price() -> Mapping[Currency, int]:
-    return MappingProxyType({Currency.COP: 100_000, Currency.USD: 2_500})
+    return MappingProxyType({Currency.COP: 100_000, Currency.USD: 1_000})
 
 
 def _catalog_min_saving() -> Mapping[Currency, int]:

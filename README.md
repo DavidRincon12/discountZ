@@ -168,8 +168,8 @@ Las dos están en VTEX, como Éxito y Olímpica, y se leen igual (sin secretos n
 
 Desde el 22 de octubre de 2026 llegan menos ofertas y mejores (ADR 0012):
 
-- **Rastreo de tiendas y eBay.** El «antes» cuesta al menos 100.000 COP o US$25 y el ahorro es de al menos 30.000 COP o US$5. Mercado no alerta. Un «error de precio» necesita los mismos 3 días de historia y solo vale para productos de la tienda, no del marketplace.
-- **Casillero.** «🇺🇸 Compra por casillero» sale siempre en eBay, Slickdeals, DealNews, 9to5Toys y Woot, y en los canales de Telegram solo si la publicación lo dice: lo de Amazon en esos canales suele enviar directo a Colombia. Lo que llega por casillero con precio menor a US$25, o de mercado, no se envía; lo que envía directo no tiene ese filtro.
+- **Rastreo de tiendas y eBay.** El «antes» cuesta al menos 100.000 COP o US$10 y el ahorro es de al menos 30.000 COP o US$5. Mercado no alerta. Un «error de precio» necesita los mismos 3 días de historia y solo vale para productos de la tienda, no del marketplace.
+- **Casillero.** «🇺🇸 Compra por casillero» sale siempre en eBay, Slickdeals, DealNews, 9to5Toys y Woot, y en los canales de Telegram solo si la publicación lo dice: lo de Amazon en esos canales suele enviar directo a Colombia. Lo que llega por casillero con precio menor a US$10, o de mercado, no se envía; lo que envía directo no tiene ese filtro.
 - **Tope diario.** Cada fuente manda en tarjeta sus primeras 8 ofertas del día (hora de Bogotá); los errores de precio no cuentan. En las tiendas, las demás tallas o colores de una misma promoción (mismo tema y descuento a ±0,5 % en 24 h) tampoco salen en tarjeta. Lo demás llega a las 21:00 en el «Resumen de la noche», una línea por oferta, por fuente y de mayor a menor ahorro.
 
 1. **Migración `0010`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala. Mientras no corra, el ciclo y el rastreo se saltan con aviso.
@@ -202,7 +202,7 @@ Woot (de Amazon) vende con descuento por pocos días. El ciclo lee sus categorí
 
 1. **Clave.** El secreto `WOOT_API_KEY` ya está en *Settings → Secrets and variables → Actions*; el ciclo lo pasa como `DISCOUNTZ_WOOT_API_KEY`. Sin él, Woot queda no disponible y su breaker lo pausa.
 2. **Migración `0014`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head`. Mientras no corra, el ciclo se salta con aviso.
-3. **Nada más.** La primera lectura solo marca lo que hay. Desde la siguiente, cada oferta nueva llega como tarjeta «📣 Visto en Woot · sin verificar» con «🇺🇸 Compra por casillero» y el botón «Ver en Woot». Solo pasan las nuevas que se pueden comprar en la web (sin agotadas, reacondicionadas ni las de la app) y, como todo lo de casillero, desde US$25. Para apagarlo: `/fuente off woot`.
+3. **Nada más.** La primera lectura solo marca lo que hay. Desde la siguiente, cada oferta nueva llega como tarjeta «📣 Visto en Woot · sin verificar» con «🇺🇸 Compra por casillero» y el botón «Ver en Woot». Solo pasan las nuevas que se pueden comprar en la web (sin agotadas, reacondicionadas ni las de la app) y, como todo lo de casillero, desde US$10. Para apagarlo: `/fuente off woot`.
 
 ### Si algo falla
 

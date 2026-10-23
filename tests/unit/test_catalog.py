@@ -261,8 +261,8 @@ def test_model_candidate_marketplace_price_error_is_none() -> None:
 
 
 def test_model_candidate_median_below_min_price_is_none() -> None:
-    assert model_candidate(None, T0, usd(1_600), [2_400] * 5, TECH, PROD) is None  # US$24
-    assert model_candidate(None, T0, usd(1_600), [2_500] * 5, TECH, PROD) is not None
+    assert model_candidate(None, T0, usd(400), [900] * 5, TECH, PROD) is None  # US$9
+    assert model_candidate(None, T0, usd(400), [1_000] * 5, TECH, PROD) is not None
 
 
 def test_model_candidate_no_threshold_topic() -> None:

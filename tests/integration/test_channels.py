@@ -386,11 +386,11 @@ def test_past_the_daily_cap_the_deal_waits_for_the_digest(db: psycopg.Connection
 
 
 def test_casillero_deal_under_min_price_is_not_sent(db: psycopg.Connection) -> None:
-    """Por casillero, menos de US$25 no compensa; lo que envía directo a Colombia sí pasa."""
+    """Por casillero, menos de US$10 no compensa; lo que envía directo a Colombia sí pasa."""
     code = "tg_descuentostech"
     repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
-    cheap = deal(code, 101, price=2499, casillero=True)
-    keyboard = deal(code, 102, price=2500, title="Teclado mecánico", casillero=True)
+    cheap = deal(code, 101, price=999, casillero=True)
+    keyboard = deal(code, 102, price=1000, title="Teclado mecánico", casillero=True)
     direct = deal(code, 103, price=800, title="Mouse inalámbrico")
     result = run(db, FakeChannel(code, [page(cheap, keyboard, direct)]))
     assert [k for k, _, _ in outbox(db)] == [f"canal:{code}:102", f"canal:{code}:103"]
@@ -413,7 +413,7 @@ def test_filtered_deal_is_kept_as_seen_and_not_an_original(db: psycopg.Connectio
     que envía directo."""
     code = "slickdeals_amazon"
     repo.save_channel_cursor(db, code, 1, T - timedelta(minutes=10))
-    knives = page(deal(code, 400, casillero=True))
+    knives = page(deal(code, 400, price=900, casillero=True))
     assert run(db, FakeChannel(code, [knives])).skipped == 1
     assert repo.channel_post_ids(db, code, [400]) == {400}
     later = T + timedelta(minutes=30)
@@ -471,11 +471,11 @@ def test_interest_post_in_a_non_card_topic_is_sent(db: psycopg.Connection) -> No
 
 
 def test_interest_post_skips_the_casillero_floor(db: psycopg.Connection) -> None:
-    """Por casillero a US$19 no compensa, salvo que coincida con un interés."""
+    """Por casillero a US$9 no compensa, salvo que coincida con un interés."""
     code = "tg_descuentostech"
     repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
-    meter = deal(code, 101, title="AstroAI Digital Multimeter", price=1900, casillero=True)
-    knives = deal(code, 102, price=1900, casillero=True)
+    meter = deal(code, 101, title="AstroAI Digital Multimeter", price=900, casillero=True)
+    knives = deal(code, 102, price=900, casillero=True)
     result = run(db, FakeChannel(code, [page(meter, knives)]), interests=(METER,))
     assert [k for k, _, _ in outbox(db)] == [f"canal:{code}:101"]
     assert (result.sent, result.skipped) == (1, 1)
@@ -527,11 +527,11 @@ def test_full_interest_cap_holds_a_post_only_the_interest_brings(db: psycopg.Con
 
 
 def test_full_interest_cap_holds_a_cheap_casillero_post(db: psycopg.Connection) -> None:
-    """Por casillero a US$19 solo la saca el interés: sin cupo en él, espera al resumen."""
+    """Por casillero a US$9 solo la saca el interés: sin cupo en él, espera al resumen."""
     code = "tg_descuentostech"
     repo.save_channel_cursor(db, code, 100, T - timedelta(hours=1))
     fill_interest_cap(db, "Multímetro", "ferreteria")
-    meter = deal(code, 101, title="AstroAI Digital Multimeter", price=1900, casillero=True)
+    meter = deal(code, 101, title="AstroAI Digital Multimeter", price=900, casillero=True)
     result = run(db, FakeChannel(code, [page(meter)]), interests=(METER,))
     assert (result.sent, result.held) == (0, 1)
 
