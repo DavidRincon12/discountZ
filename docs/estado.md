@@ -7,7 +7,7 @@
 - Perfil de temas (ADR 0013): Belleza, Mercado, Bebés y Mascotas apagados (no se rastrean ni se releen, y sus ofertas de canales quedan vistas); Hogar, Deportes y Otros solo por interés; el resto en tarjeta.
 - Intereses (esquema 12): 55 de la semilla (`config/interests.toml`) más los de `/interes`; lo que coincide (el término antes de «para», «con», «for»…) sale con «🎯», sin perfil, tope de la fuente ni mínimos de precio, hasta 3 por interés al día; después, lo que saldría sin el interés usa el tope de la fuente.
 - Dos chats: el grupo (todo, temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas y resúmenes de ofertas).
-- Suite: 1004 unitarias y 251 de integración en verde el 2026-10-23.
+- Suite: 1010 unitarias y 251 de integración en verde el 2026-10-23.
 
 ## Último cambio
 - Rama `claude/project-thread-9e8bgu` (migración `0013`): fuente `ninetofivetoys` (`sources/ninetofivetoys.py`) con `price_from_title`, que salta ahorros, precios de antes y resúmenes; spec `docs/superpowers/specs/2026-10-23-9to5toys-design.md` y plan `docs/superpowers/plans/2026-10-23-9to5toys.md` terminado (Native).
