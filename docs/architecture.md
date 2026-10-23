@@ -3,7 +3,7 @@
 ## Contexto
 Monitor **personal** de ofertas para David (Colombia). Rastrea tiendas colombianas (COP) y de EE. UU. que envían a casillero (USD), filtra descuentos inflados con un histórico propio y avisa por Telegram. Escala: decenas a pocos cientos de productos, un solo usuario, costo $0. Diseño completo: `docs/superpowers/specs/2026-10-13-discountz-v1-design.md`; decisiones en `docs/decisions/`.
 
-Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×6, Algolia de Alkosto, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API), el RSS de Slickdeals y el RSS de Amazon de DealNews.
+Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×6, Algolia de Alkosto, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API), el RSS de Slickdeals, el RSS de Amazon de DealNews y el RSS de 9to5Toys.
 
 ## Contenedores
 ```mermaid
@@ -83,6 +83,8 @@ Migración `0009_min_seen_at`: `catalog_item.min_seen_at`; el mínimo de precios
 Migración `0010_tope_diario` (ADR 0012): `offer_log`, cada oferta del rastreo y de los canales frente al tope del día (en tarjeta, o retenida con su línea para el resumen de las 21:00), y `alert.delivery = 'held'`.
 
 Migración `0012_intereses` (spec del perfil §3, ADR 0013): `interest`, los intereses personales de `/interes` (la semilla vive en `config/interests.toml`), y `offer_log.interest`, el interés cuyo tope usó la tarjeta (NULL si usó el de la fuente).
+
+Migración `0013_9to5toys` (ADR 0014): fuente `ninetofivetoys`, el RSS de 9to5Toys como canal sin orden de ids.
 
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
