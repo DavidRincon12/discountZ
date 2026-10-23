@@ -20,6 +20,7 @@ from discountz.domain.errors import CredentialUnavailable
 class EnvCredentials:
     def __init__(self, settings: Settings) -> None:
         self._bestbuy = settings.bestbuy_api_key
+        self._woot = settings.woot_api_key
         self._ebay: SecretStr | None = None
         if settings.ebay_app_id and settings.ebay_cert_id:
             pair = f"{settings.ebay_app_id}:{settings.ebay_cert_id.get_secret_value()}"
@@ -40,7 +41,8 @@ class EnvCredentials:
     def __repr__(self) -> str:
         return (
             f"EnvCredentials(bestbuy={self._bestbuy is not None}, "
-            f"walmart={self._walmart is not None}, ebay={self._ebay is not None})"
+            f"walmart={self._walmart is not None}, ebay={self._ebay is not None}, "
+            f"woot={self._woot is not None})"
         )
 
     def bearer(self, provider: str) -> SecretStr:
@@ -48,6 +50,8 @@ class EnvCredentials:
             return self._bestbuy
         if provider == "ebay" and self._ebay is not None:
             return self._ebay  # `Basic` del token de aplicación (base64 de app_id:cert_id)
+        if provider == "woot" and self._woot is not None:
+            return self._woot  # va en la cabecera `x-api-key`
         raise CredentialUnavailable(provider, "missing")
 
     def public_id(self, provider: str) -> str:

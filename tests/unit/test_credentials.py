@@ -195,3 +195,22 @@ def test_crawl_ebay_without_credentials_is_skipped(
     settings(monkeypatch)
     assert main(["crawl", "--source", "ebay_us"]) == 0
     assert "sin credenciales" in capsys.readouterr().out
+
+
+def test_woot_key_comes_from_the_environment_and_never_shows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for k, v in BASE_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("DISCOUNTZ_WOOT_API_KEY", "clave-woot-secreta")
+    creds = EnvCredentials(Settings())  # type: ignore[call-arg]
+    assert creds.bearer("woot").get_secret_value() == "clave-woot-secreta"
+    assert "clave-woot-secreta" not in repr(creds)
+
+
+def test_blank_woot_key_means_no_woot(monkeypatch: pytest.MonkeyPatch) -> None:
+    for k, v in BASE_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("DISCOUNTZ_WOOT_API_KEY", " ")
+    with pytest.raises(CredentialUnavailable):
+        EnvCredentials(Settings()).bearer("woot")  # type: ignore[call-arg]

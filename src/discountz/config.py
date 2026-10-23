@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     # eBay (ADR 0008): App ID y Cert ID del keyset de producción; sin ellos, eBay no rastrea.
     ebay_app_id: str | None = None
     ebay_cert_id: SecretStr | None = None
+    # Woot (ADR 0015): clave de su API; sin ella, el canal de Woot queda no disponible.
+    woot_api_key: SecretStr | None = None
 
     @field_validator(
         "bestbuy_api_key",
@@ -97,6 +99,7 @@ class Settings(BaseSettings):
         "walmart_key_version",
         "walmart_private_key",
         "walmart_publisher_id",
+        "woot_api_key",
         mode="before",
     )
     @classmethod

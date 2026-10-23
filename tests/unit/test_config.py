@@ -68,6 +68,7 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "tg_ofertu",
         "dealnews",
         "slickdeals_amazon",
+        "woot",
     }
     assert p.budgets["tg_clubgratis"].max_per_run == 3  # hasta 3 páginas por lectura
     assert p.budgets["dealnews"].min_pause_s == 2  # su robots.txt pide `Crawl-delay: 2`
@@ -78,6 +79,10 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
     assert p.budgets["amazon_us"].max_per_run == 12
     assert p.budgets["amazon_us"].max_per_24h == 400
     assert p.budgets["exito"].max_batch == 50
+    # Woot (ADR 0015): 3 feeds cada 15 min a 1 petición por segundo, lejos de las 1.000 al día.
+    woot = p.budgets["woot"]
+    assert (woot.min_pause_s, woot.max_per_run, woot.max_per_24h) == (1, 3, 400)
+    assert woot.watch_interval.total_seconds() == 15 * 60
     assert p.budgets["bestbuy_us"].max_batch == 100  # API: 100 SKU por consulta
     assert p.budgets["bestbuy_us"].min_pause_s == 1
     assert p.quiet_start == time(23, 0)

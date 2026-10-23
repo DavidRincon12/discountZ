@@ -10,6 +10,7 @@ inflado. Solo pasan las nuevas, como en eBay.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -17,13 +18,17 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from discountz.domain.community import ChannelPost
-from discountz.domain.errors import ParseError, UnsafeUrl
+from discountz.domain.errors import CredentialUnavailable, ParseError, UnsafeUrl
 from discountz.domain.model import normalize_title
 from discountz.domain.money import Currency, Money, to_minor
 from discountz.domain.urls import SafeUrl
-from discountz.sources.base import ChannelPage
+from discountz.infra.http import BlockKind, HttpResponse
+from discountz.sources.base import ChannelPage, PostsOnlySource, SourceContext, SourceDescriptor
+from discountz.sources.blocks import detect_block_common
+from discountz.sources.registry import register
 
 CODE = "woot"
+API = "https://developer.woot.com/feed/"
 FEEDS = ("Computers", "Electronics", "Tools")  # los temas en tarjeta del perfil (ADR 0013)
 STORE = "Woot"
 TITLE_MAX = 200
@@ -182,3 +187,39 @@ def parse_woot_feeds(bodies: Sequence[bytes], now: datetime) -> ChannelPage:
         skipped=skipped + unparsed,
         unparsed=unparsed,
     )
+
+
+class WootSource(PostsOnlySource):
+    """Feeds de Woot por su API (`ChannelSource` sin orden de ids)."""
+
+    def __init__(self) -> None:
+        self.descriptor = SourceDescriptor(
+            code=CODE,
+            kind="channel",
+            currency=Currency.USD,
+            hosts=HOSTS,
+            client="httpx",
+            capabilities=frozenset(),
+            max_batch=1,
+            external_id_re=re.compile(r"^\d{1,19}$"),
+            auth="api_key",
+            image_hosts=IMAGE_HOSTS,
+            ordered_ids=False,
+            # Un feed de categoría suma ofertas que empezaron antes: sin el tope de 6 h.
+            refeatures=True,
+        )
+
+    def fetch_posts(self, ctx: SourceContext, after_id: int | None) -> ChannelPage:
+        key = ctx.credentials.bearer(CODE).get_secret_value()  # sin clave, ni se pregunta
+        headers = {"Accept": "application/json", "x-api-key": key}
+        bodies = [ctx.http.request("GET", API + feed, headers=headers).body for feed in FEEDS]
+        return parse_woot_feeds(bodies, ctx.now)
+
+    def detect_block(self, resp: HttpResponse) -> BlockKind | None:
+        """Un 403 de la API es la clave mala, no un bloqueo anti-bots."""
+        if resp.status == 403:
+            raise CredentialUnavailable(CODE, "bad_key", 403)
+        return detect_block_common(resp)
+
+
+register(WootSource())

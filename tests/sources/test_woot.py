@@ -7,11 +7,22 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
-from discountz.domain.errors import ParseError
+from discountz.domain.errors import CredentialUnavailable, ParseError
 from discountz.domain.money import Currency, Money
+from discountz.infra.http import HttpResponse
+from discountz.sources.base import NoCredentials, SourceContext
 from discountz.sources.fixtures import load_fixture
-from discountz.sources.woot import CODE, offer_post_id, parse_woot_feeds
+from discountz.sources.registry import load_all
+from discountz.sources.woot import (
+    CODE,
+    FEEDS,
+    IMAGE_HOSTS,
+    WootSource,
+    offer_post_id,
+    parse_woot_feeds,
+)
 
 NOW = datetime(2026, 10, 23, 12, 0, tzinfo=UTC)
 OFFER_ID = "2a3deba2-6f5a-43df-875a-ea84709c9a30"
@@ -157,3 +168,58 @@ def test_fixture_feed_reads_its_offers() -> None:
     assert len(page.posts) == 2
     assert page.skipped == 1  # una agotada
     assert all(p.price.currency is Currency.USD for p in page.posts)
+
+
+class _Recorder:
+    """Transporte que guarda URL y cabeceras de cada petición."""
+
+    def __init__(self, body: bytes, status: int = 200) -> None:
+        self.body, self.status = body, status
+        self.calls: list[tuple[str, dict[str, str]]] = []
+
+    def request(self, method: str, url: str, **kw: Any) -> HttpResponse:
+        self.calls.append((url, dict(kw.get("headers") or {})))
+        return HttpResponse(self.status, url, {}, self.body, 0)
+
+
+class _Key:
+    def bearer(self, provider: str) -> SecretStr:
+        assert provider == "woot"
+        return SecretStr("clave")
+
+
+def _ctx(http: object, credentials: object) -> SourceContext:
+    return SourceContext(http, credentials, 1e9, NOW)  # type: ignore[arg-type]
+
+
+def test_source_reads_the_three_feeds_with_the_api_key() -> None:
+    http = _Recorder(feed(offer()))
+    page = WootSource().fetch_posts(_ctx(http, _Key()), None)
+    assert [u for u, _ in http.calls] == [f"https://developer.woot.com/feed/{f}" for f in FEEDS]
+    assert FEEDS == ("Computers", "Electronics", "Tools")
+    assert all(h == {"Accept": "application/json", "x-api-key": "clave"} for _, h in http.calls)
+    assert len(page.posts) == 1  # la misma oferta en los tres feeds
+
+
+def test_source_without_key_is_unavailable_before_asking() -> None:
+    http = _Recorder(feed())
+    with pytest.raises(CredentialUnavailable):
+        WootSource().fetch_posts(_ctx(http, NoCredentials()), None)
+    assert http.calls == []
+
+
+def test_forbidden_answer_is_a_bad_key_not_a_bot_block() -> None:
+    resp = HttpResponse(403, "https://developer.woot.com/feed/Computers", {}, b'{"message":""}', 0)
+    with pytest.raises(CredentialUnavailable) as exc:
+        WootSource().detect_block(resp)
+    assert exc.value.code == "bad_key"
+
+
+def test_descriptor_is_an_unordered_usd_channel_and_registered() -> None:
+    d = WootSource().descriptor
+    assert (d.code, d.kind, d.currency, d.auth) == ("woot", "channel", Currency.USD, "api_key")
+    assert d.ordered_ids is False
+    assert d.refeatures is True
+    assert d.image_hosts == IMAGE_HOSTS
+    assert "computers.woot.com" in d.hosts
+    assert "woot" in load_all()
