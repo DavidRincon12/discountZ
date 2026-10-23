@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import random
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import cast
 
@@ -42,7 +42,14 @@ from discountz.domain.scheduling import SourceBudget
 from discountz.domain.topics import GROCERY_TOPIC
 from discountz.infra import db
 from discountz.infra.log import event
-from discountz.sources.base import ChannelPage, ChannelSource, NoCredentials, Source, SourceContext
+from discountz.sources.base import (
+    ChannelPage,
+    ChannelSource,
+    CredentialStore,
+    NoCredentials,
+    Source,
+    SourceContext,
+)
 from discountz.sources.telegram_channels import FORMAT_BROKEN_MIN
 
 log = logging.getLogger(__name__)
@@ -75,6 +82,7 @@ class _Step:
     daily_cards: int  # tarjetas por canal al día
     interests: Sequence[Interest] = ()  # lo que coincide sale aunque el perfil o el casillero no
     interest_cap: int = 3  # tarjetas por interés al día
+    credentials: CredentialStore = field(default_factory=NoCredentials)  # claves de API (Woot)
 
 
 @dataclass(slots=True)
@@ -124,10 +132,12 @@ def run_channels(
     resolve: LinkResolver | None = None,
     interests: Sequence[Interest] = (),
     interest_cap: int = 3,
+    credentials: CredentialStore | None = None,
 ) -> ChannelsResult:
     """Lee cada canal de `runs` y encola sus ofertas nuevas; actualiza breaker y contadores.
 
     `resolve` cambia el enlace de cada oferta nueva por el de la tienda (`app.links`).
+    `credentials` son las claves de API del ciclo; sin ellas, un canal que pide clave falla.
     """
     step = _Step(
         conn,
@@ -139,6 +149,7 @@ def run_channels(
         params.daily_cards,
         interests,
         interest_cap,
+        credentials or NoCredentials(),
     )
     total = _Tally()
     requests = 0
@@ -183,7 +194,7 @@ def _run_one(
     ordered = source.descriptor.ordered_ids
     cursor = db.get_channel_cursor(conn, r.code)
     after = cursor.last_id if cursor is not None and ordered else None
-    pages, clean = _fetch(r, source, after, now, rnd, deadline)
+    pages, clean = _fetch(r, source, after, now, rnd, deadline, step.credentials)
     if not pages:
         return
     # Racha de publicaciones con precio y sin oferta: con 3 min entre lecturas casi nunca
@@ -291,12 +302,13 @@ def _fetch(
     now: datetime,
     rnd: random.Random,
     deadline: float,
+    credentials: CredentialStore,
 ) -> tuple[list[ChannelPage], bool]:
     """Hasta `MAX_PAGES` páginas y si se leyeron sin error; un error conserva lo ya leído.
 
     El evento `OK` del breaker lo aplica el llamador: antes tiene que mirar la racha.
     """
-    ctx = SourceContext(r.http, NoCredentials(), deadline, now)
+    ctx = SourceContext(r.http, credentials, deadline, now)
     pages: list[ChannelPage] = []
     while len(pages) < MAX_PAGES:
         try:

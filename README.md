@@ -169,7 +169,7 @@ Las dos están en VTEX, como Éxito y Olímpica, y se leen igual (sin secretos n
 Desde el 22 de octubre de 2026 llegan menos ofertas y mejores (ADR 0012):
 
 - **Rastreo de tiendas y eBay.** El «antes» cuesta al menos 100.000 COP o US$25 y el ahorro es de al menos 30.000 COP o US$5. Mercado no alerta. Un «error de precio» necesita los mismos 3 días de historia y solo vale para productos de la tienda, no del marketplace.
-- **Casillero.** «🇺🇸 Compra por casillero» sale siempre en eBay, Slickdeals, DealNews y 9to5Toys, y en los canales de Telegram solo si la publicación lo dice: lo de Amazon en esos canales suele enviar directo a Colombia. Lo que llega por casillero con precio menor a US$25, o de mercado, no se envía; lo que envía directo no tiene ese filtro.
+- **Casillero.** «🇺🇸 Compra por casillero» sale siempre en eBay, Slickdeals, DealNews, 9to5Toys y Woot, y en los canales de Telegram solo si la publicación lo dice: lo de Amazon en esos canales suele enviar directo a Colombia. Lo que llega por casillero con precio menor a US$25, o de mercado, no se envía; lo que envía directo no tiene ese filtro.
 - **Tope diario.** Cada fuente manda en tarjeta sus primeras 8 ofertas del día (hora de Bogotá); los errores de precio no cuentan. En las tiendas, las demás tallas o colores de una misma promoción (mismo tema y descuento a ±0,5 % en 24 h) tampoco salen en tarjeta. Lo demás llega a las 21:00 en el «Resumen de la noche», una línea por oferta, por fuente y de mayor a menor ahorro.
 
 1. **Migración `0010`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala. Mientras no corra, el ciclo y el rastreo se saltan con aviso.
@@ -195,6 +195,14 @@ Un interés es una lista de frases, en español y en inglés. Si una aparece en 
 3. **Ver la lista.** `/interes` la muestra por tema y con número; 🌱 marca los de la lista base.
 4. **Agregar uno tuyo.** `/interes rtx 5070, rtx5070 #tecnologia`: la primera frase es el nombre y todas las frases separadas por coma cuentan. Sin `#tema`, el tema sale de las palabras, como en los canales. Hasta 100 intereses tuyos, 10 frases por interés y 40 caracteres por frase; una frase de una sola palabra necesita al menos 3 letras.
 5. **Quitar uno tuyo.** `/interes quitar 57`, con el número de la lista. Los números no se corren al quitar otro interés.
+
+### 19. Woot
+
+Woot (de Amazon) vende con descuento por pocos días. El ciclo lee sus categorías Computers, Electronics y Tools por su [API oficial](https://developer.woot.com/) como mucho cada 15 minutos (unas 288 peticiones al día de las 1.000 que permite).
+
+1. **Clave.** El secreto `WOOT_API_KEY` ya está en *Settings → Secrets and variables → Actions*; el ciclo lo pasa como `DISCOUNTZ_WOOT_API_KEY`. Sin él, Woot queda no disponible y su breaker lo pausa.
+2. **Migración `0014`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head`. Mientras no corra, el ciclo se salta con aviso.
+3. **Nada más.** La primera lectura solo marca lo que hay. Desde la siguiente, cada oferta nueva llega como tarjeta «📣 Visto en Woot · sin verificar» con «🇺🇸 Compra por casillero» y el botón «Ver en Woot». Solo pasan las nuevas que se pueden comprar en la web (sin agotadas, reacondicionadas ni las de la app) y, como todo lo de casillero, desde US$25. Para apagarlo: `/fuente off woot`.
 
 ### Si algo falla
 

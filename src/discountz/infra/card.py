@@ -60,6 +60,7 @@ STORE_COLORS: Mapping[str, str] = MappingProxyType(
         "slickdeals_amazon": "#4D7C0F",
         "ninetofivetoys": "#0F766E",
         "ebay_us": "#0064D2",
+        "woot": "#B45309",
     }
 )
 DEFAULT_COLOR = "#334155"

@@ -48,3 +48,4 @@ jobs:
           DISCOUNTZ_WALMART_PUBLISHER_ID: ${{ secrets.WALMART_PUBLISHER_ID }}
           DISCOUNTZ_EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}
           DISCOUNTZ_EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}
+          DISCOUNTZ_WOOT_API_KEY: ${{ secrets.WOOT_API_KEY }}

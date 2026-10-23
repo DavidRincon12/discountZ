@@ -326,6 +326,16 @@ watch_interval_min = 10
 search_interval_min = 10
 max_batch = 1
 
+[sources.woot]  # API de Woot (ADR 0015): 3 feeds por lectura, 1 rps y 1.000 al día
+group = "woot"
+min_pause_s = 1
+jitter_s = 0
+max_per_run = 3
+max_per_24h = 400
+watch_interval_min = 15
+search_interval_min = 15
+max_batch = 1
+
 # Canales de ofertas de Telegram (spec de canales §2): cada canal como máximo cada N minutos.
 [channels]
 interval_min = 3

@@ -27,6 +27,7 @@ ADAPTER_MODULES: tuple[str, ...] = (
     "discountz.sources.ninetofivetoys",
     "discountz.sources.ebay",
     "discountz.sources.alkosto",
+    "discountz.sources.woot",
 )
 
 

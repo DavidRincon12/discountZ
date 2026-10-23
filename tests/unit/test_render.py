@@ -831,3 +831,27 @@ def test_9to5toys_deal_credits_9to5toys_and_links_to_its_article() -> None:
     msg = render_channel_deal(post, "tecnologia")
     assert "Visto en 9to5Toys · sin verificar" in msg.html
     assert msg.buttons == [[Button("Ver en 9to5Toys", url=url)]]
+
+
+def test_woot_card_names_woot_and_the_casillero() -> None:
+    url = "https://computers.woot.com/offers/lenovo-ideapad"
+    link = SafeUrl.parse(url, frozenset({"computers.woot.com"}))
+    post = ChannelPost(
+        channel="woot",
+        post_id=1,
+        published_at=datetime(2026, 10, 23, 5, tzinfo=UTC),
+        title="Lenovo IdeaPad Slim 5",
+        price=Money(549_99, Currency.USD),
+        coupon=None,
+        store="Woot",
+        hashtags=("computers", "laptops"),
+        image_url=None,
+        link=link,
+        post_url=link,
+        casillero=True,
+    )
+    msg = render_channel_deal(post, "tecnologia")
+    assert "📣 Visto en Woot · sin verificar" in msg.html
+    assert CASILLERO in msg.html
+    assert msg.html.startswith("<b>OFERTA DE WOOT</b> · #tecnologia · Woot")
+    assert [[b.text for b in row] for row in msg.buttons] == [["Ver en Woot"]]

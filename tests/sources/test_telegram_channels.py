@@ -344,7 +344,7 @@ def test_fetch_posts_url() -> None:
 
 def test_registry_has_five_channels() -> None:
     channels = {c for c, s in load_all().items() if s.descriptor.kind == "channel"}
-    feeds = {"dealnews", "slickdeals_amazon", "ninetofivetoys"}
+    feeds = {"dealnews", "slickdeals_amazon", "ninetofivetoys", "woot"}
     assert channels - feeds == set(CHANNELS)
     assert dict(CHANNELS) == {
         "tg_descuentostech": "DescuentosTech",

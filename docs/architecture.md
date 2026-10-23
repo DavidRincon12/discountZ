@@ -3,7 +3,7 @@
 ## Contexto
 Monitor **personal** de ofertas para David (Colombia). Rastrea tiendas colombianas (COP) y de EE. UU. que envían a casillero (USD), filtra descuentos inflados con un histórico propio y avisa por Telegram. Escala: decenas a pocos cientos de productos, un solo usuario, costo $0. Diseño completo: `docs/superpowers/specs/2026-10-13-discountz-v1-design.md`; decisiones en `docs/decisions/`.
 
-Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×6, Algolia de Alkosto, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API), el RSS de Slickdeals, el RSS de Amazon de DealNews y el RSS de 9to5Toys.
+Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×6, Algolia de Alkosto, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API), el RSS de Slickdeals, el RSS de Amazon de DealNews el RSS de 9to5Toys y la API de Woot.
 
 ## Contenedores
 ```mermaid
@@ -13,6 +13,7 @@ flowchart LR
   gha -->|HTTPS con ritmo y presupuesto| stores[[Tiendas y RSS]]
   gha -->|t.me/s/canal cada 3 min| chan[[Canales públicos de ofertas]]
   gha -->|RSS cada 10 y 30 min| feeds[[DealNews y Slickdeals<br/>ofertas de Amazon]]
+  gha -->|API con clave cada 15 min| woot[[Woot<br/>Computers, Electronics, Tools]]
   gha -->|psycopg, modo sesión, verify-full| db[(Supabase Postgres<br/>esquema discountz)]
   gha -->|getUpdates / sendMessage| tg[[Telegram Bot API]]
   david([David]) <-->|comandos y alertas| tg
@@ -86,6 +87,8 @@ Migración `0012_intereses` (spec del perfil §3, ADR 0013): `interest`, los int
 
 Migración `0013_9to5toys` (ADR 0014): fuente `ninetofivetoys`, el RSS de 9to5Toys como canal sin orden de ids.
 
+Migración `0014_woot` (ADR 0015): fuente `woot`, un canal sin orden de ids sobre `channel_post`.
+
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
 ## Flujos clave
@@ -109,7 +112,7 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
    5. Solo se confirma lo de un tema `card` del perfil o lo que coincide con un interés, que se detecta sin los mínimos de precio y de ahorro (ADR 0013, `domain/interests.py`). `app/held.py` decide si sale en tarjeta: 8 por tienda al día y 3 por interés (con ese tope lleno, lo que también saldría sin el interés usa el de la tienda); lo demás va al resumen de las 21:00. La alerta entra a `outbox` con su tema y su tarjeta; el ciclo la entrega como foto (`sendPhoto`) en ese tema.
 4. **Feed de Slickdeals**: una tarea `feed` baja el RSS una vez para todas las búsquedas `source='slickdeals'` vencidas → cada lead que coincide y apunta a una tienda activa (sin red: `href`, `u2=` o `data-aps-asin`) encola en memoria una lectura de ficha en esa tienda, antes que sus demás tareas → `evaluate(origin="lead")` puede dar `COMMUNITY_DEAL`. Los leads no se guardan, pero todo lead que lleva a una ficha crea un seguimiento automático (`aNN`, 30 días sin alerta, tope por tienda).
 
-5. **Canales de Telegram** (`app/channels.py`, dentro del ciclo): cada canal que toca (3 min) baja hasta 3 páginas `t.me/s/<canal>?after=<cursor>` con `sources/telegram_channels.py` → `domain/community.py` descarta duplicados (mismo cupón, o precio a ±10 % y títulos parecidos, 24 h) y asigna el tema → lo de un tema que no es `card` del perfil queda visto (`baseline`) sin enviarse, salvo que coincida con un interés (ADR 0013) → por página, en una transacción: guarda las publicaciones, encola la tarjeta «sin verificar» en `outbox` (o la retiene para el resumen con el tope del día de `app/held.py`, como en el rastreo) y avanza el cursor. La primera lectura solo fija el cursor. Los feeds de Amazon (`sources/dealnews.py` cada 10 min y `slickdeals_amazon` cada 30) son canales con `ordered_ids=False`: se releen enteros, se saltan los ids ya guardados y su primera lectura marca lo que hay con `baseline` (ADR 0006).
+5. **Canales de Telegram** (`app/channels.py`, dentro del ciclo): cada canal que toca (3 min) baja hasta 3 páginas `t.me/s/<canal>?after=<cursor>` con `sources/telegram_channels.py` → `domain/community.py` descarta duplicados (mismo cupón, o precio a ±10 % y títulos parecidos, 24 h) y asigna el tema → lo de un tema que no es `card` del perfil queda visto (`baseline`) sin enviarse, salvo que coincida con un interés (ADR 0013) → por página, en una transacción: guarda las publicaciones, encola la tarjeta «sin verificar» en `outbox` (o la retiene para el resumen con el tope del día de `app/held.py`, como en el rastreo) y avanza el cursor. La primera lectura solo fija el cursor. Los feeds de Amazon (`sources/dealnews.py` cada 10 min y `slickdeals_amazon` cada 30) son canales con `ordered_ids=False`: se releen enteros, se saltan los ids ya guardados y su primera lectura marca lo que hay con `baseline` (ADR 0006). Woot (`sources/woot.py`, cada 15 min, ADR 0015) es otro: lee tres feeds de su API con la clave que `run_channels` recibe del ciclo (`credentials`), y su `post_id` son 63 bits del `OfferId`.
 
 ## Atributos de calidad
 1. **Corrección de alertas**: ninguna alerta por un error de parseo o un descuento inflado (guardas G1-G14, confirmación independiente, tabla U01-U37).

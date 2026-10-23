@@ -237,6 +237,7 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
         resolve=resolve,
         interests=active_interests(conn, deps.interests),
         interest_cap=deps.interests.daily_cards_per_interest,
+        credentials=deps.credentials,
     )
     for r in channel_runs:
         _close_source(conn, r, now)

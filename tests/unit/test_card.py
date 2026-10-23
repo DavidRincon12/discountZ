@@ -164,10 +164,10 @@ def test_community_card_has_no_discount_badge() -> None:
 
 
 def test_unverified_feeds_have_their_own_color() -> None:
-    codes = {"dealnews", "slickdeals_amazon", "ninetofivetoys"}
+    codes = {"dealnews", "slickdeals_amazon", "ninetofivetoys", "woot"}
     feeds = [STORE_COLORS[code] for code in codes]
     others = [c for code, c in STORE_COLORS.items() if code not in codes]
-    assert len(set(feeds)) == 3
+    assert len(set(feeds)) == 4
     assert not set(feeds) & {*others, DEFAULT_COLOR}
 
 
