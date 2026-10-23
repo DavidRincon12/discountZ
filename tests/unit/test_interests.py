@@ -61,3 +61,29 @@ def test_term_problem() -> None:
 def test_interest_key_ignores_case_and_accents() -> None:
     assert interest_key("Audífonos ") == interest_key("AUDIFONOS")
     assert interest_key("Audífonos") != interest_key("Audífono")
+
+
+def test_plural_and_singular_match_alike_in_both_languages() -> None:
+    """Revisión final del PR 2: «Headphone» con `headphones` y «Cases» con el exclude `case`."""
+    head = compile_interest("Audífonos", "tecnologia", ["headphones"])
+    assert match_interest("Sony WH-1000XM5 Wireless Headphone", [head]) == head
+    phone = compile_interest("Celular", "tecnologia", ["iphone"], exclude=["case", "cable"])
+    assert match_interest("iPhone 17 Phone Cases", [phone]) is None
+    assert match_interest("Cables USB-C para iPhone", [phone]) is None
+    assert match_interest("iPhone 17 Pro 256GB", [phone]) == phone
+    watch = compile_interest("Smartwatch", "tecnologia", ["smartwatch"])
+    assert match_interest("Smartwatches para hombre", [watch]) == watch
+
+
+def test_words_after_para_or_for_describe_the_use() -> None:
+    """Revisión final del PR 2: lo que va después de «para», «con», «for»… es el uso del producto
+    (`Funda para iPhone`), como en el tema de los canales; un conector al inicio no corta."""
+    phone = compile_interest("Celular", "tecnologia", ["iphone", "smartphone", "celular"])
+    assert match_interest("Funda magnética para iPhone 17", [phone]) is None
+    assert match_interest("Gimbal DJI OM 5 for smartphones", [phone]) is None
+    assert match_interest("Celular Samsung A16 con cargador", [phone]) == phone
+    assert match_interest("Con cupón: iPhone 16 128GB", [phone]) == phone
+    stand = compile_interest("Soporte", "hogar", ["soporte para monitor"])
+    assert match_interest("Soporte para monitor doble", [stand]) == stand
+    kid = compile_interest("Bicicleta", "deportes", ["bicicleta"], exclude=["nino"])
+    assert match_interest("Bicicleta para niños rin 16", [kid]) is None  # el exclude mira todo

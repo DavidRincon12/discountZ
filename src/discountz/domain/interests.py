@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from discountz.domain.community import stem
+from discountz.domain.community import CONNECTORS, stem
 from discountz.domain.model import normalize_title
 from discountz.domain.topics import TOPIC_CODES
 
@@ -31,8 +31,15 @@ class Interest:
     personal_id: int | None = None  # fila de `interest`; None = semilla
 
 
+def _singular(word: str) -> str:
+    """`stem` sin la «e» final: `stem` deja `headphones` en `headphon` y `cases` en `cas`, pero no
+    toca `headphone` ni `case`; así el singular y el plural quedan iguales en los dos idiomas."""
+    w = stem(word)
+    return w[:-1] if len(w) > 3 and w.endswith("e") else w
+
+
 def _words(text: str) -> Words:
-    return tuple(stem(w) for w in normalize_title(text).split())
+    return tuple(_singular(w) for w in normalize_title(text).split())
 
 
 def term_problem(term: str) -> str | None:
@@ -69,20 +76,29 @@ def interest_key(name: str) -> str:
     return normalize_title(name)
 
 
-def _contains(words: Words, term: Words) -> bool:
+def _contains(words: Words, term: Words, starts_before: int | None = None) -> bool:
     n = len(term)
-    return any(words[i : i + n] == term for i in range(len(words) - n + 1))
+    last = len(words) - n + 1 if starts_before is None else min(starts_before, len(words) - n + 1)
+    return any(words[i : i + n] == term for i in range(last))
+
+
+def _use_starts(raw: Sequence[str]) -> int:
+    """Dónde empieza el uso: lo que va después de «para», «con», «for»… dice para qué sirve el
+    producto, no qué es (`Funda para iPhone`). Un conector al inicio («Con cupón: …») no corta."""
+    return next((i for i, w in enumerate(raw) if i > 0 and w in CONNECTORS), len(raw))
 
 
 def match_interest(title: str, interests: Sequence[Interest]) -> Interest | None:
-    """El interés del término con más palabras presente en el título; a igual largo, el primero."""
-    words = _words(title)
+    """El interés del término con más palabras que empieza antes del uso; a igual largo, el
+    primero. Un término de `exclude` en cualquier parte del título anula el interés."""
+    raw = normalize_title(title).split()
+    words, use = tuple(_singular(w) for w in raw), _use_starts(raw)
     best: Interest | None = None
     best_len = 0
     for interest in interests:
         if any(_contains(words, t) for t in interest.exclude):
             continue
-        found = max((len(t) for t in interest.terms if _contains(words, t)), default=0)
+        found = max((len(t) for t in interest.terms if _contains(words, t, use)), default=0)
         if found > best_len:
             best, best_len = interest, found
     return best
