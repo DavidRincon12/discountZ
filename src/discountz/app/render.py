@@ -282,6 +282,8 @@ def render_catalog_alert(
         "",
         f"<b>{format_money(price)}</b>  {reference} (-{pct(int(card['drop_bp']))})",
     ]
+    if card.get("interest"):  # lo sacó un interés (spec del perfil §3.3)
+        lines.insert(2, f"🎯 {esc(str(card['interest']))}")
     if kind is AlertKind.PRICE_ERROR:
         lines.append("<i>La tienda puede anular el pedido.</i>")
     elif kind is not AlertKind.MODEL_LOW:

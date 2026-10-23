@@ -623,6 +623,7 @@ def parse_vtex_catalog(body: bytes) -> list[CatalogObservation]:
                     path,
                     ean,
                     SellerClass.FIRST_PARTY if first_party else SellerClass.MARKETPLACE,
+                    title=product.productName,
                 )
             )
     return out

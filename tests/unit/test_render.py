@@ -459,6 +459,19 @@ def test_catalog_alert_caption() -> None:
     assert buttons[1][1] == {"text": "Seguir", "callback_data": "fol:L42"}
 
 
+def test_catalog_alert_with_interest_matches_golden() -> None:
+    card = CARD_C01 | {
+        "topic": "hogar",
+        "title": "Silla Ergonómica de Oficina",
+        "interest": "Silla de oficina",
+    }
+    msg = render_catalog_alert(card, 42, "🛋️ Hogar y muebles")
+    assert msg.html == golden("alert_interest_cop.html")
+    escaped = render_catalog_alert(card | {"interest": "Silla <gamer>"}, 42, "🛋️ Hogar y muebles")
+    assert escaped.html.split("\n")[2] == "🎯 Silla &lt;gamer&gt;"
+    assert "🎯" not in render_catalog_alert(CARD_C01, 42, "📱 Tecnología").html
+
+
 def test_catalog_price_error_caption_usd() -> None:
     card = CARD_C01 | {
         "store": "bestbuy_us",

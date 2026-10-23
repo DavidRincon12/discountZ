@@ -36,6 +36,7 @@ class CatalogObservation:
     ean: str | None
     seller_class: SellerClass
     model_key: str | None = None  # `epid` de eBay; None en las demás tiendas
+    title: str | None = None  # solo para los intereses: no se guarda (spec del perfil §3.3)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,8 +68,13 @@ def observe(
     now: datetime,
     topic: TopicParams,
     glob: GlobalParams,
+    *,
+    floors: bool = True,
 ) -> tuple[CatalogState, CatalogCandidate | None, bool]:
-    """Aplica una lectura: estado nuevo, candidato y si hay que registrar el cambio de precio."""
+    """Aplica una lectura: estado nuevo, candidato y si hay que registrar el cambio de precio.
+
+    Sin `floors` (lo que coincide con un interés) no se exigen el precio ni el ahorro mínimos.
+    """
     p = obs.price.minor
     if state is None:
         fresh = CatalogState(p, None, None, now, now, 1, None, None, None)
@@ -85,7 +91,7 @@ def observe(
             elif state.min_seen_at is None:  # guardado antes de la ventana: cuenta desde hoy
                 state = replace(state, min_seen_at=now)
         return state, None, False
-    candidate = _candidate(state, obs, now, topic, glob)
+    candidate = _candidate(state, obs, now, topic, glob, floors)
     moved = replace(state, price_minor=p, stable_since=now, reads_at_price=1, last_changed_at=now)
     return moved, candidate, True
 
@@ -96,11 +102,12 @@ def _candidate(
     now: datetime,
     topic: TopicParams,
     glob: GlobalParams,
+    floors: bool,
 ) -> CatalogCandidate | None:
     u, p = state.usual_minor, obs.price.minor
     if u is None or p >= u or topic.t_bp is None or topic.g_bp is None:
         return None
-    if now - state.first_seen_at < WARMUP or not _worth(u, obs, glob):
+    if now - state.first_seen_at < WARMUP or (floors and not _worth(u, obs, glob)):
         return None
     drop_bp = (u - p) * 10_000 // u
     kind: AlertKind | None = None
@@ -178,12 +185,14 @@ def model_candidate(
     peers: Sequence[int],
     topic: TopicParams,
     glob: GlobalParams,
+    *,
+    floors: bool = True,
 ) -> CatalogCandidate | None:
     """Precio bajo frente a las demás publicaciones del mismo modelo (spec de eBay §4.2)."""
     if len(peers) < MIN_PEERS or topic.t_bp is None or topic.g_bp is None:
         return None
     median, p = median_low(peers), obs.price.minor
-    if p >= median or not _worth(median, obs, glob):
+    if p >= median or (floors and not _worth(median, obs, glob)):
         return None
     drop_bp = (median - p) * 10_000 // median
     kind: AlertKind | None = None

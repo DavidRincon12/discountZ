@@ -345,3 +345,28 @@ def test_split_price_band_at_the_geometric_midpoint() -> None:
 
 def test_split_price_band_does_not_split_a_single_price() -> None:
     assert split_price_band(5, 5) == []
+
+
+def test_observe_without_floors_accepts_a_cheap_real_drop() -> None:
+    """Un interés salta el precio mínimo y el ahorro mínimo (spec del perfil §3.3)."""
+    state, t = history(80_000, 5, glob=PROD)
+    later = t + timedelta(hours=6)
+    assert observe(state, obs(60_000), later, TECH, PROD)[1] is None
+    cand = observe(state, obs(60_000), later, TECH, PROD, floors=False)[1]
+    assert cand is not None
+    assert cand.kind is AlertKind.CATALOG_DROP
+
+
+def test_observe_without_floors_still_needs_a_real_drop() -> None:
+    state, t = history(80_000, 5, glob=PROD)
+    later = t + timedelta(hours=6)
+    assert observe(state, obs(75_000), later, TECH, PROD, floors=False)[1] is None  # 6 %
+    young, t = history(80_000, 2, glob=PROD)
+    assert observe(young, obs(60_000), t + timedelta(hours=6), TECH, PROD, floors=False)[1] is None
+
+
+def test_model_candidate_without_floors_skips_the_minimum_saving() -> None:
+    assert model_candidate(None, T0, usd(600), [1_000] * 5, TECH, GLOB) is None
+    cand = model_candidate(None, T0, usd(600), [1_000] * 5, TECH, GLOB, floors=False)
+    assert cand is not None
+    assert cand.kind is AlertKind.MODEL_LOW

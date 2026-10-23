@@ -455,7 +455,9 @@ def _parse_partition(partition: str) -> tuple[int, int]:
 def _observations(items: Iterable[AlkostoItem]) -> tuple[CatalogObservation, ...]:
     """Solo lo que está en stock (y por eso tiene precio)."""
     return tuple(
-        CatalogObservation(i.external_id, i.price, i.category_path, i.ean, SellerClass.FIRST_PARTY)
+        CatalogObservation(
+            i.external_id, i.price, i.category_path, i.ean, SellerClass.FIRST_PARTY, title=i.title
+        )
         for i in items
         if i.in_stock and i.price is not None
     )

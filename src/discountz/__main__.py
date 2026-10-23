@@ -25,7 +25,9 @@ from discountz.app.crawl import (
     run_crawl_reconnecting,
 )
 from discountz.app.cycle import CycleDeps, run_cycle
+from discountz.app.interests import active_interests
 from discountz.config import (
+    InterestsConfig,
     Settings,
     load_canaries,
     load_interests,
@@ -35,8 +37,9 @@ from discountz.config import (
 )
 from discountz.domain.commands import BOT_MENU
 from discountz.domain.errors import ConfigError, LeaseBusy, TelegramError
+from discountz.domain.interests import Interest
 from discountz.infra.credentials import EnvCredentials
-from discountz.infra.db import connect
+from discountz.infra.db import SCHEMA_VERSION, connect, schema_version
 from discountz.infra.healthchecks import Healthchecks
 from discountz.infra.http import CATALOG_MAX_BODY_BYTES, CurlClient, HttpClient, HttpxClient
 from discountz.infra.log import configure_logging, event, install_excepthook
@@ -174,6 +177,13 @@ def _connect_with_retry(settings: Settings, rnd: random.Random) -> psycopg.Conne
     raise AssertionError("inalcanzable")
 
 
+def _crawl_interests(conn: psycopg.Connection, cfg: InterestsConfig) -> tuple[Interest, ...]:
+    """Con el esquema anterior no hay tabla de intereses: la corrida termina en `skipped_schema`."""
+    if schema_version(conn) != SCHEMA_VERSION:
+        return ()
+    return active_interests(conn, cfg)
+
+
 def _connect_crawl(settings: Settings, rnd: random.Random, source: str) -> psycopg.Connection:
     """Arranque del rastreo con la misma paciencia que la reconexión a mitad de corrida.
 
@@ -292,6 +302,7 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
         settings = load_settings()
         params = load_params()
         topics = load_topics()
+        interests = load_interests()
     except ConfigError as exc:
         print(f"crawl: {exc}", file=sys.stderr)
         return EXIT_CONFIG
@@ -339,6 +350,8 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
                     sleep=time.sleep,
                     rnd=rnd,
                     max_items=crawl_max_items(args.source, params),
+                    interests=_crawl_interests(conn, interests),
+                    interest_cap=interests.daily_cards_per_interest,
                 ),
                 now,
                 args.minutes,

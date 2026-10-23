@@ -424,6 +424,7 @@ def test_catalog_page_observations() -> None:
     by_id = {o.external_id: o for o in page.items}
     assert set(by_id) == {"840031700816", "278384636909"}
     assert by_id["840031700816"].model_key == "13060624345"
+    assert by_id["840031700816"].title == first["title"]
     assert by_id["278384636909"].model_key is None
     assert by_id["278384636909"].price == usd(71_499)
     assert all(o.seller_class is SellerClass.FIRST_PARTY for o in page.items)
