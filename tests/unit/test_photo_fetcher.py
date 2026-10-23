@@ -8,7 +8,8 @@ import logging
 import pytest
 from PIL import Image
 
-from discountz.app.deliver import PHOTO_ATTEMPTS, PHOTO_RETRY_S, make_photo_fetcher
+from discountz.app.deliver import PHOTO_ATTEMPTS, PHOTO_RETRY_S, PhotoPending, make_photo_fetcher
+from discountz.domain.errors import Unavailable
 from discountz.infra.http import FakeHttp, HttpResponse
 from discountz.sources.registry import load_all
 
@@ -62,10 +63,26 @@ def test_photo_fetcher_retries_server_errors() -> None:
     assert waits == [PHOTO_RETRY_S]
 
 
-def test_photo_fetcher_gives_up_after_attempts() -> None:
+def test_photo_fetcher_reports_pending_after_attempts() -> None:
+    """Un 5xx que no cede en los intentos no es «sin foto»: se vuelve a intentar más tarde."""
     net = FakeHttp({IMG: HttpResponse(503, IMG, {}, b"", 1)})
-    assert make_photo_fetcher(net, load_all(), sleep=lambda _: None)("exito", IMG) is None
+    with pytest.raises(PhotoPending) as err:
+        make_photo_fetcher(net, load_all(), sleep=lambda _: None)("exito", IMG)
+    assert (err.value.code, err.value.status) == ("status", 503)
     assert len(net.calls) == PHOTO_ATTEMPTS
+
+
+class Down:
+    """Transporte que nunca responde: el cliente real lanza `Unavailable` tras sus intentos."""
+
+    def request(self, method: str, url: str, **kwargs: object) -> HttpResponse:
+        raise Unavailable("exito", "timeout")
+
+
+def test_photo_fetcher_reports_pending_on_network_errors() -> None:
+    with pytest.raises(PhotoPending) as err:
+        make_photo_fetcher(Down(), load_all(), sleep=lambda _: None)("exito", IMG)
+    assert (err.value.code, err.value.status) == ("timeout", None)
 
 
 def test_photo_fetcher_does_not_retry_client_errors() -> None:

@@ -12,7 +12,7 @@ from PIL import Image
 from pydantic import SecretStr
 
 from discountz.app.compose import compose_alerts
-from discountz.app.deliver import deliver, make_photo_fetcher
+from discountz.app.deliver import PHOTO_DEFER, PHOTO_DEFERRALS, deliver, make_photo_fetcher
 from discountz.config import load_params
 from discountz.infra import db as repo
 from discountz.infra.http import FakeHttp, HttpResponse
@@ -86,6 +86,7 @@ def run(
     routes: dict[str, HttpResponse | list[HttpResponse]],
     photos: object = None,
     channel_id: int | None = None,
+    now: datetime = T,
 ) -> FakeHttp:
     http = FakeHttp(routes)
     tg = TelegramClient(SecretStr(TOKEN), http)
@@ -93,7 +94,7 @@ def run(
         conn,
         tg,
         -100,
-        T,
+        now,
         sleep=lambda s: None,
         monotonic=lambda: 0.0,
         deadline=1e9,
@@ -157,6 +158,50 @@ def test_deliver_skips_photo_from_foreign_host(db: psycopg.Connection) -> None:
     http = run(db, {f"{API}/sendPhoto": ok()}, photos)
     assert net.calls == []
     assert len(http.uploads) == 1
+
+
+def outbox_state(conn: psycopg.Connection) -> tuple[str, int, datetime]:
+    row = conn.execute("SELECT status, attempts, not_before FROM discountz.outbox").fetchone()
+    assert row is not None
+    return (row[0], row[1], row[2])
+
+
+def test_deliver_holds_a_card_while_the_photo_cdn_fails(db: psycopg.Connection) -> None:
+    """Un 502 del CDN no deja la tarjeta con el cuadro gris: se reintenta en unos minutos."""
+    repo.save_topic(db, "tecnologia", "📱 Tecnología", 11)
+    enqueue(db, "cat:1", topic="tecnologia", card=CARD)
+    photos = make_photo_fetcher(FakeHttp({IMG: HttpResponse(502, IMG, {}, b"", 1)}), load_all())
+    http = run(db, {f"{API}/sendPhoto": ok()}, photos)
+    assert http.uploads == []
+    assert outbox_state(db) == ("pending", 1, T + PHOTO_DEFER)
+
+
+def test_deliver_sends_the_photo_once_the_cdn_recovers(db: psycopg.Connection) -> None:
+    repo.save_topic(db, "tecnologia", "📱 Tecnología", 11)
+    enqueue(db, "cat:1", topic="tecnologia", card=CARD)
+    bad = make_photo_fetcher(FakeHttp({IMG: HttpResponse(502, IMG, {}, b"", 1)}), load_all())
+    run(db, {f"{API}/sendPhoto": ok()}, bad)
+    later = T + PHOTO_DEFER
+    good = make_photo_fetcher(FakeHttp({IMG: HttpResponse(200, IMG, {}, jpeg(), 1)}), load_all())
+    http = run(db, {f"{API}/sendPhoto": ok()}, good, now=later)
+    assert len(http.uploads) == 1
+    assert outbox_state(db)[0] == "sent"
+
+
+def test_deliver_sends_the_placeholder_after_the_deferrals(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level("INFO")
+    repo.save_topic(db, "tecnologia", "📱 Tecnología", 11)
+    enqueue(db, "cat:1", topic="tecnologia", card=CARD)
+    bad = make_photo_fetcher(FakeHttp({IMG: HttpResponse(502, IMG, {}, b"", 1)}), load_all())
+    for n in range(PHOTO_DEFERRALS):
+        http = run(db, {f"{API}/sendPhoto": ok()}, bad, now=T + n * PHOTO_DEFER)
+        assert http.uploads == []
+    http = run(db, {f"{API}/sendPhoto": ok()}, bad, now=T + PHOTO_DEFERRALS * PHOTO_DEFER)
+    assert len(http.uploads) == 1  # sin foto, pero la oferta no se pierde
+    assert outbox_state(db)[0] == "sent"
+    assert "photo_missing source=exito code=status http_status=502" in caplog.text
 
 
 def test_photo_fetcher_validates_image(db: psycopg.Connection) -> None:

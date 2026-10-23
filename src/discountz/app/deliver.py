@@ -64,8 +64,21 @@ CHANNEL_PURPOSES = frozenset({"alert", "digest"})
 MAX_PHOTO_REDIRECTS = 2
 PHOTO_ATTEMPTS = 3  # el CDN de Telegram (telesco.pe) da 502 pasajeros
 PHOTO_RETRY_S = 1.0
+# Si el CDN sigue fallando tras los intentos, la tarjeta espera `PHOTO_DEFER` y se vuelve a
+# intentar hasta `PHOTO_DEFERRALS` veces antes de salir con el cuadro gris de la tienda.
+PHOTO_DEFERRALS = 3
+PHOTO_DEFER = timedelta(minutes=3)
 REDIRECTS = frozenset({301, 302, 303, 307, 308})
 PhotoFetcher = Callable[[str, str], bytes | None]  # (fuente, URL de la foto) → bytes o None
+
+
+class PhotoPending(Exception):
+    """El CDN falló (5xx o red) en todos los intentos: conviene probar otra vez más tarde."""
+
+    def __init__(self, code: str, status: int | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.status = status
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,8 +132,7 @@ def make_photo_fetcher(
             except DiscountzError as exc:
                 if not last:
                     return None, True
-                missing(source, exc.code if isinstance(exc, SourceError) else "network")
-                return None, False
+                raise PhotoPending(exc.code if isinstance(exc, SourceError) else "network") from exc
             if resp.status not in REDIRECTS:
                 break
             target = {k.lower(): v for k, v in resp.headers.items()}.get("location", "")
@@ -131,8 +143,10 @@ def make_photo_fetcher(
         else:
             missing(source, "redirect_loop")
             return None, False
-        if resp.status >= 500 and not last:
-            return None, True
+        if resp.status >= 500:
+            if not last:
+                return None, True
+            raise PhotoPending("status", resp.status)
         if resp.status != 200:
             missing(source, "status", resp.status)
             return None, False
@@ -238,7 +252,22 @@ def deliver(
         png = None
         if row.card is not None:
             url = row.card.get("image_url")
-            photo = photos(str(row.card["store"]), url) if photos and isinstance(url, str) else None
+            photo = None
+            if photos and isinstance(url, str):
+                try:
+                    photo = photos(str(row.card["store"]), url)
+                except PhotoPending as exc:
+                    if row.attempts < PHOTO_DEFERRALS:
+                        db.defer_outbox(conn, row.id, now + PHOTO_DEFER)
+                        event(log, "photo_deferred", source=str(row.card["store"]), code=exc.code)
+                        continue
+                    event(
+                        log,
+                        "photo_missing",
+                        source=str(row.card["store"]),
+                        code=exc.code,
+                        http_status=exc.status,
+                    )
             png = card_png(row.card, photo)
 
         def send(

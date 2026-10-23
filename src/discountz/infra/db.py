@@ -572,6 +572,17 @@ def mark_retry(conn: psycopg.Connection, outbox_id: int, error_code: str) -> Non
     )
 
 
+def defer_outbox(conn: psycopg.Connection, outbox_id: int, not_before: datetime) -> None:
+    """Vuelve a `pending` con un intento más y no antes de `not_before` (la foto no estaba)."""
+    conn.execute(
+        """UPDATE discountz.outbox
+              SET status = 'pending', sending_since = NULL, not_before = %s,
+                  attempts = least(attempts + 1, 10), last_error_code = 'photo'
+            WHERE id = %s""",
+        (not_before, outbox_id),
+    )
+
+
 def mark_failed(conn: psycopg.Connection, outbox_id: int, error_code: str) -> None:
     conn.execute(
         """UPDATE discountz.outbox SET status = 'failed', last_error_code = %s,
