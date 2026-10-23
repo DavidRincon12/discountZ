@@ -15,6 +15,7 @@ from discountz.config import (
     PARAMS_PATH,
     Settings,
     load_canaries,
+    load_interests,
     load_params,
     load_settings,
     load_topics,
@@ -22,6 +23,7 @@ from discountz.config import (
 from discountz.domain.errors import ConfigError
 from discountz.domain.money import Currency
 from discountz.domain.params import DEFAULT_CATEGORIES, GlobalParams
+from discountz.domain.topics import TOPIC_CODES
 
 SECRET = "123456:SECRETO-de-prueba"  # noqa: S105 - falso, de prueba
 DB_SECRET = "postgresql://u:CANARYPASS@localhost:5432/postgres"  # noqa: S105
@@ -410,3 +412,66 @@ def test_check_config_fails_on_unknown_topic_mode(
     monkeypatch.setattr("discountz.__main__.load_topics", partial(load_topics, bad))
     assert main(["check-config"]) == 2
     assert ".mode" in capsys.readouterr().err
+
+
+def test_seed_interests_load() -> None:
+    cfg = load_interests()
+    assert cfg.daily_cards_per_interest == 3
+    assert len(cfg.seeds) == 55
+    assert {i.topic for i in cfg.seeds} <= set(TOPIC_CODES) - {"errores", "comunidad_us"}
+
+
+def _interests_file(folder: Path, second: str) -> Path:
+    """Un `interests.toml` mínimo: un interés válido y `second` como el segundo."""
+    path = folder / "interests.toml"
+    path.write_text(
+        "daily_cards_per_interest = 3\n\n"
+        '[[interests]]\nname = "Multímetro"\ntopic = "ferreteria"\nterms = ["multimetro"]\n\n'
+        f"[[interests]]\n{second}\n",
+        "utf-8",
+    )
+    return path
+
+
+def test_load_interests_reads_a_minimal_file(tmp_path: Path) -> None:
+    second = (
+        'name = "Taladro"\ntopic = "ferreteria"\nterms = ["Taladros", "drill"]\nexclude = ["3d"]'
+    )
+    seeds = load_interests(_interests_file(tmp_path, second)).seeds
+    assert [i.name for i in seeds] == ["Multímetro", "Taladro"]
+    assert seeds[1].terms == (("taladro",), ("drill",))
+    assert seeds[1].exclude == (("3d",),)  # en `exclude` vale una palabra corta
+
+
+BAD_INTERESTS = {
+    "unknown_topic": ('name = "Taladro"\ntopic = "jardin"\nterms = ["taladro"]', "tema"),
+    "reserved_topic": ('name = "Taladro"\ntopic = "errores"\nterms = ["taladro"]', "tema"),
+    "no_terms": ('name = "Taladro"\ntopic = "ferreteria"\nterms = []', r"\.terms"),
+    "many_terms": (
+        f'name = "Taladro"\ntopic = "ferreteria"\nterms = {[f"taladro {n}" for n in range(11)]}',
+        r"\.terms",
+    ),
+    "repeated_name": ('name = "MULTIMETRO"\ntopic = "ferreteria"\nterms = ["tester"]', "repetido"),
+    "long_term": (f'name = "Taladro"\ntopic = "ferreteria"\nterms = ["{"x" * 41}"]', "40"),
+    "short_term": ('name = "Taladro"\ntopic = "ferreteria"\nterms = ["ti"]', "3 letras"),
+}
+
+
+@pytest.mark.parametrize("problem", sorted(BAD_INTERESTS))
+def test_load_interests_rejects(problem: str, tmp_path: Path) -> None:
+    second, reason = BAD_INTERESTS[problem]
+    with pytest.raises(ConfigError, match=reason):
+        load_interests(_interests_file(tmp_path, second))
+
+
+def test_check_config_fails_on_bad_interests(
+    env: None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Un interés mal escrito en la semilla es un error de configuración (spec del perfil §5)."""
+    bad = _interests_file(tmp_path, BAD_INTERESTS["short_term"][0])
+    monkeypatch.setattr("discountz.__main__.load_interests", partial(load_interests, bad))
+    assert main(["check-config"]) == 2
+    assert "3 letras" in capsys.readouterr().err

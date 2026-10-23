@@ -25,7 +25,14 @@ from discountz.app.crawl import (
     run_crawl_reconnecting,
 )
 from discountz.app.cycle import CycleDeps, run_cycle
-from discountz.config import Settings, load_canaries, load_params, load_settings, load_topics
+from discountz.config import (
+    Settings,
+    load_canaries,
+    load_interests,
+    load_params,
+    load_settings,
+    load_topics,
+)
 from discountz.domain.commands import BOT_MENU
 from discountz.domain.errors import ConfigError, LeaseBusy, TelegramError
 from discountz.infra.credentials import EnvCredentials
@@ -139,12 +146,14 @@ def _cmd_check_config() -> int:
         params = load_params()
         canaries = load_canaries()
         topics = load_topics()
+        interests = load_interests()
     except ConfigError as exc:
         print(f"check-config: {exc}", file=sys.stderr)
         return EXIT_CONFIG
     print(
         f"check-config: OK ({len(params.budgets)} fuentes, {len(params.events)} eventos, "
-        f"{len(topics.params)} temas, canarios en {len(canaries)} tiendas)"
+        f"{len(topics.params)} temas, {len(interests.seeds)} intereses, "
+        f"canarios en {len(canaries)} tiendas)"
     )
     return EXIT_OK
 

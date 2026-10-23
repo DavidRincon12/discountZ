@@ -10,7 +10,11 @@ from dataclasses import dataclass
 
 from discountz.domain.community import stem
 from discountz.domain.model import normalize_title
+from discountz.domain.topics import TOPIC_CODES
 
+# `errores` y `comunidad_us` no clasifican productos: un interés no se agrupa ahí.
+INTEREST_TOPICS = tuple(c for c in TOPIC_CODES if c not in ("errores", "comunidad_us"))
+MAX_TERMS = 10
 MAX_TERM_CHARS = 40
 MIN_WORD_LETTERS = 3  # un término de una sola palabra más corta coincidiría con cualquier cosa
 

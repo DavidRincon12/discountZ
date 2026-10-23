@@ -1,0 +1,373 @@
+# Intereses de David (spec del perfil §3-§4, ADR 0013): lo que coincide sale en tarjeta aunque
+# su tema no esté en `card`, aunque la fuente ya haya enviado sus tarjetas del día y sin el
+# precio mínimo del rastreo; sigue exigiendo un descuento real contra el histórico.
+#
+# Cada interés: `name` (1 a 40 caracteres, sin repetir), `topic` (el tema del grupo bajo el que
+# se lista en /interes), `terms` (1 a 10, en español y en inglés) y `exclude` (opcional).
+# Un término coincide si sus palabras aparecen seguidas en el título, sin importar mayúsculas,
+# tildes ni plural; un término de una sola palabra necesita al menos 3 letras (en `exclude`
+# sí vale una más corta, como «3d»). Si coinciden varios, gana el término con más palabras y,
+# a igual largo, el que aparece primero en este archivo (los de /interes van después).
+# Los intereses personales se agregan con /interes; los de este archivo se cambian con un PR.
+
+daily_cards_per_interest = 3  # tarjetas por interés al día de Bogotá; lo demás va al resumen
+
+# 📱 Tecnología
+
+[[interests]]
+name = "Portátil"
+topic = "tecnologia"
+terms = ["portatil", "computador portatil", "laptop", "notebook", "macbook"]
+exclude = [
+    "funda", "forro", "sleeve", "case", "protector", "sticker", "skin", "soporte", "stand",
+    "mochila", "backpack", "maletin", "bag",
+]
+
+[[interests]]
+name = "Monitor"
+topic = "tecnologia"
+terms = ["monitor"]
+exclude = ["bebe", "baby", "presion", "pressure", "cardiaco", "heart"]
+
+[[interests]]
+name = "SSD"
+topic = "tecnologia"
+terms = ["disco solido", "unidad de estado solido", "ssd", "nvme"]
+
+[[interests]]
+name = "Memoria RAM"
+topic = "tecnologia"
+terms = ["memoria ram", "ram ddr4", "ram ddr5", "ddr4", "ddr5", "sodimm"]
+
+[[interests]]
+name = "Tarjeta gráfica"
+topic = "tecnologia"
+terms = ["tarjeta grafica", "tarjeta de video", "graphics card", "gpu", "geforce", "rtx", "radeon"]
+
+[[interests]]
+name = "Procesador"
+topic = "tecnologia"
+terms = ["procesador", "cpu", "ryzen", "intel core", "core ultra"]
+
+[[interests]]
+name = "Teclado mecánico"
+topic = "tecnologia"
+terms = ["teclado mecanico", "mechanical keyboard"]
+
+[[interests]]
+name = "Mouse"
+topic = "tecnologia"
+terms = ["mouse inalambrico", "mouse gamer", "wireless mouse", "gaming mouse", "mouse"]
+exclude = ["pad", "alfombrilla"]
+
+[[interests]]
+name = "Audífonos"
+topic = "tecnologia"
+terms = ["audifonos", "auriculares", "diadema", "headphones", "earbuds", "headset", "airpods"]
+exclude = ["funda", "case", "estuche"]
+
+[[interests]]
+name = "Parlante"
+topic = "tecnologia"
+terms = ["parlante", "bocina", "bluetooth speaker"]
+
+[[interests]]
+name = "Router wifi"
+topic = "tecnologia"
+terms = ["router wifi", "repetidor wifi", "mesh wifi", "wifi 6", "wifi 7", "access point"]
+
+[[interests]]
+name = "Almacenamiento externo"
+topic = "tecnologia"
+terms = [
+    "disco duro externo", "disco externo", "memoria usb", "external hard drive", "portable ssd",
+    "flash drive", "microsd",
+]
+
+[[interests]]
+name = "Hub USB-C"
+topic = "tecnologia"
+terms = ["hub usb c", "adaptador multipuerto", "usb c hub", "docking station"]
+
+[[interests]]
+name = "Tablet"
+topic = "tecnologia"
+terms = ["tablet", "tableta", "ipad", "galaxy tab"]
+exclude = ["funda", "case", "protector", "vidrio", "mica", "teclado"]
+
+[[interests]]
+name = "Celular"
+topic = "tecnologia"
+terms = ["celular", "telefono celular", "smartphone", "iphone", "pixel", "redmi"]
+exclude = [
+    "funda", "forro", "case", "protector", "vidrio", "mica", "cargador", "charger", "cable",
+    "soporte",
+]
+
+[[interests]]
+name = "Smartwatch"
+topic = "tecnologia"
+terms = ["reloj inteligente", "smartwatch", "apple watch", "galaxy watch", "smart band"]
+exclude = ["correa", "strap", "protector", "funda"]
+
+[[interests]]
+name = "Power bank"
+topic = "tecnologia"
+terms = ["bateria externa", "cargador portatil", "power bank"]
+
+[[interests]]
+name = "Webcam"
+topic = "tecnologia"
+terms = ["camara web", "webcam"]
+
+[[interests]]
+name = "Impresora"
+topic = "tecnologia"
+terms = ["impresora", "multifuncional", "printer"]
+exclude = ["3d"]
+
+[[interests]]
+name = "Impresora 3D"
+topic = "tecnologia"
+terms = [
+    "impresora 3d", "filamento pla", "3d printer", "bambu lab", "creality", "prusa",
+    "pla filament",
+]
+
+[[interests]]
+name = "Raspberry Pi"
+topic = "tecnologia"
+terms = ["raspberry pi"]
+
+[[interests]]
+name = "Arduino y ESP32"
+topic = "tecnologia"
+terms = [
+    "microcontrolador", "kit de sensores", "protoboard", "arduino", "esp32", "esp8266",
+    "microcontroller", "sensor kit", "breadboard",
+]
+
+[[interests]]
+name = "Lector de libros"
+topic = "tecnologia"
+terms = ["lector de libros electronicos", "kindle", "e reader", "ereader", "kobo"]
+exclude = ["funda", "case"]
+
+[[interests]]
+name = "Tableta gráfica"
+topic = "tecnologia"
+terms = ["tableta grafica", "tableta digitalizadora", "drawing tablet", "wacom", "xp pen"]
+
+# 🔧 Ferretería y autos
+
+[[interests]]
+name = "Taladro"
+topic = "ferreteria"
+terms = ["taladro", "rotomartillo", "drill", "hammer drill"]
+exclude = ["broca", "bits"]
+
+[[interests]]
+name = "Atornillador"
+topic = "ferreteria"
+terms = [
+    "atornillador", "destornillador electrico", "llave de impacto", "impact driver",
+    "impact wrench", "cordless screwdriver",
+]
+
+[[interests]]
+name = "Destornilladores de precisión"
+topic = "ferreteria"
+terms = [
+    "juego de destornilladores", "destornilladores de precision", "screwdriver set",
+    "precision screwdriver", "ifixit",
+]
+
+[[interests]]
+name = "Kit de herramientas"
+topic = "ferreteria"
+terms = [
+    "kit de herramientas", "juego de herramientas", "caja de herramientas", "tool kit",
+    "tool set", "tool box", "toolbox",
+]
+
+[[interests]]
+name = "Llaves y copas"
+topic = "ferreteria"
+terms = [
+    "juego de llaves", "juego de copas", "llave de torque", "socket set", "wrench set",
+    "ratchet", "torque wrench",
+]
+
+[[interests]]
+name = "Pulidora"
+topic = "ferreteria"
+terms = ["pulidora", "esmeril angular", "angle grinder"]
+exclude = ["disco"]
+
+[[interests]]
+name = "Sierras"
+topic = "ferreteria"
+terms = [
+    "sierra circular", "caladora", "sierra ingletadora", "circular saw", "jigsaw", "miter saw",
+]
+exclude = ["hoja", "blade"]
+
+[[interests]]
+name = "Herramienta rotativa"
+topic = "ferreteria"
+terms = ["mototool", "herramienta rotativa", "dremel", "rotary tool"]
+
+[[interests]]
+name = "Multímetro"
+topic = "ferreteria"
+terms = ["multimetro", "pinza amperimetrica", "multimeter", "clamp meter"]
+
+[[interests]]
+name = "Soldadura electrónica"
+topic = "ferreteria"
+terms = [
+    "cautin", "estacion de soldadura", "estano para soldar", "soldering iron",
+    "soldering station", "solder wire",
+]
+
+[[interests]]
+name = "Osciloscopio"
+topic = "ferreteria"
+terms = [
+    "osciloscopio", "generador de funciones", "analizador logico", "oscilloscope",
+    "function generator", "logic analyzer",
+]
+
+[[interests]]
+name = "Fuente de laboratorio"
+topic = "ferreteria"
+terms = ["fuente de laboratorio", "fuente regulada", "bench power supply", "dc power supply"]
+
+[[interests]]
+name = "Calibrador"
+topic = "ferreteria"
+terms = ["calibrador", "pie de rey", "micrometro", "caliper", "vernier", "micrometer"]
+
+[[interests]]
+name = "Medición"
+topic = "ferreteria"
+terms = [
+    "nivel laser", "medidor laser", "flexometro", "laser level", "laser measure", "tape measure",
+]
+
+[[interests]]
+name = "Pistola de silicona y calor"
+topic = "ferreteria"
+terms = ["pistola de silicona", "pistola de calor", "hot glue gun", "heat gun"]
+
+[[interests]]
+name = "Linterna"
+topic = "ferreteria"
+terms = ["linterna", "linterna frontal", "flashlight", "headlamp"]
+
+[[interests]]
+name = "Prensa de banco"
+topic = "ferreteria"
+terms = ["prensa de banco", "tornillo de banco", "banco de trabajo", "bench vise", "workbench"]
+
+[[interests]]
+name = "Inflador y compresor"
+topic = "ferreteria"
+terms = ["inflador portatil", "compresor de aire", "tire inflator", "air compressor"]
+
+# 📚 Libros y papelería
+
+[[interests]]
+name = "Calculadora"
+topic = "libros"
+terms = [
+    "calculadora cientifica", "calculadora graficadora", "scientific calculator",
+    "graphing calculator", "ti 84", "ti nspire", "casio fx", "hp prime",
+]
+
+[[interests]]
+name = "Libros de ingeniería"
+topic = "libros"
+terms = [
+    "ingenieria", "calculo", "fisica universitaria", "termodinamica", "estatica", "engineering",
+    "calculus", "physics", "thermodynamics", "statics",
+]
+
+[[interests]]
+name = "Cuadernos"
+topic = "libros"
+terms = ["cuaderno", "libreta", "cuaderno inteligente", "rocketbook"]
+
+[[interests]]
+name = "Dibujo técnico"
+topic = "libros"
+terms = [
+    "escuadras", "compas", "regla t", "portaminas", "estilografo", "drafting",
+    "mechanical pencil", "technical pen",
+]
+
+# 👕 Moda y calzado
+
+[[interests]]
+name = "Morral"
+topic = "moda"
+terms = ["morral", "mochila", "maletin para portatil", "backpack", "laptop bag"]
+
+[[interests]]
+name = "Botas de seguridad"
+topic = "moda"
+terms = [
+    "botas de seguridad", "botas punta de acero", "calzado de seguridad", "safety boots",
+    "steel toe", "work boots",
+]
+
+[[interests]]
+name = "Chaqueta impermeable"
+topic = "moda"
+terms = ["chaqueta impermeable", "impermeable", "rain jacket", "waterproof jacket"]
+
+# 🛋️ Hogar y muebles
+
+[[interests]]
+name = "Escritorio"
+topic = "hogar"
+terms = ["escritorio", "escritorio elevable", "desk", "standing desk"]
+
+[[interests]]
+name = "Silla de oficina"
+topic = "hogar"
+terms = [
+    "silla ergonomica", "silla de oficina", "silla de escritorio", "silla gamer", "office chair",
+    "ergonomic chair", "gaming chair",
+]
+
+[[interests]]
+name = "Lámpara de escritorio"
+topic = "hogar"
+terms = [
+    "lampara de escritorio", "barra de luz para monitor", "desk lamp", "monitor light bar",
+]
+
+[[interests]]
+name = "Soporte de monitor o portátil"
+topic = "hogar"
+terms = [
+    "soporte para monitor", "brazo para monitor", "soporte para portatil", "monitor arm",
+    "monitor stand", "laptop stand",
+]
+
+# ⚽ Deportes
+
+[[interests]]
+name = "Movilidad eléctrica"
+topic = "deportes"
+terms = [
+    "patineta electrica", "scooter electrico", "bicicleta electrica", "electric scooter",
+    "e bike", "ebike",
+]
+
+[[interests]]
+name = "Bicicleta"
+topic = "deportes"
+terms = ["bicicleta", "bicycle", "bike"]
+exclude = ["infantil", "nino", "kids", "estatica", "stationary", "juguete"]
