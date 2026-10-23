@@ -158,3 +158,15 @@ def test_load_plan_input(db: psycopg.Connection) -> None:
     assert [w.pending for w in inp.watches] == [True]
     assert inp.hot_listings == [("exito", state.id)]
     assert "exito" in inp.breakers and inp.discovery_paused is False
+
+
+def test_add_list_and_delete_interests(db: psycopg.Connection) -> None:
+    first = repo.add_interest(db, "RTX 5070", "tecnologia", ["rtx 5070", "rtx5070"], T)
+    second = repo.add_interest(db, "Soldador", "ferreteria", ["soldador"], T)
+    assert repo.list_interests(db) == [
+        repo.InterestRow(first, "RTX 5070", "tecnologia", ("rtx 5070", "rtx5070")),
+        repo.InterestRow(second, "Soldador", "ferreteria", ("soldador",)),
+    ]
+    assert repo.delete_interest(db, first)
+    assert not repo.delete_interest(db, first)
+    assert [r.id for r in repo.list_interests(db)] == [second]

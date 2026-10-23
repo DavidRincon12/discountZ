@@ -10,6 +10,7 @@ import pytest
 from discountz.app.held import Slot, admit, digest_due, send_digest
 from discountz.config import load_params
 from discountz.domain.model import AlertKind
+from discountz.infra import db as repo
 
 pytestmark = pytest.mark.integration
 
@@ -139,3 +140,15 @@ def test_long_digest_rings_once(db: psycopg.Connection) -> None:
     nine = datetime(2026, 10, 23, 2, 5, tzinfo=UTC)
     assert send_digest(db, nine, PARAMS) > 1
     assert [silent for _, _, silent in digests(db)][:2] == [False, True]
+
+
+def test_interest_cards_do_not_count_for_the_source_cap(db: psycopg.Connection) -> None:
+    day = T.date()
+    for interest, line in (("SSD", None), ("SSD", None), (None, None), ("SSD", "• x")):
+        entry = repo.OfferEntry("exito", day, "tecnologia", "catalog_drop", 2000, line, interest)
+        repo.log_offer(db, entry, T)
+    other_day = repo.OfferEntry("exito", day - timedelta(days=1), "tecnologia", "x", 1, None, "SSD")
+    repo.log_offer(db, other_day, T - timedelta(days=1))
+    assert repo.count_cards(db, "exito", day) == 1
+    assert repo.count_interest_cards(db, "SSD", day) == 2  # sin la retenida ni la de ayer
+    assert repo.count_interest_cards(db, "Monitor", day) == 0

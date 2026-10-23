@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -2224,6 +2224,7 @@ class OfferEntry:
     kind: str
     drop_bp: int | None
     line: str | None  # None: salió en tarjeta; si no, su línea en el resumen
+    interest: str | None = None  # el interés que la sacó: cuenta para su tope, no el de la fuente
 
 
 @dataclass(frozen=True, slots=True)
@@ -2237,8 +2238,8 @@ class HeldOffer:
 def log_offer(conn: psycopg.Connection, entry: OfferEntry, now: datetime) -> None:
     conn.execute(
         """INSERT INTO discountz.offer_log (source, day, topic, kind, drop_bp, carded, line,
-               created_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+               created_at, interest)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
             entry.source,
             entry.day,
@@ -2248,17 +2249,30 @@ def log_offer(conn: psycopg.Connection, entry: OfferEntry, now: datetime) -> Non
             entry.line is None,
             entry.line,
             now,
+            entry.interest,
         ),
     )
 
 
 def count_cards(conn: psycopg.Connection, source: str, day: date) -> int:
-    """Tarjetas de la fuente en el día, sin los errores de precio."""
+    """Tarjetas de la fuente en el día, sin los errores de precio ni las de un interés."""
     row = _one(
         conn,
         """SELECT count(*) FROM discountz.offer_log
-            WHERE source = %s AND day = %s AND carded AND kind <> 'price_error'""",
+            WHERE source = %s AND day = %s AND carded AND kind <> 'price_error'
+              AND interest IS NULL""",
         (source, day),
+    )
+    return int(_required(row)[0])
+
+
+def count_interest_cards(conn: psycopg.Connection, name: str, day: date) -> int:
+    """Tarjetas que sacó el interés en el día, de todas las fuentes."""
+    row = _one(
+        conn,
+        """SELECT count(*) FROM discountz.offer_log
+            WHERE interest = %s AND day = %s AND carded""",
+        (name, day),
     )
     return int(_required(row)[0])
 
@@ -2315,3 +2329,38 @@ def mark_offers_digested(conn: psycopg.Connection, ids: Sequence[int], now: date
 def delete_old_offer_log(conn: psycopg.Connection, before: datetime) -> int:
     cur = conn.execute("DELETE FROM discountz.offer_log WHERE created_at < %s", (before,))
     return cur.rowcount
+
+
+# ───────────── Intereses personales (/interes, spec del perfil §3.4)
+
+
+@dataclass(frozen=True, slots=True)
+class InterestRow:
+    id: int
+    name: str
+    topic: str
+    terms: tuple[str, ...]  # normalizados
+
+
+def list_interests(conn: psycopg.Connection) -> list[InterestRow]:
+    rows = conn.execute(
+        "SELECT id, name, topic, terms FROM discountz.interest ORDER BY id"
+    ).fetchall()
+    return [InterestRow(int(r[0]), r[1], r[2], tuple(r[3])) for r in rows]
+
+
+def add_interest(
+    conn: psycopg.Connection, name: str, topic: str, terms: Sequence[str], now: datetime
+) -> int:
+    row = _one(
+        conn,
+        """INSERT INTO discountz.interest (name, topic, terms, created_at)
+           VALUES (%s, %s, %s, %s) RETURNING id""",
+        (name, topic, list(terms), now),
+    )
+    return int(_required(row)[0])
+
+
+def delete_interest(conn: psycopg.Connection, interest_id: int) -> bool:
+    cur = conn.execute("DELETE FROM discountz.interest WHERE id = %s", (interest_id,))
+    return cur.rowcount == 1
