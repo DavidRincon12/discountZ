@@ -7,6 +7,7 @@ from datetime import UTC, datetime, time, timedelta
 from functools import partial
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from discountz.__main__ import main
@@ -15,13 +16,16 @@ from discountz.config import (
     PARAMS_PATH,
     Settings,
     load_canaries,
+    load_interests,
     load_params,
     load_settings,
     load_topics,
 )
 from discountz.domain.errors import ConfigError
+from discountz.domain.interests import interest_key
 from discountz.domain.money import Currency
 from discountz.domain.params import DEFAULT_CATEGORIES, GlobalParams
+from discountz.domain.topics import TOPIC_CODES
 
 SECRET = "123456:SECRETO-de-prueba"  # noqa: S105 - falso, de prueba
 DB_SECRET = "postgresql://u:CANARYPASS@localhost:5432/postgres"  # noqa: S105
@@ -373,15 +377,13 @@ def test_crawl_start_gives_up_after_the_reconnects(monkeypatch: pytest.MonkeyPat
 
 
 def test_load_topics_reads_profile_modes() -> None:
-    """Fija el perfil de `config/topics.toml` (README §17): quien cambie un `mode`, cambia esto.
-
-    Hasta que lleguen los intereses (PR 2), Hogar, Deportes y Otros siguen en tarjeta.
-    """
+    """Fija el perfil de `config/topics.toml` (README §17): quien cambie un `mode`, cambia esto."""
     modes = {code: p.mode for code, p in load_topics().params.items()}
     off = {"belleza", "mercado", "bebes", "mascotas"}
+    interest = {"hogar", "deportes", "otros"}
     assert {c for c, m in modes.items() if m == "off"} == off
-    assert {c for c, m in modes.items() if m == "interest"} == set()
-    assert {c for c, m in modes.items() if m == "card"} == set(modes) - off
+    assert {c for c, m in modes.items() if m == "interest"} == interest
+    assert {c for c, m in modes.items() if m == "card"} == set(modes) - off - interest
 
 
 def _topics_with_unknown_mode(folder: Path) -> Path:
@@ -410,3 +412,87 @@ def test_check_config_fails_on_unknown_topic_mode(
     monkeypatch.setattr("discountz.__main__.load_topics", partial(load_topics, bad))
     assert main(["check-config"]) == 2
     assert ".mode" in capsys.readouterr().err
+
+
+def test_seed_interests_load() -> None:
+    """La semilla carga y es coherente; no fija cuántos ni cuáles: David la edita."""
+    cfg = load_interests()
+    assert cfg.daily_cards_per_interest >= 1
+    assert cfg.seeds
+    assert len({interest_key(i.name) for i in cfg.seeds}) == len(cfg.seeds)
+    assert {i.topic for i in cfg.seeds} <= set(TOPIC_CODES) - {"errores", "comunidad_us"}
+    assert all(i.personal_id is None for i in cfg.seeds)
+
+
+def _interests_file(folder: Path, second: str) -> Path:
+    """Un `interests.toml` mínimo: un interés válido y `second` como el segundo."""
+    path = folder / "interests.toml"
+    path.write_text(
+        "daily_cards_per_interest = 3\n\n"
+        '[[interests]]\nname = "Multímetro"\ntopic = "ferreteria"\nterms = ["multimetro"]\n\n'
+        f"[[interests]]\n{second}\n",
+        "utf-8",
+    )
+    return path
+
+
+def test_load_interests_reads_a_minimal_file(tmp_path: Path) -> None:
+    second = (
+        'name = "Taladro"\ntopic = "ferreteria"\nterms = ["Taladros", "drill"]\nexclude = ["3d"]'
+    )
+    seeds = load_interests(_interests_file(tmp_path, second)).seeds
+    assert [i.name for i in seeds] == ["Multímetro", "Taladro"]
+    assert seeds[1].terms == (("taladro",), ("drill",))
+    assert seeds[1].exclude == (("3d",),)  # en `exclude` vale una palabra corta
+
+
+BAD_INTERESTS = {
+    "unknown_topic": ('name = "Taladro"\ntopic = "jardin"\nterms = ["taladro"]', "tema"),
+    "reserved_topic": ('name = "Taladro"\ntopic = "errores"\nterms = ["taladro"]', "tema"),
+    "no_terms": ('name = "Taladro"\ntopic = "ferreteria"\nterms = []', r"\.terms"),
+    "many_terms": (
+        f'name = "Taladro"\ntopic = "ferreteria"\nterms = {[f"taladro {n}" for n in range(11)]}',
+        r"\.terms",
+    ),
+    "repeated_name": ('name = "MULTIMETRO"\ntopic = "ferreteria"\nterms = ["tester"]', "repetido"),
+    "long_term": (f'name = "Taladro"\ntopic = "ferreteria"\nterms = ["{"x" * 41}"]', "40"),
+    "short_term": ('name = "Taladro"\ntopic = "ferreteria"\nterms = ["ti"]', "3 letras"),
+}
+
+
+@pytest.mark.parametrize("problem", sorted(BAD_INTERESTS))
+def test_load_interests_rejects(problem: str, tmp_path: Path) -> None:
+    second, reason = BAD_INTERESTS[problem]
+    with pytest.raises(ConfigError, match=reason):
+        load_interests(_interests_file(tmp_path, second))
+
+
+def test_check_config_fails_on_bad_interests(
+    env: None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Un interés mal escrito en la semilla es un error de configuración (spec del perfil §5)."""
+    bad = _interests_file(tmp_path, BAD_INTERESTS["short_term"][0])
+    monkeypatch.setattr("discountz.__main__.load_interests", partial(load_interests, bad))
+    assert main(["check-config"]) == 2
+    assert "3 letras" in capsys.readouterr().err
+
+
+def test_run_fails_on_bad_interests_before_connecting(
+    env: None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """El ciclo lee los intereses con el resto de la configuración: falla antes de tocar la BD."""
+    bad = _interests_file(tmp_path, BAD_INTERESTS["short_term"][0])
+    monkeypatch.setattr("discountz.__main__.load_interests", partial(load_interests, bad))
+
+    def no_db(*_: object) -> None:
+        raise psycopg.OperationalError("sin BD")
+
+    monkeypatch.setattr("discountz.__main__._connect_with_retry", no_db)
+    assert main(["run"]) == 2
+    assert "3 letras" in capsys.readouterr().err

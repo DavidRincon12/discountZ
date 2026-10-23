@@ -332,7 +332,13 @@ def _partitions(node: _TreeNode, above: tuple[str, ...] = ()) -> list[CatalogPar
 
 def _observation(item: EbayItem) -> CatalogObservation:
     return CatalogObservation(
-        item.external_id, item.price, item.category_path, None, item.seller_class, item.model_key
+        item.external_id,
+        item.price,
+        item.category_path,
+        None,
+        item.seller_class,
+        item.model_key,
+        item.title,
     )
 
 

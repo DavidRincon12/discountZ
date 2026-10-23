@@ -27,10 +27,10 @@ Monolito modular hexagonal-lite **síncrono** (ADR 0001). Paquete `src/discountz
 
 | Módulo | Responsabilidad |
 |---|---|
-| `domain/` | Puro: `Money`, modelo, `SafeUrl`, segmentos, estadísticos, guardas, `evaluate`, `decide`, comandos, planificador, salud, ofertas de canales (`community`). Sin I/O, reloj ni azar del sistema |
+| `domain/` | Puro: `Money`, modelo, `SafeUrl`, segmentos, estadísticos, guardas, `evaluate`, `decide`, comandos, planificador, salud, ofertas de canales (`community`), perfil de temas (`topics`) e intereses (`interests`). Sin I/O, reloj ni azar del sistema |
 | `infra/` | HTTP (`PacedClient` como Decorator), BD (Repository de funciones), migraciones, Telegram, logs, healthchecks |
 | `sources/` | Contrato `Source`, registro (`SOURCES`, `route_url`), detección de bloqueos y un adaptador por plataforma (incluidos los canales de Telegram, `kind="channel"`) |
-| `app/` | Casos de uso: ciclo (bandeja de entrada, recolección, confirmación, composición, entrega, mantenimiento, render) y rastreo del catálogo (`crawl`) |
+| `app/` | Casos de uso: ciclo (bandeja de entrada, recolección, confirmación, composición, entrega, mantenimiento, render), rastreo del catálogo (`crawl`), tope de tarjetas del día (`held`) e intereses activos (`interests`) |
 | `__main__.py` | Composition root y CLI: `run`, `crawl`, `migrate`, `check-config`, `record-fixture` |
 
 Regla de dependencias `app → sources → infra → domain`, comprobada por import-linter en pre-commit y CI:
@@ -80,6 +80,10 @@ Migración `0008_jumbo_pepeganga`: fuentes `jumbo` y `pepeganga`, dos tiendas VT
 
 Migración `0009_min_seen_at`: `catalog_item.min_seen_at`; el mínimo de precios estables vence a los 90 días (`domain/catalog.py`, `MIN_WINDOW`).
 
+Migración `0010_tope_diario` (ADR 0012): `offer_log`, cada oferta del rastreo y de los canales frente al tope del día (en tarjeta, o retenida con su línea para el resumen de las 21:00), y `alert.delivery = 'held'`.
+
+Migración `0012_intereses` (spec del perfil §3, ADR 0013): `interest`, los intereses personales de `/interes` (la semilla vive en `config/interests.toml`), y `offer_log.interest`, el interés cuyo tope usó la tarjeta (NULL si usó el de la fuente).
+
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
 ## Flujos clave
@@ -100,10 +104,10 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
    2. Capa caliente (≤ 25 % del presupuesto): `fetch_changed` en Best Buy, relectura de lo que cambió hace poco en VTEX (sin los temas `off` del perfil, ADR 0013).
    3. Barrido desde el cursor: particiones por categoría raíz y, si pasan de 2.500 productos, bandas de precio partidas a demanda. Se saltan las particiones de temas `off` del perfil (`domain/topics.py`, ADR 0013).
    4. Cada página va a `domain/catalog.py` (puro); en eBay también se compara con la mediana de las publicaciones del mismo modelo (`model_candidate`, ADR 0008); una bajada real contra el «antes» estable se confirma en la ficha (±1 %, stock, vendedor) y se descarta si otra tienda alertó el mismo EAN.
-   5. Solo se confirma lo de un tema `card` del perfil (ADR 0013). La alerta entra a `outbox` con su tema y su tarjeta; el ciclo la entrega como foto (`sendPhoto`) en ese tema.
+   5. Solo se confirma lo de un tema `card` del perfil o lo que coincide con un interés, que se detecta sin los mínimos de precio y de ahorro (ADR 0013, `domain/interests.py`). `app/held.py` decide si sale en tarjeta: 8 por tienda al día y 3 por interés (con ese tope lleno, lo que también saldría sin el interés usa el de la tienda); lo demás va al resumen de las 21:00. La alerta entra a `outbox` con su tema y su tarjeta; el ciclo la entrega como foto (`sendPhoto`) en ese tema.
 4. **Feed de Slickdeals**: una tarea `feed` baja el RSS una vez para todas las búsquedas `source='slickdeals'` vencidas → cada lead que coincide y apunta a una tienda activa (sin red: `href`, `u2=` o `data-aps-asin`) encola en memoria una lectura de ficha en esa tienda, antes que sus demás tareas → `evaluate(origin="lead")` puede dar `COMMUNITY_DEAL`. Los leads no se guardan, pero todo lead que lleva a una ficha crea un seguimiento automático (`aNN`, 30 días sin alerta, tope por tienda).
 
-5. **Canales de Telegram** (`app/channels.py`, dentro del ciclo): cada canal que toca (3 min) baja hasta 3 páginas `t.me/s/<canal>?after=<cursor>` con `sources/telegram_channels.py` → `domain/community.py` descarta duplicados (mismo cupón, o precio a ±10 % y títulos parecidos, 24 h) y asigna el tema → lo de un tema que no es `card` del perfil queda visto (`baseline`) sin enviarse (ADR 0013) → por página, en una transacción: guarda las publicaciones, encola la tarjeta «sin verificar» en `outbox` y avanza el cursor. La primera lectura solo fija el cursor. Los feeds de Amazon (`sources/dealnews.py` cada 10 min y `slickdeals_amazon` cada 30) son canales con `ordered_ids=False`: se releen enteros, se saltan los ids ya guardados y su primera lectura marca lo que hay con `baseline` (ADR 0006).
+5. **Canales de Telegram** (`app/channels.py`, dentro del ciclo): cada canal que toca (3 min) baja hasta 3 páginas `t.me/s/<canal>?after=<cursor>` con `sources/telegram_channels.py` → `domain/community.py` descarta duplicados (mismo cupón, o precio a ±10 % y títulos parecidos, 24 h) y asigna el tema → lo de un tema que no es `card` del perfil queda visto (`baseline`) sin enviarse, salvo que coincida con un interés (ADR 0013) → por página, en una transacción: guarda las publicaciones, encola la tarjeta «sin verificar» en `outbox` (o la retiene para el resumen con el tope del día de `app/held.py`, como en el rastreo) y avanza el cursor. La primera lectura solo fija el cursor. Los feeds de Amazon (`sources/dealnews.py` cada 10 min y `slickdeals_amazon` cada 30) son canales con `ordered_ids=False`: se releen enteros, se saltan los ids ya guardados y su primera lectura marca lo que hay con `baseline` (ADR 0006).
 
 ## Atributos de calidad
 1. **Corrección de alertas**: ninguna alerta por un error de parseo o un descuento inflado (guardas G1-G14, confirmación independiente, tabla U01-U37).

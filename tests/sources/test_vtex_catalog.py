@@ -93,6 +93,7 @@ def test_catalog_page_parses_real_fixture(code: str) -> None:
         assert obs.price.minor > 0
         assert obs.category_path.startswith("/")
         assert obs.ean is None or obs.ean.isdigit()
+        assert obs.title
 
 
 def test_pepeganga_marketplace_product_is_marked_as_marketplace() -> None:
@@ -123,6 +124,7 @@ def test_catalog_page_takes_cheapest_seller_in_stock() -> None:
     assert by_id["101"].seller_class is SellerClass.MARKETPLACE
     assert by_id["101"].category_path == "/Tecnología/Celulares/Smartphones/"
     assert by_id["101"].ean == "7701234567890"
+    assert by_id["101"].title == "Producto 101"
     assert by_id["103"].seller_class is SellerClass.FIRST_PARTY
     assert by_id["103"].ean is None  # EAN fuera de 6-14 dígitos
 

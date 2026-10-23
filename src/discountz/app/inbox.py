@@ -14,15 +14,19 @@ import logging
 import re
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import psycopg
 
-from discountz.app.render import esc, render_health, render_list, source_name
-from discountz.config import load_topics
+from discountz.app.interests import active_interests
+from discountz.app.render import esc, render_health, render_interests, render_list, source_name
+from discountz.config import InterestsConfig, Topics, load_interests, load_topics
 from discountz.domain import commands as c
+from discountz.domain.community import topic_for_title
 from discountz.domain.errors import ParseError, TelegramError, UnsafeUrl
-from discountz.domain.model import ListingRef
+from discountz.domain.interests import MAX_PERSONAL, Interest, interest_key
+from discountz.domain.model import ListingRef, normalize_title
 from discountz.domain.money import Currency, parse_price
 from discountz.infra import db
 from discountz.infra.telegram import CallbackQuery, IncomingMessage, TelegramApi, Update
@@ -45,7 +49,8 @@ HELP = (
     "/lista [#cat|fuente] · /dejar &lt;p12|a12|b3|auto&gt;\n"
     "/objetivo &lt;p12&gt; &lt;precio|no&gt; · /categoria &lt;p12|L1234&gt; &lt;cat&gt;\n"
     "/silenciar &lt;p12|L1234|todo&gt; &lt;días&gt; · /fuente &lt;on|off&gt; &lt;codigo&gt;\n"
-    "/token_vence AAAA-MM-DD · /temas · /estado · /ayuda"
+    "/token_vence AAAA-MM-DD · /temas · /estado · /ayuda\n"
+    "/interes [frases, …] [#tema] · /interes quitar &lt;n&gt;"
 )
 TOPICS_FAILED = (
     "No pude crear los temas. Revisa que el grupo tenga los temas activados y que el bot sea"
@@ -61,6 +66,15 @@ _URL_REASONS = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class _Context:
+    """Lo que leen los comandos además de la base."""
+
+    sources: Mapping[str, Source] | None
+    topics: Topics
+    interests: InterestsConfig
+
+
 def process_inbox(
     conn: psycopg.Connection,
     tg: TelegramApi,
@@ -71,8 +85,15 @@ def process_inbox(
     *,
     sources: Mapping[str, Source] | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    topics: Topics | None = None,
+    interests: InterestsConfig | None = None,
 ) -> int:
     """Procesa los updates pendientes durante hasta `max_seconds`; devuelve cuántos de David."""
+    ctx = _Context(
+        sources,
+        load_topics() if topics is None else topics,
+        load_interests() if interests is None else interests,
+    )
     deadline = monotonic() + max_seconds
     offset = db.telegram_offset(conn) + 1
     processed = 0
@@ -87,7 +108,7 @@ def process_inbox(
             if _is_topics(upd):
                 _topics(conn, tg, upd, chat_id, now)
             else:
-                _apply(conn, tg, upd, now, sources)
+                _apply(conn, tg, upd, now, ctx)
             processed += 1
     with conn.transaction():
         db.advance_offset(conn, offset - 1)  # ajenos al final del lote: un solo UPDATE
@@ -143,13 +164,13 @@ def _apply(
     tg: TelegramApi,
     upd: Update,
     now: datetime,
-    sources: Mapping[str, Source] | None,
+    ctx: _Context,
 ) -> None:
     reply_to = _reply_to(upd)
     try:
         with conn.transaction():
             if db.advance_offset(conn, upd.update_id):
-                for i, text in enumerate(_handle(conn, upd, now, sources)):
+                for i, text in enumerate(_handle(conn, upd, now, ctx)):
                     _reply(conn, upd.update_id, i, text, reply_to, now)
     except Exception as exc:  # update venenoso: no puede bloquear la cola
         with conn.transaction():
@@ -192,21 +213,16 @@ def _reply(
     )
 
 
-def _handle(
-    conn: psycopg.Connection, upd: Update, now: datetime, sources: Mapping[str, Source] | None
-) -> list[str]:
+def _handle(conn: psycopg.Connection, upd: Update, now: datetime, ctx: _Context) -> list[str]:
     if upd.message is not None:
-        return _handle_message(conn, upd.message, now, sources)
+        return _handle_message(conn, upd.message, now, ctx)
     if upd.callback is not None:
         return [_handle_callback(conn, upd.callback, now)]
     return []
 
 
 def _handle_message(
-    conn: psycopg.Connection,
-    m: IncomingMessage,
-    now: datetime,
-    sources: Mapping[str, Source] | None,
+    conn: psycopg.Connection, m: IncomingMessage, now: datetime, ctx: _Context
 ) -> list[str]:
     if m.text is None:
         return []
@@ -215,9 +231,9 @@ def _handle_message(
         case c.CommandRejected(reason):
             return [esc(reason)]
         case c.Follow():
-            return [_follow(conn, cmd, m.message_id, now, sources)]
+            return [_follow(conn, cmd, m.message_id, now, ctx.sources)]
         case c.Search():
-            return [_search(conn, cmd, now, sources)]
+            return [_search(conn, cmd, now, ctx.sources)]
         case c.ListCmd(filter=flt):
             return _list(conn, flt)
         case c.Drop("auto"):
@@ -256,7 +272,58 @@ def _handle_message(
             return [HELP]
         case c.Topics():
             return []  # lo atiende `_topics` antes de llegar aquí
+        case c.InterestList():
+            titles = {code: p.title for code, p in ctx.topics.params.items()}
+            return render_interests(_numbered(conn, ctx.interests), titles)
+        case c.InterestAdd():
+            return [_interest_add(conn, cmd, ctx, now)]
+        case c.InterestDrop(number):
+            return [_interest_drop(conn, number, ctx.interests)]
     return []  # pragma: no cover - `match` exhaustivo
+
+
+def _numbered(conn: psycopg.Connection, cfg: InterestsConfig) -> list[tuple[int, Interest]]:
+    """Número de cada interés en /interes: la semilla 1..S en orden del archivo y los personales
+    S + id, que no se corre al quitar otro (quitar dos seguidos quita esos dos)."""
+    seeds = len(cfg.seeds)
+    return [
+        (n if i.personal_id is None else seeds + i.personal_id, i)
+        for n, i in enumerate(active_interests(conn, cfg), start=1)
+    ]
+
+
+def _interest_add(
+    conn: psycopg.Connection, cmd: c.InterestAdd, ctx: _Context, now: datetime
+) -> str:
+    numbered = _numbered(conn, ctx.interests)
+    key = interest_key(cmd.name)
+    for n, interest in numbered:
+        if interest_key(interest.name) == key:
+            name = esc(interest.name)
+            return f"Ya existe el interés {n}. {name}: usa otro nombre (la primera frase)."
+    if sum(1 for _, i in numbered if i.personal_id is not None) >= MAX_PERSONAL:
+        return f"Ya tienes {MAX_PERSONAL} intereses tuyos: quita uno con /interes quitar &lt;n&gt;."
+    topic = cmd.topic or topic_for_title(" ".join(cmd.terms), ctx.topics.channel_rules)
+    terms = [normalize_title(t) for t in cmd.terms]  # se guardan normalizados (spec del perfil §5)
+    n = len(ctx.interests.seeds) + db.add_interest(conn, cmd.name, topic, terms, now)
+    params = ctx.topics.params.get(topic)
+    text = f"Listo: {n}. {esc(cmd.name)} en {esc(params.title if params else topic)}."
+    if cmd.topic is None:
+        text += f" ¿Otro tema? /interes quitar {n} y agrégalo de nuevo con #tema."
+    return text
+
+
+def _interest_drop(conn: psycopg.Connection, number: int, cfg: InterestsConfig) -> str:
+    if number <= len(cfg.seeds):
+        name = esc(cfg.seeds[number - 1].name)
+        return (
+            f"{number}. {name} es de la lista base: se cambia en config/interests.toml con un PR."
+        )
+    personal_id = number - len(cfg.seeds)
+    row = next((r for r in db.list_interests(conn) if r.id == personal_id), None)
+    if row is None or not db.delete_interest(conn, personal_id):
+        return f"No encontré el interés {number}."
+    return f"Listo: quité {number}. {esc(row.name)}."
 
 
 def _url_rejected(i: int, exc: UnsafeUrl) -> str:

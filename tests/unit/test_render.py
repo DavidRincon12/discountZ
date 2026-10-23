@@ -26,6 +26,7 @@ from discountz.app.render import (
     render_daily,
     render_health,
     render_held_digest,
+    render_interests,
     render_list,
     render_storm,
     render_summary,
@@ -33,6 +34,7 @@ from discountz.app.render import (
     visible_length,
 )
 from discountz.domain.community import ChannelPost
+from discountz.domain.interests import compile_interest
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
@@ -459,6 +461,19 @@ def test_catalog_alert_caption() -> None:
     assert buttons[1][1] == {"text": "Seguir", "callback_data": "fol:L42"}
 
 
+def test_catalog_alert_with_interest_matches_golden() -> None:
+    card = CARD_C01 | {
+        "topic": "hogar",
+        "title": "Silla Ergonómica de Oficina",
+        "interest": "Silla de oficina",
+    }
+    msg = render_catalog_alert(card, 42, "🛋️ Hogar y muebles")
+    assert msg.html == golden("alert_interest_cop.html")
+    escaped = render_catalog_alert(card | {"interest": "Silla <gamer>"}, 42, "🛋️ Hogar y muebles")
+    assert escaped.html.split("\n")[2] == "🎯 Silla &lt;gamer&gt;"
+    assert "🎯" not in render_catalog_alert(CARD_C01, 42, "📱 Tecnología").html
+
+
 def test_catalog_price_error_caption_usd() -> None:
     card = CARD_C01 | {
         "store": "bestbuy_us",
@@ -558,6 +573,17 @@ def test_render_channel_deal_matches_golden(kw: dict[str, object], topic: str, n
     assert render_channel_deal(_channel_post(**kw), topic).html == golden(name)
 
 
+def test_channel_deal_with_interest_matches_golden() -> None:
+    post = _channel_post(
+        **CHANNEL_COP | {"title": 'Monitor gamer 27" 165 Hz', "price": Money(899_900, Currency.COP)}
+    )
+    assert render_channel_deal(post, "tecnologia", "Monitor").html == golden(
+        "channel_deal_interest.html"
+    )
+    assert channel_card(post, "tecnologia", "Monitor")["interest"] == "Monitor"
+    assert channel_card(post, "tecnologia")["interest"] is None
+
+
 def test_render_channel_deal_buttons() -> None:
     assert render_channel_deal(_channel_post(), "deportes").buttons == [
         [Button("Ver oferta", url="https://joylink.io/clubgratis/x")],
@@ -596,6 +622,7 @@ def test_channel_card_fields() -> None:
         "coupon": "T6YLVQZS",
         "badge": "Clubgratis · sin verificar",
         "casillero": False,
+        "interest": None,
     }
 
 
@@ -752,3 +779,44 @@ def test_held_digest_splits_into_messages_that_fit() -> None:
 def test_held_digest_of_one_offer_says_so_in_singular() -> None:
     (body,) = render_held_digest([_held("exito", 2000, "• x")], 8)
     assert body.startswith("🌙 <b>Resumen de la noche</b> · 1 oferta\n")
+
+
+INTEREST_TITLES = {"tecnologia": "📱 Tecnología", "hogar": "🛋️ Hogar y muebles"}
+
+
+def test_interest_list_groups_by_topic_and_marks_seeds() -> None:
+    monitor = compile_interest("Monitor", "tecnologia", ["monitor"])
+    desk = compile_interest("Escritorio <alto>", "hogar", ["escritorio"])
+    mine = compile_interest("rtx 5070", "tecnologia", ["rtx 5070"], personal_id=1)
+    assert render_interests([(1, monitor), (2, desk), (56, mine)], INTEREST_TITLES) == [
+        "🎯 <b>Intereses</b> · 2 de la lista base (🌱) y 1 tuyo\n"
+        "<i>Agrega uno: /interes frase, sinónimo… [#tema] · quita uno tuyo: "
+        "/interes quitar &lt;n&gt;</i>\n"
+        "\n"
+        "<b>📱 Tecnología</b>\n"
+        "1. 🌱 Monitor\n"
+        "56. rtx 5070\n"
+        "\n"
+        "<b>🛋️ Hogar y muebles</b>\n"
+        "2. 🌱 Escritorio &lt;alto&gt;"
+    ]
+
+
+def test_interest_list_splits_at_the_telegram_limit() -> None:
+    seeds = [(n, compile_interest(f"Semilla {n:02}", "tecnologia", ["abc"])) for n in range(1, 56)]
+    mine = [
+        (55 + i, compile_interest("n" * 37 + f"{i:03}", "hogar", ["abc"], personal_id=i))
+        for i in range(1, 101)
+    ]
+    bodies = render_interests([*seeds, *mine], INTEREST_TITLES)
+    assert len(bodies) > 1
+    assert all(visible_length(b) <= MAX_VISIBLE for b in bodies)
+    assert all(b.startswith("<b>") for b in bodies[1:])  # cada mensaje dice de qué tema sigue
+    text = "\n".join(bodies)
+    assert all(f"\n{n}. " in text for n, _ in [*seeds, *mine])
+
+
+def test_interest_list_without_interests() -> None:
+    assert render_interests([], INTEREST_TITLES) == [
+        "No hay intereses. Agrega uno: /interes frase, sinónimo… [#tema]"
+    ]

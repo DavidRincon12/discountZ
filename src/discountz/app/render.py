@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from discountz.domain.community import ChannelPost
+from discountz.domain.interests import Interest
 from discountz.domain.model import AlertKind, Flag
 from discountz.domain.money import Currency, Money, format_money
 from discountz.infra.db import CatalogDaily, HeldOffer, SearchItem, StatusSnapshot, WatchItem
@@ -282,6 +283,8 @@ def render_catalog_alert(
         "",
         f"<b>{format_money(price)}</b>  {reference} (-{pct(int(card['drop_bp']))})",
     ]
+    if card.get("interest"):  # lo sacó un interés (spec del perfil §3.3)
+        lines.insert(2, f"🎯 {esc(str(card['interest']))}")
     if kind is AlertKind.PRICE_ERROR:
         lines.append("<i>La tienda puede anular el pedido.</i>")
     elif kind is not AlertKind.MODEL_LOW:
@@ -325,7 +328,7 @@ def _channel_labels(post: ChannelPost) -> tuple[str, str]:
     return f"OFERTA DE {name.upper()}", f"Ver en {name}"
 
 
-def channel_card(post: ChannelPost, topic: str) -> dict[str, Any]:
+def channel_card(post: ChannelPost, topic: str, interest: str | None = None) -> dict[str, Any]:
     """Datos de la tarjeta `community` de una oferta de canal (se guardan en `outbox.card`)."""
     return {
         "store": post.channel,
@@ -339,10 +342,13 @@ def channel_card(post: ChannelPost, topic: str) -> dict[str, Any]:
         "coupon": post.coupon,
         "badge": f"{source_name(post.channel)} · sin verificar",
         "casillero": post.casillero,
+        "interest": interest,
     }
 
 
-def render_channel_deal(post: ChannelPost, topic: str) -> RenderedMessage:
+def render_channel_deal(
+    post: ChannelPost, topic: str, interest: str | None = None
+) -> RenderedMessage:
     """Pie de foto de una oferta de canal (spec de canales §5); cabe en 1.024."""
     header, post_button = _channel_labels(post)
     head = f"<b>{header}</b> · #{topic}"
@@ -354,6 +360,8 @@ def render_channel_deal(post: ChannelPost, topic: str) -> RenderedMessage:
         "",
         f"<b>{format_money(post.price)}</b>",
     ]
+    if interest:  # lo sacó un interés (spec del perfil §3.3)
+        lines.insert(2, f"🎯 {esc(interest)}")
     if post.coupon:
         lines.append(f"Cupón <code>{esc(post.coupon)}</code>")
     lines.append(f"📣 Visto en {esc(source_name(post.channel))} · sin verificar")
@@ -610,6 +618,42 @@ def render_held_digest(rows: Sequence[HeldOffer], daily_cards: int) -> list[str]
             if visible_length("\n".join([*current, *block])) > MAX_VISIBLE:
                 bodies.append("\n".join(current))
                 block = [heading[1] if heading else f"<b>{name}</b> (sigue)", line]
+                current = []
+            current.extend(block)
+            heading = []
+    bodies.append("\n".join(current))
+    return bodies
+
+
+INTERESTS_EMPTY = "No hay intereses. Agrega uno: /interes frase, sinónimo… [#tema]"
+
+
+def render_interests(items: Sequence[tuple[int, Interest]], titles: Mapping[str, str]) -> list[str]:
+    """`/interes`: con su número y por tema, en el orden en que aparecen (la semilla va agrupada
+    por tema); 🌱 marca los de la lista base. Mensajes de 4.096 visibles, como el resumen."""
+    if not items:
+        return [INTERESTS_EMPTY]
+    groups: dict[str, list[str]] = {}
+    for number, interest in items:
+        mark = "🌱 " if interest.personal_id is None else ""
+        groups.setdefault(interest.topic, []).append(f"{number}. {mark}{esc(interest.name)}")
+    seeds = sum(1 for _, i in items if i.personal_id is None)
+    mine = len(items) - seeds
+    current = [
+        f"🎯 <b>Intereses</b> · {seeds} de la lista base (🌱) y {mine} "
+        f"tuyo{'' if mine == 1 else 's'}",
+        "<i>Agrega uno: /interes frase, sinónimo… [#tema] · quita uno tuyo: "
+        "/interes quitar &lt;n&gt;</i>",
+    ]
+    bodies: list[str] = []
+    for code, lines in groups.items():
+        title = f"<b>{esc(titles.get(code, code))}</b>"
+        heading = ["", title]
+        for line in lines:
+            block = [*heading, line]
+            if visible_length("\n".join([*current, *block])) > MAX_VISIBLE:
+                bodies.append("\n".join(current))
+                block = [title if heading else f"{title} (sigue)", line]
                 current = []
             current.extend(block)
             heading = []

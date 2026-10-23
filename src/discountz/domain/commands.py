@@ -1,7 +1,8 @@
 """Comandos de Telegram tipados (spec §5.3, sin `/peso`, con `/fuente` y `/token_vence`). Puro.
 
 `parse_command` solo valida la forma. Las URLs se validan con `SafeUrl` y los precios con
-`parse_price` cuando ya se conoce la fuente (app/inbox).
+`parse_price` cuando ya se conoce la fuente (app/inbox). `/interes` valida aquí sus frases y su
+tema; el nombre repetido y el máximo de intereses los decide app/inbox, que ve la base.
 """
 
 from __future__ import annotations
@@ -10,6 +11,9 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
+
+from discountz.domain.interests import INTEREST_TOPICS, MAX_TERMS, term_problem
+from discountz.domain.model import normalize_title
 
 CATEGORIES = frozenset({"tecnologia", "componentes", "hogar", "ropa", "otros"})
 DEFAULT_CATEGORY = "otros"
@@ -97,6 +101,23 @@ class Topics:
 
 
 @dataclass(frozen=True, slots=True)
+class InterestList:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class InterestAdd:
+    name: str  # la primera frase
+    terms: tuple[str, ...]  # todas las frases, como llegaron
+    topic: str | None  # None: el tema sale del clasificador de los canales
+
+
+@dataclass(frozen=True, slots=True)
+class InterestDrop:
+    number: int  # el de la lista de /interes
+
+
+@dataclass(frozen=True, slots=True)
 class CommandRejected:
     reason: str  # texto para David, en español
 
@@ -114,6 +135,9 @@ Command = (
     | Status
     | Help
     | Topics
+    | InterestList
+    | InterestAdd
+    | InterestDrop
 )
 
 
@@ -260,6 +284,32 @@ def _token(args: list[str]) -> Command | CommandRejected:
         return usage
 
 
+def _interest(args: list[str]) -> Command | CommandRejected:
+    """`/interes`, `/interes frase, sinónimo… [#tema]` o `/interes quitar <n>` (spec §3.4)."""
+    if not args:
+        return InterestList()
+    if args[0].lower() == "quitar":
+        if len(args) != 2 or not re.fullmatch(r"\d{1,9}", args[1]) or int(args[1]) == 0:
+            return CommandRejected("Uso: /interes quitar <n>, con el número que da /interes")
+        return InterestDrop(int(args[1]))
+    tags = [a for a in args if a.startswith("#")]
+    if len(tags) > 1:
+        return CommandRejected("Un solo #tema por interés.")
+    topic = normalize_title(tags[0][1:]) if tags else None
+    if topic is not None and topic not in INTEREST_TOPICS:
+        return CommandRejected(f"Tema desconocido. Usa: {', '.join(INTEREST_TOPICS)}.")
+    text = " ".join(a for a in args if not a.startswith("#"))
+    terms = tuple(t for t in (p.strip() for p in text.split(",")) if t)
+    if not terms:
+        return CommandRejected("Escribe al menos una frase. Ejemplo: /interes rtx 5070, rtx5070")
+    if len(terms) > MAX_TERMS:
+        return CommandRejected(f"Máximo {MAX_TERMS} frases por interés.")
+    for term in terms:
+        if (problem := term_problem(term)) is not None:
+            return CommandRejected(f"«{term}»: {problem}.")
+    return InterestAdd(terms[0], terms, topic)
+
+
 def _no_args(cmd: Command) -> _Parser:
     def parse(args: list[str]) -> Command | CommandRejected:
         return cmd if not args else CommandRejected("Este comando no lleva argumentos.")
@@ -280,6 +330,7 @@ _PARSERS: dict[str, _Parser] = {
     "estado": _no_args(Status()),
     "ayuda": _no_args(Help()),
     "temas": _no_args(Topics()),
+    "interes": _interest,
 }
 
 # Menú que Telegram muestra al escribir «/» en el grupo (`setup-bot`). Sin /temas: el grupo
@@ -295,5 +346,6 @@ BOT_MENU: tuple[tuple[str, str], ...] = (
     ("fuente", "Encender o apagar una fuente: /fuente <on|off> <codigo>"),
     ("estado", "Salud de las fuentes y del bot"),
     ("token_vence", "Fecha en que vence el token: /token_vence AAAA-MM-DD"),
+    ("interes", "Intereses: /interes [frases, …] [#tema] · /interes quitar <n>"),
     ("ayuda", "Todos los comandos y su sintaxis"),
 )

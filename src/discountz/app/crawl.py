@@ -31,6 +31,7 @@ from discountz.domain.catalog import (
     CatalogCandidate,
     CatalogObservation,
     CatalogState,
+    meets_floors,
     model_candidate,
     observe,
 )
@@ -43,6 +44,7 @@ from discountz.domain.errors import (
 )
 from discountz.domain.guards import check_offer
 from discountz.domain.health import BreakerEvent, BreakerState, breaker_transition, effective_state
+from discountz.domain.interests import Interest, match_interest
 from discountz.domain.model import AlertKind, ListingRef, Maturity, Offer, SellerClass
 from discountz.domain.money import format_money
 from discountz.domain.scheduling import CrawlBudget
@@ -104,6 +106,8 @@ class CrawlDeps:
     sleep: Callable[[float], None]
     rnd: random.Random
     max_items: int | None = None  # tope de publicaciones guardadas (eBay: 150 mil)
+    interests: tuple[Interest, ...] = ()  # semilla y personales (`active_interests`)
+    interest_cap: int = 3  # tarjetas por interés al día (`daily_cards_per_interest`)
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +126,7 @@ class _Found:
     candidate: CatalogCandidate
     topic: str
     peers: int = 0  # > 0: la referencia es la mediana de esos pares del mismo modelo
+    interest: str | None = None  # el interés que la saca (spec del perfil §3.3)
 
 
 class _Stop(Exception):
@@ -368,18 +373,23 @@ class _Run:
         for o in items:
             topic = assign_topic(self.deps.topics.rules, self.code, o.category_path)
             prev = states.get(o.external_id)
-            state, cand, changed = observe(prev, o, self.now, params[topic], self.deps.params.glob)
+            hit = match_interest(o.title or "", self.deps.interests)
+            interest = hit.name if hit is not None else None
+            glob = self.deps.params.glob
+            state, cand, changed = observe(
+                prev, o, self.now, params[topic], glob, floors=interest is None
+            )
             currency = o.price.currency.value
             rows[o.external_id] = db.CatalogRow(
                 o.external_id, o.ean, topic, currency, state, o.model_key
             )
             self.items += 1
             self.changes += int(changed)
-            best = self.best_candidate(prev, o, cand, peers, topic)
+            best = self.best_candidate(prev, o, cand, peers, topic, interest)
             if best is None:
                 continue
-            if params[topic].mode != "card":  # fuera del perfil: se guarda sin confirmar
-                self.off_profile += 1
+            if params[topic].mode != "card" and interest is None:  # fuera del perfil
+                self.off_profile += 1  # se guarda sin confirmar
                 continue
             found.append(best)
         fresh = _cheapest_per_model([f for f in found if not self.duplicate(f)])
@@ -430,17 +440,19 @@ class _Run:
         cand: CatalogCandidate | None,
         peers: Mapping[str, list[tuple[str, int]]],
         topic: str,
+        interest: str | None = None,
     ) -> _Found | None:
         """Bajada de la misma publicación (§4.1) o precio bajo frente al modelo (§4.2): gana la
-        de mayor descuento."""
-        best = _Found(o, cand, topic) if cand is not None else None
+        de mayor descuento. Con un interés no se exigen el precio ni el ahorro mínimos."""
+        best = _Found(o, cand, topic, interest=interest) if cand is not None else None
         if o.model_key is None:
             return best
         prices = [p for ext, p in peers.get(o.model_key, []) if ext != o.external_id]
         params = self.deps.topics.params[topic]
-        model = model_candidate(prev, self.now, o, prices, params, self.deps.params.glob)
+        glob = self.deps.params.glob
+        model = model_candidate(prev, self.now, o, prices, params, glob, floors=interest is None)
         if model is not None and (best is None or model.drop_bp > best.candidate.drop_bp):
-            return _Found(o, model, topic, len(prices))
+            return _Found(o, model, topic, len(prices), interest)
         return best
 
     def duplicate(self, f: _Found) -> bool:
@@ -569,10 +581,13 @@ class _Run:
             db.mark_catalog_alert(self.conn, self.code, f.obs.external_id, price, self.now)
             if alert_id is None or delivery != "new":
                 return
-            card = _card(self.code, f.topic, title, url, facts, cand, f.peers)
-            slot = Slot(self.code, f.topic, kind, cand.drop_bp)
-            cards = self.deps.params.daily_cards
-            if not admit(self.conn, slot, self.now, cards, held_catalog_line(card)):
+            card = _card(self.code, f.topic, title, url, facts, cand, f.peers, f.interest)
+            # Con el tope del interés lleno, lo que también saldría sin él usa el de la tienda.
+            alone = topic.mode == "card" and meets_floors(cand, self.deps.params.glob)
+            slot = Slot(self.code, f.topic, kind, cand.drop_bp, f.interest, alone)
+            cards, per_interest = self.deps.params.daily_cards, self.deps.interest_cap
+            line = held_catalog_line(card)
+            if not admit(self.conn, slot, self.now, cards, line, per_interest):
                 db.mark_alert_held(self.conn, alert_id)  # va al resumen de la noche
                 return
             msg = render_catalog_alert(card, prev.id, topic.title)
@@ -631,6 +646,7 @@ def _card(
     facts: CardFacts | None,
     cand: CatalogCandidate,
     peers: int = 0,
+    interest: str | None = None,
 ) -> dict[str, Any]:
     if peers:
         label = f"Mediana de {peers} publicaciones del mismo modelo"
@@ -651,6 +667,7 @@ def _card(
         "reference_label": label,
         "note": facts.note if facts else None,
         "peers": peers,
+        "interest": interest,
     }
 
 

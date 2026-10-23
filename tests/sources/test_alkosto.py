@@ -447,6 +447,7 @@ def test_band_reads_items_with_numeric_filters() -> None:
     assert tv.category_path == "/tv/smart tv/"
     assert tv.ean == TV
     assert tv.seller_class is SellerClass.FIRST_PARTY
+    assert tv.title is not None and tv.title.startswith("TV KALLEY 60")
     sent = api.calls[-1][2]
     assert sent is not None
     assert sent["numericFilters"] == ["lowestprice_double>=1500000", "lowestprice_double<=1700000"]

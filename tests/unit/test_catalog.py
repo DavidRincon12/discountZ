@@ -12,9 +12,11 @@ from hypothesis import strategies as st
 from discountz.domain.catalog import (
     MIN_PEERS,
     MIN_READS,
+    CatalogCandidate,
     CatalogObservation,
     CatalogState,
     median_low,
+    meets_floors,
     model_candidate,
     observe,
     split_price_band,
@@ -345,3 +347,41 @@ def test_split_price_band_at_the_geometric_midpoint() -> None:
 
 def test_split_price_band_does_not_split_a_single_price() -> None:
     assert split_price_band(5, 5) == []
+
+
+def test_observe_without_floors_accepts_a_cheap_real_drop() -> None:
+    """Un interés salta el precio mínimo y el ahorro mínimo (spec del perfil §3.3)."""
+    state, t = history(80_000, 5, glob=PROD)
+    later = t + timedelta(hours=6)
+    assert observe(state, obs(60_000), later, TECH, PROD)[1] is None
+    cand = observe(state, obs(60_000), later, TECH, PROD, floors=False)[1]
+    assert cand is not None
+    assert cand.kind is AlertKind.CATALOG_DROP
+
+
+def test_observe_without_floors_still_needs_a_real_drop() -> None:
+    state, t = history(80_000, 5, glob=PROD)
+    later = t + timedelta(hours=6)
+    assert observe(state, obs(75_000), later, TECH, PROD, floors=False)[1] is None  # 6 %
+    young, t = history(80_000, 2, glob=PROD)
+    assert observe(young, obs(60_000), t + timedelta(hours=6), TECH, PROD, floors=False)[1] is None
+
+
+def test_model_candidate_without_floors_skips_the_minimum_saving() -> None:
+    assert model_candidate(None, T0, usd(600), [1_000] * 5, TECH, GLOB) is None
+    cand = model_candidate(None, T0, usd(600), [1_000] * 5, TECH, GLOB, floors=False)
+    assert cand is not None
+    assert cand.kind is AlertKind.MODEL_LOW
+
+
+def test_meets_floors_needs_the_min_price_and_the_min_saving() -> None:
+    """Lo que saldría sin un interés: «antes» de 100.000 y ahorro de 30.000 como mínimo."""
+
+    def cand(price: int, usual: int) -> CatalogCandidate:
+        cop = Currency.COP
+        return CatalogCandidate(AlertKind.CATALOG_DROP, Money(price, cop), Money(usual, cop), 0, 5)
+
+    assert meets_floors(cand(119_900, 199_900), PROD)
+    assert meets_floors(cand(70_000, 100_000), PROD)  # justo en los dos mínimos
+    assert not meets_floors(cand(59_900, 79_900), PROD)  # «antes» bajo el mínimo
+    assert not meets_floors(cand(180_000, 199_900), PROD)  # ahorro de 19.900

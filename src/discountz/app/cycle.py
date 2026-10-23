@@ -23,6 +23,7 @@ from discountz.app.confirm import confirm_candidates
 from discountz.app.deliver import deliver, make_photo_fetcher
 from discountz.app.held import digest_due, send_digest
 from discountz.app.inbox import process_inbox
+from discountz.app.interests import active_interests
 from discountz.app.links import make_link_resolver
 from discountz.app.maintenance import (
     MB,
@@ -32,7 +33,15 @@ from discountz.app.maintenance import (
     summary_due,
 )
 from discountz.app.render import local, source_name
-from discountz.config import AppParams, Canary, Settings, Topics, load_topics
+from discountz.config import (
+    AppParams,
+    Canary,
+    InterestsConfig,
+    Settings,
+    Topics,
+    load_interests,
+    load_topics,
+)
 from discountz.domain.errors import TelegramError
 from discountz.domain.health import BreakerState, classify_health, effective_state, tick_quarantine
 from discountz.domain.scheduling import PlanInput, Task, plan_run
@@ -80,6 +89,7 @@ class CycleDeps:
     # Transporte sin redirecciones para las fotos de las tarjetas y el enlace real de los canales.
     photos: HttpClient | None = None
     topics: Topics = field(default_factory=load_topics)  # tema de las ofertas de canales
+    interests: InterestsConfig = field(default_factory=load_interests)
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +182,8 @@ def _inbox(deps: CycleDeps, now: datetime) -> int:
             INBOX_SECONDS,
             sources=deps.sources,
             monotonic=deps.monotonic,
+            topics=deps.topics,
+            interests=deps.interests,
         )
     except TelegramError as exc:  # Telegram caído: el ciclo sigue sin comandos
         event(log, "inbox_unavailable", code=str(exc))
@@ -214,7 +226,18 @@ def _work(deps: CycleDeps, now: datetime, run_id: int, deadline: float) -> Cycle
     compose_alerts(conn, collector.views, now, params)
     channel_runs = _channel_runs(deps, inp, now, deadline)
     resolve = make_link_resolver(deps.photos, channel_link_hosts()) if deps.photos else None
-    run_channels(conn, channel_runs, now, params, deps.topics, deps.rnd, deadline, resolve=resolve)
+    run_channels(
+        conn,
+        channel_runs,
+        now,
+        params,
+        deps.topics,
+        deps.rnd,
+        deadline,
+        resolve=resolve,
+        interests=active_interests(conn, deps.interests),
+        interest_cap=deps.interests.daily_cards_per_interest,
+    )
     for r in channel_runs:
         _close_source(conn, r, now)
     runs += channel_runs

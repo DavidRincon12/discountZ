@@ -11,6 +11,7 @@ from discountz.domain.community import (
     assign_channel_topic,
     find_duplicate,
     title_tokens,
+    topic_for_title,
 )
 from discountz.domain.model import normalize_title
 from discountz.domain.money import Currency, Money
@@ -140,3 +141,10 @@ def test_topic_phrase_may_start_with_connector() -> None:
 
 def test_topic_defaults_to_otros() -> None:
     assert assign_channel_topic(_post("Producto genérico xyz"), RULES) == "otros"
+
+
+def test_topic_for_title_uses_channel_rules() -> None:
+    rules = (ChannelRule("ferreteria", frozenset({"taladro"})), *RULES)
+    assert topic_for_title("taladro percutor", rules) == "ferreteria"
+    assert topic_for_title("Teclados mecánicos, reloj inteligente", rules) == "tecnologia"
+    assert topic_for_title("xyz", rules) == "otros"

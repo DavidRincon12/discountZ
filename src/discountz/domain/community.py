@@ -46,7 +46,7 @@ class ChannelPost:
 HASHTAG_WEIGHT = 2
 HEAD_WEIGHT = 2
 TAIL_WEIGHT = 1
-_CONNECTORS = frozenset({"para", "con", "sin", "for", "with", "w", "without", "compatible"})
+CONNECTORS = frozenset({"para", "con", "sin", "for", "with", "w", "without", "compatible"})
 _MIN_AFFIX = 4  # un hashtag compuesto se lee por prefijo o sufijo de al menos 4 letras
 
 
@@ -163,9 +163,15 @@ def _title_scores(title: str, index: _Index, scores: Counter[str]) -> None:
                 i += size
                 break
         else:
-            if tokens[i] in _CONNECTORS:  # «para perros» puede ser una frase del vocabulario
+            if tokens[i] in CONNECTORS:  # «para perros» puede ser una frase del vocabulario
                 weight = TAIL_WEIGHT
             i += 1
+
+
+def _best(scores: Counter[str], index: _Index) -> str:
+    if not scores:
+        return DEFAULT_TOPIC
+    return min(scores, key=lambda t: (-scores[t], index.order[t]))
 
 
 def assign_channel_topic(post: ChannelPost, rules: Sequence[ChannelRule]) -> str:
@@ -176,6 +182,12 @@ def assign_channel_topic(post: ChannelPost, rules: Sequence[ChannelRule]) -> str
         if (topic := _hashtag_topic(tag, index)) is not None:
             scores[topic] += HASHTAG_WEIGHT
     _title_scores(post.title, index, scores)
-    if not scores:
-        return DEFAULT_TOPIC
-    return min(scores, key=lambda t: (-scores[t], index.order[t]))
+    return _best(scores, index)
+
+
+def topic_for_title(title: str, rules: Sequence[ChannelRule]) -> str:
+    """El tema que tendría una oferta de canal con ese título y sin hashtags (`/interes`)."""
+    index = _index(tuple(rules))
+    scores: Counter[str] = Counter()
+    _title_scores(title, index, scores)
+    return _best(scores, index)

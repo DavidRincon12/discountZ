@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 import psycopg
@@ -10,6 +11,7 @@ import pytest
 from discountz.app.held import Slot, admit, digest_due, send_digest
 from discountz.config import load_params
 from discountz.domain.model import AlertKind
+from discountz.infra import db as repo
 
 pytestmark = pytest.mark.integration
 
@@ -19,9 +21,14 @@ PARAMS = load_params()
 
 
 def slot(
-    kind: AlertKind = DROP, drop: int | None = 2000, topic: str = "hogar", source: str = "exito"
+    kind: AlertKind = DROP,
+    drop: int | None = 2000,
+    topic: str = "hogar",
+    source: str = "exito",
+    interest: str | None = None,
+    standalone: bool = False,
 ) -> Slot:
-    return Slot(source, topic, kind, drop)
+    return Slot(source, topic, kind, drop, interest, standalone)
 
 
 def carded(db: psycopg.Connection) -> list[tuple[str, bool]]:
@@ -139,3 +146,84 @@ def test_long_digest_rings_once(db: psycopg.Connection) -> None:
     nine = datetime(2026, 10, 23, 2, 5, tzinfo=UTC)
     assert send_digest(db, nine, PARAMS) > 1
     assert [silent for _, _, silent in digests(db)][:2] == [False, True]
+
+
+def test_interest_cards_do_not_count_for_the_source_cap(db: psycopg.Connection) -> None:
+    day = T.date()
+    for interest, line in (("SSD", None), ("SSD", None), (None, None), ("SSD", "• x")):
+        entry = repo.OfferEntry("exito", day, "tecnologia", "catalog_drop", 2000, line, interest)
+        repo.log_offer(db, entry, T)
+    other_day = repo.OfferEntry("exito", day - timedelta(days=1), "tecnologia", "x", 1, None, "SSD")
+    repo.log_offer(db, other_day, T - timedelta(days=1))
+    assert repo.count_cards(db, "exito", day) == 1
+    assert repo.count_interest_cards(db, "SSD", day) == 2  # sin la retenida ni la de ayer
+    assert repo.count_interest_cards(db, "Monitor", day) == 0
+
+
+def logged_interests(db: psycopg.Connection) -> list[tuple[str | None, bool]]:
+    rows = db.execute("SELECT interest, carded FROM discountz.offer_log ORDER BY id").fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+
+def test_interest_slot_skips_a_full_source_cap(db: psycopg.Connection) -> None:
+    for i in range(8):
+        assert admit(db, slot(drop=1000 + 100 * i), T, 8, "• x")
+    assert not admit(db, slot(drop=3000), T, 8, "• x")
+    assert admit(db, slot(drop=4000, interest="SSD"), T, 8, "• x")
+    assert logged_interests(db)[-1] == ("SSD", True)
+    assert not admit(db, slot(drop=5000), T, 8, "• x")  # no le devolvió cupo a la fuente
+
+
+def test_interest_cap_holds_the_fourth_card(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    sent = [admit(db, slot(drop=1000 + 200 * i, interest="SSD"), T, 8, "• x") for i in range(4)]
+    assert sent == [True, True, True, False]
+    assert logged_interests(db)[-1] == ("SSD", False)
+    assert admit(db, slot(drop=3000, interest="Monitor"), T, 8, "• x")  # el tope es por interés
+    assert admit(db, slot(drop=5000, interest="SSD"), T + timedelta(days=1), 8, "• x")
+    assert "offer_held source=exito code=interest_cap" in caplog.text
+    assert "SSD" not in caplog.text
+
+
+def test_interest_cap_follows_the_given_limit(db: psycopg.Connection) -> None:
+    assert admit(db, slot(drop=1000, interest="SSD"), T, 8, "• x", per_interest=1)
+    assert not admit(db, slot(drop=2000, interest="SSD"), T, 8, "• x", per_interest=1)
+
+
+def test_interest_slot_keeps_the_promotion_rule(db: psycopg.Connection) -> None:
+    assert admit(db, slot(drop=2000, interest="SSD"), T, 8, "• x")
+    assert not admit(db, slot(drop=2030, interest="SSD"), T + timedelta(hours=1), 8, "• x")
+    assert logged_interests(db) == [("SSD", True), ("SSD", False)]
+
+
+def test_interest_price_errors_always_go_out_and_do_not_count(db: psycopg.Connection) -> None:
+    for i in range(3):
+        assert admit(db, slot(drop=1000 + 200 * i, interest="SSD"), T, 8, "• x")
+    error = slot(AlertKind.PRICE_ERROR, 8000, interest="SSD")
+    assert admit(db, error, T, 8, "• x")
+    assert repo.count_interest_cards(db, "SSD", T.date()) == 3
+
+
+def test_full_interest_cap_falls_back_to_the_source_cap(db: psycopg.Connection) -> None:
+    """Lo que saldría sin el interés (tema en tarjeta, con los mínimos) no lo pierde por él."""
+    for i in range(3):
+        assert admit(db, slot(drop=1000 + 200 * i, interest="SSD"), T, 8, "• x")
+    assert admit(db, slot(drop=3000, interest="SSD", standalone=True), T, 8, "• x")
+    assert logged_interests(db)[-1] == (None, True)  # cuenta para la fuente, no para el interés
+    assert repo.count_cards(db, "exito", T.date()) == 1
+    assert repo.count_interest_cards(db, "SSD", T.date()) == 3
+
+
+def test_fallback_waits_when_the_source_cap_is_full_too(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    for i in range(8):
+        assert admit(db, slot(drop=1000 + 100 * i), T, 8, "• x")
+    for i in range(3):
+        assert admit(db, slot(drop=2000 + 200 * i, interest="SSD"), T, 8, "• x")
+    assert not admit(db, slot(drop=5000, interest="SSD", standalone=True), T, 8, "• x")
+    assert logged_interests(db)[-1] == (None, False)
+    assert "offer_held source=exito code=daily_cap" in caplog.text

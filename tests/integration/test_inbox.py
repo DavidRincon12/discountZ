@@ -11,6 +11,8 @@ import psycopg
 import pytest
 
 from discountz.app.inbox import process_inbox
+from discountz.config import InterestsConfig
+from discountz.domain.interests import compile_interest
 from discountz.domain.model import ListingRef
 from discountz.domain.money import Currency
 from discountz.domain.urls import SafeUrl
@@ -74,13 +76,25 @@ class Boom:
         raise RuntimeError("boom")
 
 
+# Semilla propia: las pruebas no dependen de config/interests.toml, que David edita.
+SEED = InterestsConfig(
+    3,
+    (
+        compile_interest("Portátil", "tecnologia", ["portatil", "laptop"]),
+        compile_interest("SSD", "tecnologia", ["ssd"]),
+        compile_interest("Multímetro", "ferreteria", ["multimetro", "multimeter"]),
+    ),
+)
+SEEDS = len(SEED.seeds)
+
+
 def run(
     db: psycopg.Connection,
     batches: list[list[Update]],
     sources: Mapping[str, Source] | None = None,
 ) -> tuple[int, FakeTelegram]:
     tg = FakeTelegram(batches)
-    n = process_inbox(db, tg, OWNER, CHAT, T, sources=sources or load_all())
+    n = process_inbox(db, tg, OWNER, CHAT, T, sources=sources or load_all(), interests=SEED)
     return n, tg
 
 
@@ -350,3 +364,67 @@ def test_source_on_after_off_closes_breaker_and_sets_ramp(db: psycopg.Connection
     assert state[:5] == ("closed", None, 3, 0, 0)
     assert state[5] is not None
     assert "activada" in replies(db)[-1]
+
+
+def test_interest_add_list_and_drop(db: psycopg.Connection) -> None:
+    """La lista agrupa por tema, numera la semilla y luego los personales (spec del perfil §3.4)."""
+    add = [msg(1, "/interes rtx 5070, RTX5070 #tecnologia"), msg(2, "/interes taladro percutor")]
+    run(db, [add])
+    rows = repo.list_interests(db)
+    assert [(r.name, r.topic, r.terms) for r in rows] == [
+        ("rtx 5070", "tecnologia", ("rtx 5070", "rtx5070")),
+        ("taladro percutor", "ferreteria", ("taladro percutor",)),
+    ]
+    rtx, drill = (SEEDS + r.id for r in rows)
+    added = replies(db)
+    assert added[0].startswith(f"Listo: {rtx}. rtx 5070 en 📱 Tecnología.")
+    assert f"Listo: {drill}. taladro percutor en 🔧 Ferretería y autos." in added[1]
+    assert f"/interes quitar {drill}" in added[1]  # el tema salió del clasificador: cómo cambiarlo
+
+    run(db, [[msg(3, "/interes")]])
+    listing = replies(db)[2]
+    assert "3 de la lista base (🌱) y 2 tuyos" in listing
+    assert "\n1. 🌱 Portátil\n" in listing
+    tech = listing.index("📱 Tecnología")
+    assert tech < listing.index("2. 🌱 SSD") < listing.index(f"{rtx}. rtx 5070")
+    assert listing.index(f"{rtx}. rtx 5070") < listing.index("🔧 Ferretería y autos")
+    ferreteria = listing.index("🔧 Ferretería y autos")
+    assert ferreteria < listing.index("3. 🌱 Multímetro") < listing.index(f"{drill}. taladro")
+
+    run(db, [[msg(4, f"/interes quitar {rtx}"), msg(5, f"/interes quitar {rtx}")]])
+    assert [r.name for r in repo.list_interests(db)] == ["taladro percutor"]
+    assert replies(db)[3:] == [f"Listo: quité {rtx}. rtx 5070.", f"No encontré el interés {rtx}."]
+
+
+def test_interest_numbers_do_not_shift_after_a_drop(db: psycopg.Connection) -> None:
+    """Quitar dos seguidos con los números de la lista quita esos dos, no el que se corrió."""
+    run(db, [[msg(1, "/interes kindle"), msg(2, "/interes kobo"), msg(3, "/interes boox")]])
+    kindle, kobo, boox = (SEEDS + r.id for r in repo.list_interests(db))
+    run(db, [[msg(4, f"/interes quitar {kindle}"), msg(5, f"/interes quitar {kobo}")]])
+    assert [SEEDS + r.id for r in repo.list_interests(db)] == [boox]
+
+
+def test_interest_add_rejects_a_seed_name_with_other_case_or_accents(
+    db: psycopg.Connection,
+) -> None:
+    run(db, [[msg(1, "/interes MULTIMETRO, multimetro digital"), msg(2, "/interes Ssd")]])
+    run(db, [[msg(3, "/interes rtx 5070"), msg(4, "/interes RTX-5070")]])
+    assert [r.name for r in repo.list_interests(db)] == ["rtx 5070"]
+    texts = replies(db)
+    assert "Multímetro" in texts[0] and "Multímetro" not in texts[1]
+    assert "SSD" in texts[1]
+    assert "rtx 5070" in texts[3] and texts[3].startswith("Ya existe")
+
+
+def test_interest_add_rejects_the_101st(db: psycopg.Connection) -> None:
+    for i in range(100):
+        repo.add_interest(db, f"interes {i:03}", "otros", [f"termino {i:03}"], T)
+    run(db, [[msg(1, "/interes uno mas")]])
+    assert len(repo.list_interests(db)) == 100
+    assert "100" in replies(db)[0] and "/interes quitar" in replies(db)[0]
+
+
+def test_interest_drop_of_a_seed_is_rejected(db: psycopg.Connection) -> None:
+    run(db, [[msg(1, "/interes quitar 1")]])
+    text = replies(db)[0]
+    assert "Portátil" in text and "config/interests.toml" in text

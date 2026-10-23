@@ -102,12 +102,14 @@ terms = ["multimetro", "multimeter", "pinza amperimetrica", "clamp meter"]
 - Un término coincide si sus palabras aparecen seguidas en el título («silla ergonomica» coincide con «Silla Ergonómica de Oficina», no con «Silla de comedor ergonómica»).
 - Un término de `exclude` presente en el título anula la coincidencia del interés (`monitor` excluye `bebe` y `baby`).
 - Si coinciden varios, gana el término con más palabras («monitor arm» le gana a «monitor»); a igual largo, el primero del archivo y luego los personales.
+- (Revisión final, 2026-10-23) El término tiene que empezar antes del primer conector del título («para», «con», «sin», «for», «with», «w», «without», «compatible»; uno al principio no corta): «Mochila para portátil» es un morral, no un portátil. El singular también ignora la «e» final, para que «cases» active el `exclude` «case» y «headphone» coincida con «headphones».
 
 ### 3.3 Qué hace una coincidencia
 
 - Sale en tarjeta aunque el tema no sea `card` y aunque la fuente ya haya enviado sus 8 tarjetas del día. No cuenta para ese tope.
 - No aplica el precio mínimo (100.000 COP / US$25) ni el ahorro mínimo (30.000 COP / US$5) del rastreo, ni el precio mínimo de lo que llega por casillero. Sí exige lo demás: el descuento contra el histórico propio (`t_bp` del tema), las 24 h de «antes» estable, la confirmación en la ficha y la regla de una tarjeta por promoción.
 - Hay un máximo de 3 tarjetas por interés al día de Bogotá (`daily_cards_per_interest` en `config/interests.toml`). Lo que pasa de ahí va al resumen de las 21:00.
+- (Revisión final, 2026-10-23) Con ese tope lleno, lo que también saldría sin el interés (tema `card` y con los mínimos) usa el tope de la fuente y cuenta para él: un interés nunca le quita la tarjeta a una oferta del perfil.
 - La tarjeta lleva una línea «🎯 <nombre del interés>» bajo el título.
 
 Para saltar los mínimos de precio en el rastreo, `CatalogObservation` gana `title` (VTEX `productName`, Alkosto `name_text_es`, eBay `title`). No se guarda en la base: solo vive durante la página.
@@ -138,6 +140,8 @@ ALTER TABLE offer_log ADD COLUMN interest text;  -- nombre del interés que la s
 `count_cards` (tope por fuente) pasa a contar solo `interest IS NULL`; el tope por interés cuenta `interest = <nombre>` en el día. `offer_log` guarda 7 días y pesa poco: no necesita índice nuevo.
 
 ## 4. Lista inicial de intereses (para revisar)
+
+(Revisión final, 2026-10-23) Los términos ambiguos se ajustaron contra títulos reales de los canales y del rastreo (`tests/unit/test_interest_seed.py`): la lista vigente es `config/interests.toml`, no esta tabla.
 
 | Tema | Interés | Palabras (español · inglés) | Excluye |
 |---|---|---|---|

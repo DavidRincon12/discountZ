@@ -23,6 +23,7 @@ from discountz.app.held import Slot, admit
 from discountz.config import load_params
 from discountz.domain.catalog import CatalogObservation, CatalogState
 from discountz.domain.errors import ParseError, Unavailable
+from discountz.domain.interests import Interest, compile_interest
 from discountz.domain.model import (
     AlertKind,
     ExtractionPath,
@@ -252,6 +253,7 @@ def deps(
     max_per_run: int = 1000,
     holder: str = "gh:1:1",
     max_items: int | None = None,
+    interests: tuple[Interest, ...] = (),
 ) -> tuple[CrawlDeps, Transport]:
     transport = Transport(clock)
     d = CrawlDeps(
@@ -267,6 +269,7 @@ def deps(
         sleep=clock.sleep,
         rnd=random.Random(1),
         max_items=max_items,
+        interests=interests,
     )
     return d, transport
 
@@ -689,6 +692,7 @@ def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
         "reference_label": "Antes",
         "note": None,
         "peers": 0,
+        "interest": None,
     }
     assert "BAJÓ DE PRECIO" in row.body_html
     alert = db.execute("SELECT kind, delivery FROM discountz.alert").fetchone()
@@ -1063,3 +1067,96 @@ def test_max_items_counts_the_catalog_once_per_run(
     run_crawl(d, T, minutes=60)
     assert calls == [EBAY]
     assert count(db, "catalog_item", "source = 'ebay_us'") == 4  # el tope se mira por página
+
+
+SILLA = compile_interest("Silla de oficina", "hogar", ["silla ergonomica", "office chair"])
+METER = compile_interest("Multímetro", "ferreteria", ["multimetro", "multimeter"])
+
+
+def titled(ext: str, price: int, title: str, path: str = PATH) -> CatalogObservation:
+    money = Money(price, Currency.COP)
+    return CatalogObservation(ext, money, path, None, SellerClass.FIRST_PARTY, title=title)
+
+
+def test_interest_match_alerts_in_an_interest_topic(db: psycopg.Connection) -> None:
+    """Hogar va solo por interés: la silla ergonómica sale en tarjeta con su interés."""
+    seed_history(db, "123", 199_900)
+    seed_history(db, "124", 199_900)
+    chair = titled("123", 119_900, "Silla Ergonómica Negra", "/Hogar/Muebles/")
+    table = titled("124", 119_900, "Mesa de comedor", "/Hogar/Muebles/")
+    offers = {"123": offer("123", 119_900), "124": offer("124", 119_900)}
+    src = FakeCatalog({"C:/1/": [[chair, table]]}, offers=offers)
+    d, _ = deps(db, src, Clock(), interests=(METER, SILLA))
+    result = run_crawl(d, T, minutes=60)
+    assert result.alerts == 1
+    (row,) = repo.claim_outbox(db, 10, T)
+    assert row.topic == "hogar"
+    assert row.card is not None and row.card["interest"] == "Silla de oficina"
+    assert "🎯 Silla de oficina" in row.body_html
+    logged = db.execute("SELECT interest FROM discountz.offer_log").fetchall()
+    assert logged == [("Silla de oficina",)]
+
+
+def test_interest_match_skips_the_price_floor(db: psycopg.Connection) -> None:
+    """Bajo el precio mínimo (100.000) y con poco ahorro, pero coincide con un interés."""
+    seed_history(db, "123", 79_900)
+    seed_history(db, "124", 79_900)
+    meter = titled("123", 59_900, "Multímetro Digital UNI-T")
+    phone = titled("124", 59_900, "Celular básico")
+    offers = {"123": offer("123", 59_900), "124": offer("124", 59_900)}
+    src = FakeCatalog({"C:/1/": [[meter, phone]]}, offers=offers)
+    d, _ = deps(db, src, Clock(), interests=(METER,))
+    assert run_crawl(d, T, minutes=60).alerts == 1
+    assert count(db, "alert") == 1
+    (row,) = repo.claim_outbox(db, 10, T)
+    assert row.card is not None and row.card["interest"] == "Multímetro"
+
+
+def fill_interest_cap(conn: psycopg.Connection, name: str, topic: str) -> None:
+    """Las 3 tarjetas del día del interés ya salieron de otra tienda."""
+    for i in range(3):
+        drop = 1000 + 100 * i
+        admit(conn, Slot("panamericana", topic, AlertKind.CATALOG_DROP, drop, name), T, 8, "• x")
+
+
+def test_full_interest_cap_leaves_a_card_topic_offer_to_the_source_cap(
+    db: psycopg.Connection,
+) -> None:
+    """Tecnología va en tarjeta y el multímetro pasa los mínimos: sale aunque su interés ya
+    gastó el tope, y cuenta para el tope de la tienda."""
+    fill_interest_cap(db, "Multímetro", "tecnologia")
+    seed_history(db, "123", 199_900)
+    meter = titled("123", 119_900, "Multímetro Digital UNI-T")
+    src = FakeCatalog({"C:/1/": [[meter]]}, offers={"123": offer("123", 119_900)})
+    d, _ = deps(db, src, Clock(), interests=(METER,))
+    assert run_crawl(d, T, minutes=60).alerts == 1
+    (row,) = repo.claim_outbox(db, 10, T)
+    assert row.card is not None and row.card["interest"] == "Multímetro"
+    last = "SELECT source, interest FROM discountz.offer_log ORDER BY id DESC"
+    assert db.execute(last).fetchone() == ("exito", None)
+
+
+def test_full_interest_cap_holds_an_offer_only_the_interest_brings(
+    db: psycopg.Connection,
+) -> None:
+    """Hogar va solo por interés: sin cupo en el interés, la silla espera al resumen."""
+    fill_interest_cap(db, "Silla de oficina", "hogar")
+    seed_history(db, "123", 199_900)
+    chair = titled("123", 119_900, "Silla Ergonómica Negra", "/Hogar/Muebles/")
+    src = FakeCatalog({"C:/1/": [[chair]]}, offers={"123": offer("123", 119_900)})
+    d, _ = deps(db, src, Clock(), interests=(SILLA,))
+    assert run_crawl(d, T, minutes=60).alerts == 0
+    assert db.execute("SELECT delivery FROM discountz.alert").fetchone() == ("held",)
+
+
+def test_full_interest_cap_holds_a_card_topic_offer_below_the_floors(
+    db: psycopg.Connection,
+) -> None:
+    """Bajo el precio mínimo solo la saca el interés: sin cupo en él, espera al resumen."""
+    fill_interest_cap(db, "Multímetro", "tecnologia")
+    seed_history(db, "123", 79_900)
+    meter = titled("123", 59_900, "Multímetro Digital UNI-T")
+    src = FakeCatalog({"C:/1/": [[meter]]}, offers={"123": offer("123", 59_900)})
+    d, _ = deps(db, src, Clock(), interests=(METER,))
+    assert run_crawl(d, T, minutes=60).alerts == 0
+    assert db.execute("SELECT delivery FROM discountz.alert").fetchone() == ("held",)

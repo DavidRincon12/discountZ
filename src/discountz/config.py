@@ -29,6 +29,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from discountz.domain.commands import CATEGORIES
 from discountz.domain.community import ChannelRule, stem
 from discountz.domain.errors import ConfigError
+from discountz.domain.interests import (
+    INTEREST_TOPICS,
+    MAX_TERM_CHARS,
+    MAX_TERMS,
+    Interest,
+    compile_interest,
+    interest_key,
+    term_problem,
+)
 from discountz.domain.model import normalize_title
 from discountz.domain.money import Currency
 from discountz.domain.params import CategoryParams, GlobalParams
@@ -45,6 +54,7 @@ CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 PARAMS_PATH = CONFIG_DIR / "discountz.toml"
 CANARIES_PATH = CONFIG_DIR / "canaries.toml"
 TOPICS_PATH = CONFIG_DIR / "topics.toml"
+INTERESTS_PATH = CONFIG_DIR / "interests.toml"
 BOGOTA = timezone(timedelta(hours=-5), "COT")
 
 NonNeg = Annotated[int, Field(ge=0)]
@@ -527,3 +537,43 @@ def load_topics(path: Path = TOPICS_PATH) -> Topics:
                 raise ConfigError(f"{path.name}:channel_rules.{i}: «{term}» ya está en {other}")
         channel_rules.append(ChannelRule(cr.topic, words))
     return Topics(MappingProxyType(params), tuple(rules), frozenset(otros), tuple(channel_rules))
+
+
+class _Interest(_Strict):
+    name: Annotated[str, Field(min_length=1, max_length=40)]
+    topic: str
+    terms: Annotated[list[str], Field(min_length=1, max_length=MAX_TERMS)]
+    exclude: list[Annotated[str, Field(min_length=1, max_length=MAX_TERM_CHARS)]] = Field(
+        default_factory=list
+    )
+
+
+class _Interests(_Strict):
+    daily_cards_per_interest: Annotated[int, Field(ge=1, le=20)]
+    interests: list[_Interest]
+
+
+@dataclass(frozen=True, slots=True)
+class InterestsConfig:
+    daily_cards_per_interest: int  # tarjetas por interés al día de Bogotá (spec del perfil §3.3)
+    seeds: tuple[Interest, ...]  # en el orden del archivo: desempata a igual largo de término
+
+
+def load_interests(path: Path = INTERESTS_PATH) -> InterestsConfig:
+    try:
+        raw = _Interests.model_validate(_read_toml(path))
+    except ValidationError as exc:
+        raise ConfigError(_describe(exc, f"{path.name}:")) from None
+    seen: set[str] = set()
+    for i, it in enumerate(raw.interests):
+        where = f"{path.name}:interests.{i}"
+        if it.topic not in INTEREST_TOPICS:
+            raise ConfigError(f"{where}: tema desconocido (van {', '.join(INTEREST_TOPICS)})")
+        if (key := interest_key(it.name)) in seen:
+            raise ConfigError(f"{where}: nombre repetido «{it.name}»")
+        seen.add(key)
+        for term in it.terms:
+            if problem := term_problem(term):
+                raise ConfigError(f"{where}: «{term}» {problem}")
+    seeds = tuple(compile_interest(it.name, it.topic, it.terms, it.exclude) for it in raw.interests)
+    return InterestsConfig(raw.daily_cards_per_interest, seeds)
