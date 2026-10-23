@@ -388,7 +388,7 @@ def test_load_topics_reads_profile_modes() -> None:
     """Fija el perfil de `config/topics.toml` (README §17): quien cambie un `mode`, cambia esto."""
     modes = {code: p.mode for code, p in load_topics().params.items()}
     off = {"belleza", "mercado", "bebes", "mascotas"}
-    interest = {"hogar", "deportes", "otros"}
+    interest: set[str] = set()
     assert {c for c, m in modes.items() if m == "off"} == off
     assert {c for c, m in modes.items() if m == "interest"} == interest
     assert {c for c, m in modes.items() if m == "card"} == set(modes) - off - interest

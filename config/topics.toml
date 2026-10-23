@@ -41,7 +41,7 @@ category = "hogar"
 
 [topics.hogar]
 title = "🛋️ Hogar y muebles"
-mode = "interest"
+mode = "card"
 t_bp = 2000
 g_bp = 6000
 category = "hogar"
@@ -67,7 +67,7 @@ category = "otros"
 
 [topics.deportes]
 title = "⚽ Deportes"
-mode = "interest"
+mode = "card"
 t_bp = 2000
 g_bp = 6000
 category = "otros"
@@ -106,7 +106,7 @@ category = "otros"
 
 [topics.otros]
 title = "📦 Otros"
-mode = "interest"
+mode = "card"
 t_bp = 2000
 g_bp = 6000
 category = "otros"
