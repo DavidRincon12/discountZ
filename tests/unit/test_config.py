@@ -142,7 +142,7 @@ def test_quality_floors_come_from_the_toml(tmp_path: Path) -> None:
     path = _bad_toml(tmp_path, "min_price_cop = 100000", "min_price_cop = 150000")
     glob = load_params(path).glob
     assert glob.min_price[Currency.COP] == 150_000
-    assert glob.min_price[Currency.USD] == 2_500
+    assert glob.min_price[Currency.USD] == 1_000
     assert glob.catalog_min_saving == {Currency.COP: 30_000, Currency.USD: 500}
 
 
