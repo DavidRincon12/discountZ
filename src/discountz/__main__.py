@@ -138,12 +138,13 @@ def _cmd_check_config() -> int:
         load_settings()
         params = load_params()
         canaries = load_canaries()
+        topics = load_topics()
     except ConfigError as exc:
         print(f"check-config: {exc}", file=sys.stderr)
         return EXIT_CONFIG
     print(
         f"check-config: OK ({len(params.budgets)} fuentes, {len(params.events)} eventos, "
-        f"canarios en {len(canaries)} tiendas)"
+        f"{len(topics.params)} temas, canarios en {len(canaries)} tiendas)"
     )
     return EXIT_OK
 

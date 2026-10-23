@@ -1883,13 +1883,19 @@ def recent_alert_for_model(
 
 
 def hot_catalog_ids(
-    conn: psycopg.Connection, source: str, since: datetime, limit: int
+    conn: psycopg.Connection,
+    source: str,
+    since: datetime,
+    limit: int,
+    skip_topics: Sequence[str] = (),
 ) -> list[str]:
+    """Publicaciones que cambiaron desde `since`, la más reciente primero, sin las de
+    `skip_topics`."""
     rows = conn.execute(
         """SELECT external_id FROM discountz.catalog_item
-            WHERE source = %s AND last_changed_at >= %s
+            WHERE source = %s AND last_changed_at >= %s AND topic <> ALL(%s::text[])
             ORDER BY last_changed_at DESC LIMIT %s""",
-        (source, since, limit),
+        (source, since, list(skip_topics), limit),
     ).fetchall()
     return [r[0] for r in rows]
 

@@ -33,7 +33,13 @@ from discountz.domain.model import normalize_title
 from discountz.domain.money import Currency
 from discountz.domain.params import CategoryParams, GlobalParams
 from discountz.domain.scheduling import CrawlBudget, Event, SourceBudget
-from discountz.domain.topics import TOPIC_CODES, TopicParams, TopicRule, normalize_path
+from discountz.domain.topics import (
+    TOPIC_CODES,
+    TopicMode,
+    TopicParams,
+    TopicRule,
+    normalize_path,
+)
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 PARAMS_PATH = CONFIG_DIR / "discountz.toml"
@@ -446,6 +452,7 @@ class _Topic(_Strict):
     t_bp: Bp | None = None
     g_bp: Bp | None = None
     category: str
+    mode: TopicMode = "card"
 
 
 class _Rule(_Strict):
@@ -504,6 +511,7 @@ def load_topics(path: Path = TOPICS_PATH) -> Topics:
             raw.topics[code].t_bp,
             raw.topics[code].g_bp,
             raw.topics[code].category,
+            raw.topics[code].mode,
         )
         for code in TOPIC_CODES
     }

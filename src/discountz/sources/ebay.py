@@ -37,6 +37,7 @@ from discountz.sources.base import (
     Capability,
     CardFacts,
     CatalogPage,
+    CatalogPartition,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -148,6 +149,7 @@ class _SearchPage(_Model):
 
 class _TreeCategory(_Model):
     categoryId: str
+    categoryName: str
 
 
 class _TreeNode(_Model):
@@ -227,6 +229,10 @@ def _category_path(listing: _Listing) -> str:
         names = [c.categoryName for c in ancestors] + [leaf.categoryName]
     else:
         names = []
+    return _path(names)
+
+
+def _path(names: Sequence[str]) -> str:
     return "/" + "".join(f"{n}/" for n in names)
 
 
@@ -316,10 +322,12 @@ def _offer(item: EbayItem, observed_at: datetime) -> Offer:
     )
 
 
-def _partitions(node: _TreeNode) -> list[str]:
+def _partitions(node: _TreeNode, above: tuple[str, ...] = ()) -> list[CatalogPartition]:
+    """Particiones bajo `node` con la ruta de nombres desde su raíz, como la de una publicación."""
+    names = (*above, node.category.categoryName)
     if node.categoryTreeNodeLevel >= PARTITION_LEVEL or not node.childCategoryTreeNodes:
-        return [node.category.categoryId]
-    return [p for child in node.childCategoryTreeNodes for p in _partitions(child)]
+        return [CatalogPartition(node.category.categoryId, _path(names))]
+    return [p for child in node.childCategoryTreeNodes for p in _partitions(child, names)]
 
 
 def _observation(item: EbayItem) -> CatalogObservation:
@@ -493,7 +501,7 @@ class EbaySource:
 
     # --- catálogo ---------------------------------------------------------------------------
 
-    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]:
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[CatalogPartition]:
         tree = _validate(_Tree, _load(self._get(ctx, TAXONOMY_URL)))
         excluded = {str(r) for r in self.params.excluded_roots}
         roots = [
@@ -501,8 +509,10 @@ class EbaySource:
             for n in tree.rootCategoryNode.childCategoryTreeNodes
             if n.category.categoryId not in excluded
         ]
-        found = {p for root in roots for p in _partitions(root) if _PARTITION.fullmatch(p)}
-        return sorted(found, key=int)
+        found = {
+            p.key: p for root in roots for p in _partitions(root) if _PARTITION.fullmatch(p.key)
+        }
+        return [found[k] for k in sorted(found, key=int)]
 
     def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
         """Una búsqueda por categoría en el orden de eBay; cada partición es una sola página."""

@@ -20,7 +20,7 @@ from discountz.app.crawl import (
     run_crawl_reconnecting,
 )
 from discountz.app.held import Slot, admit
-from discountz.config import load_params, load_topics
+from discountz.config import load_params
 from discountz.domain.catalog import CatalogObservation, CatalogState
 from discountz.domain.errors import ParseError, Unavailable
 from discountz.domain.model import (
@@ -42,6 +42,7 @@ from discountz.sources.base import (
     Capability,
     CardFacts,
     CatalogPage,
+    CatalogPartition,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -53,6 +54,7 @@ from discountz.sources.base import (
     SourceDescriptor,
 )
 from discountz.sources.blocks import detect_block_common
+from tests.profiles import spec_profile
 
 pytestmark = pytest.mark.integration
 T = datetime(2026, 10, 16, 12, tzinfo=UTC)
@@ -139,6 +141,7 @@ class FakeCatalog:
     default_offers: dict[str, Offer] = field(default_factory=dict)  # vendedor por defecto (v1)
     fail_confirms: int = 0  # confirmaciones que fallan por red antes de responder
     currency: Currency = Currency.COP
+    paths: dict[str, str] = field(default_factory=dict)  # partición → ruta; sin ruta, «/»
     descriptor: SourceDescriptor = field(init=False)
 
     def __post_init__(self) -> None:
@@ -155,9 +158,9 @@ class FakeCatalog:
             supports_changed=self.supports_changed,
         )
 
-    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]:
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[CatalogPartition]:
         ctx.http.request("GET", "https://fake/partitions")
-        return list(self.pages)
+        return [CatalogPartition(k, self.paths.get(k, "/")) for k in self.pages]
 
     def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
         ctx.http.request("GET", f"https://fake/page/{partition}/{page}")
@@ -256,7 +259,7 @@ def deps(
         source=source,
         http=transport,
         credentials=NoCredentials(),
-        topics=load_topics(),
+        topics=spec_profile(),
         params=load_params(),
         budget=CrawlBudget(0, 0, max_per_run, 100_000, 2500),
         holder=holder,
@@ -314,6 +317,50 @@ def test_crawl_resumes_from_cursor_without_duplicates(db: psycopg.Connection) ->
     assert cur.day_requests == 5
 
 
+def test_crawl_skips_partitions_outside_the_profile(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Mercado está apagado en el perfil: su partición no se pide (ADR 0013)."""
+    src = FakeCatalog(
+        {"C:/1/": [page_of(1)], "C:/2/": [page_of(1, 5)]},
+        paths={"C:/1/": "/Tecnología/", "C:/2/": "/Mercado/"},
+    )
+    d, transport = deps(db, src, Clock())
+    with caplog.at_level(logging.INFO, logger="discountz"):
+        result = run_crawl(d, T, minutes=60)
+    assert "crawl_partitions_skipped source=exito count=1" in caplog.text
+    assert result.status == "ok"
+    assert transport.kinds() == ["partitions", "page"]
+    assert transport.urls[1] == "https://fake/page/C:/1//0"
+    assert count(db, "catalog_item") == 1
+
+
+def test_crawl_with_every_partition_off_ends_ok_without_requests(db: psycopg.Connection) -> None:
+    """Sin nada que rastrear la corrida termina en paz y no guarda un barrido vacío."""
+    src = FakeCatalog({"C:/2/": [page_of(1)]}, paths={"C:/2/": "/Mercado/"})
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert (result.status, result.pages) == ("ok", 0)
+    assert transport.kinds() == ["partitions"]
+    cur = repo.get_cursor(db, "exito")
+    assert (cur.sweep_no, cur.partitions) == (0, ())
+
+
+def test_crawl_resumes_a_cursor_saved_with_plain_keys(db: psycopg.Connection) -> None:
+    """Un barrido guardado antes del perfil (solo claves) sigue donde iba."""
+    cur = repo.get_cursor(db, "exito")
+    repo.save_cursor(
+        db, replace(cur, sweep_no=1, partitions=("C:/1/", "C:/2/"), partition_idx=1, page=0)
+    )
+    src = FakeCatalog(
+        {"C:/1/": [page_of(1)], "C:/2/": [page_of(1, 5)]},
+        paths={"C:/1/": "/Tecnología/", "C:/2/": "/Mercado/"},
+    )
+    d, transport = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=60).status == "ok"
+    assert transport.urls == ["https://fake/page/C:/2//0"]
+
+
 def test_crawl_accepts_catalog_pages_over_the_cycle_body_cap(db: psycopg.Connection) -> None:
     """Olímpica pesa ~7 MB por página de 50 (medido el 2026-10-17): el rastreo no la descarta."""
     src = FakeCatalog({"C:/1/": [page_of(2)]})
@@ -362,6 +409,21 @@ def test_crawl_hot_tier_first_and_capped(db: psycopg.Connection) -> None:
     assert kinds[:5] == ["items"] * 5  # 25 % de 20
     assert kinds.count("items") == 5
     assert result.requests == len(kinds) == 20
+
+
+def test_crawl_hot_tier_skips_topics_out_of_the_profile(db: psycopg.Connection) -> None:
+    """Lo guardado de un tema apagado no se relee: no puede alertar y así vence con la retención
+    (ADR 0013)."""
+    changed = CatalogState(10_000, None, None, T, T, 1, T - timedelta(hours=1), None, None)
+    rows = [
+        CatalogRow("1", None, "belleza", "COP", changed),
+        CatalogRow("2", None, "tecnologia", "COP", changed),
+    ]
+    repo.save_catalog_page(db, "exito", rows, T - timedelta(hours=1))
+    src = FakeCatalog({"C:/1/": [page_of(1)]}, max_batch=1)
+    d, transport = deps(db, src, Clock())
+    run_crawl(d, T, minutes=60)
+    assert transport.kinds().count("items") == 1  # solo el de tecnología
 
 
 def test_crawl_hot_tier_uses_fetch_changed_when_supported(db: psycopg.Connection) -> None:
@@ -633,6 +695,39 @@ def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
     assert alert == ("catalog_drop", "queued")
     s = repo.load_catalog_states(db, "exito", ["123"])["123"]
     assert (s.last_alert_at, s.last_alert_minor) == (T, 119_900)
+
+
+def test_drop_in_a_non_card_topic_is_not_confirmed(
+    db: psycopg.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Belleza está fuera del perfil: la bajada no se confirma ni alerta (ADR 0013)."""
+    seed_history(db, "123", 199_900)
+    drop = CatalogObservation(
+        "123", Money(119_900, Currency.COP), "/Belleza/Maquillaje/", None, SellerClass.FIRST_PARTY
+    )
+    src = FakeCatalog({"C:/1/": [[drop]]}, offers={"123": offer("123", 119_900)})
+    d, transport = deps(db, src, Clock())
+    with caplog.at_level(logging.INFO, logger="discountz"):
+        result = run_crawl(d, T, minutes=60)
+    assert result.alerts == 0
+    (done,) = [m for m in caplog.messages if m.startswith("crawl_done")]
+    assert "skipped=1" in done.split()
+    assert "listings" not in transport.kinds()
+    assert count(db, "alert") == 0
+    # La fila sí se guarda con el precio nuevo, como cualquier lectura sin candidato.
+    where = "external_id = '123' AND topic = 'belleza' AND price_minor = 119900"
+    assert count(db, "catalog_item", where) == 1
+
+
+def test_drop_in_a_card_topic_still_alerts(db: psycopg.Connection) -> None:
+    """La misma bajada en Tecnología sigue saliendo como tarjeta."""
+    seed_history(db, "123", 199_900)
+    src = FakeCatalog({"C:/1/": [[obs("123", 119_900)]]}, offers={"123": offer("123", 119_900)})
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.alerts == 1
+    assert "listings" in transport.kinds()
+    assert count(db, "alert") == 1
 
 
 def test_crawl_price_error_also_posts_line_in_category(db: psycopg.Connection) -> None:

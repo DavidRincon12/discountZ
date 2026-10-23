@@ -173,6 +173,17 @@ Desde el 22 de octubre de 2026 llegan menos ofertas y mejores (ADR 0012):
 1. **Migración `0010`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala. Mientras no corra, el ciclo y el rastreo se saltan con aviso.
 2. Los valores se ajustan en `config/discountz.toml`: `min_price_*` y `catalog_min_saving_*` en `[pricing]`, y `daily_per_source` en `[cards]`.
 
+### 17. Perfil de temas
+
+Desde el 22 de octubre de 2026 cada tema tiene un modo (ADR 0013), en `mode` de `config/topics.toml`:
+
+- **En tarjeta** (`card`): Tecnología, Electrodomésticos, Ferretería y autos, Moda y calzado, y Libros y papelería. Llegan como antes, igual que las alertas de Comunidad EE. UU. (Slickdeals). Por ahora también Hogar y muebles, Deportes y Otros: pasan a «solo por interés» cuando lleguen los intereses (`/interes`).
+- **Solo por interés** (`interest`): se rastrean, pero solo llega lo que coincida con un interés.
+- **Apagados** (`off`): Belleza y cuidado, Mercado, Bebés y juguetes, y Mascotas. Sus categorías no se rastrean en las tiendas ni en eBay, y sus ofertas de canales y feeds quedan vistas sin enviarse. Un error de precio sigue el modo del tema del producto: el de un producto de belleza tampoco llega.
+
+1. **Nada que correr.** No hay migración. El perfil rige desde el primer ciclo después de fusionar; en el rastreo, desde la siguiente vuelta de cada tienda (la que va en curso termina con sus categorías).
+2. **Cambiar el perfil.** Edita `mode` en `config/topics.toml` y también `test_load_topics_reads_profile_modes` en `tests/unit/test_config.py`, que fija el perfil (sin ese cambio el CI queda en rojo); luego fusiona. `/seguir` y `/buscar` no pasan por el perfil.
+
 ### Si algo falla
 
 - Sin resumen diario de las 08:00: revisa *Actions → cycle* (workflows desactivados, secreto caducado o Supabase pausado).

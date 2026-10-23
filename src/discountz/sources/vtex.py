@@ -29,6 +29,7 @@ from discountz.sources.base import (
     Capability,
     CardFacts,
     CatalogPage,
+    CatalogPartition,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -117,6 +118,7 @@ class _CatalogProduct(_Model):
 
 class _CategoryNode(_Model):
     id: int
+    name: str
 
 
 class _SimItem(_Model):
@@ -426,7 +428,7 @@ class VtexSource:
     def fetch_leads(self, ctx: SourceContext) -> list[Lead]:
         return []
 
-    def catalog_partitions(self, ctx: SourceContext) -> Sequence[str]:
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[CatalogPartition]:
         """Una partición por categoría raíz: juntas cubren todo el surtido disponible."""
         resp = ctx.http.request(
             "GET", f"{self.store.api_base}/catalog_system/pub/category/tree/1", headers=_HEADERS
@@ -438,7 +440,7 @@ class VtexSource:
             nodes = [_CategoryNode.model_validate(raw) for raw in data]
         except ValidationError as exc:
             raise _parse_error(exc) from None
-        return [f"C:/{n.id}/" for n in nodes]
+        return [CatalogPartition(f"C:/{n.id}/", f"/{n.name}/") for n in nodes]
 
     def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
         root, band = _parse_partition(partition)

@@ -27,7 +27,13 @@ from discountz.domain.money import Currency, Money
 from discountz.domain.scheduling import SourceBudget
 from discountz.domain.urls import SafeUrl
 from discountz.infra.http import Files, HttpResponse, Method, PacedClient, Params
-from discountz.sources.base import ListingFailed, ListingFound, ListingGone, SourceContext
+from discountz.sources.base import (
+    CatalogPartition,
+    ListingFailed,
+    ListingFound,
+    ListingGone,
+    SourceContext,
+)
 from discountz.sources.ebay import (
     CODE,
     EbayRules,
@@ -390,7 +396,8 @@ SEARCH_PATH = "/buy/browse/v1/item_summary/search"
 def test_partitions_from_taxonomy() -> None:
     src = EbaySource(EXCLUDED)
     api = by_path({"/commerce/taxonomy/v1/category_tree/0": fx("taxonomy")})
-    parts = list(src.catalog_partitions(ctx(paced(api, src))))
+    found = list(src.catalog_partitions(ctx(paced(api, src))))
+    parts = [p.key for p in found]
     assert parts == sorted(parts, key=int)
     assert len(parts) == len(set(parts))
     assert all(p.isdigit() for p in parts)
@@ -398,6 +405,11 @@ def test_partitions_from_taxonomy() -> None:
     assert not {"36", "3984", "114", "1437"} & set(parts)
     assert {"296", "4670", "15053", "309", "617", "9355", "20349", "43304"} <= set(parts)
     assert not {"1500", "9394", "293", "15032"} & set(parts)
+    # Cada partición lleva la ruta de nombres desde su raíz, como la de las publicaciones.
+    phones = "/Cell Phones & Accessories/Cell Phones & Smartphones/"
+    assert CatalogPartition("9355", phones) in found
+    radio = "/Consumer Electronics/Radio Communication/Other Radio Communication/"
+    assert CatalogPartition("296", radio) in found
 
 
 def test_catalog_page_observations() -> None:

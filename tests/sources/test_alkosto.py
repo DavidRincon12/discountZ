@@ -32,6 +32,7 @@ from discountz.sources.alkosto import (
 )
 from discountz.sources.base import (
     CatalogPage,
+    CatalogPartition,
     ListingFailed,
     ListingFound,
     ListingGone,
@@ -425,7 +426,7 @@ def _band_with(nb_hits: int) -> HttpResponse:
 
 def test_catalog_starts_with_one_band() -> None:
     src, api, ctx = run()
-    assert list(src.catalog_partitions(ctx)) == ["1-999999999"]
+    assert list(src.catalog_partitions(ctx)) == [CatalogPartition("1-999999999")]
     assert api.calls == []
 
 
