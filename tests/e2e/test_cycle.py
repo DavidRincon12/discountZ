@@ -151,6 +151,7 @@ def deps(
         rnd=random.Random(7),
         healthchecks=Healthchecks(None, tg),
         topics=spec_profile(),
+        interests=InterestsConfig(3, ()),  # sin la semilla, que David edita
     )
 
 

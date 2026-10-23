@@ -22,6 +22,7 @@ from discountz.config import (
     load_topics,
 )
 from discountz.domain.errors import ConfigError
+from discountz.domain.interests import interest_key
 from discountz.domain.money import Currency
 from discountz.domain.params import DEFAULT_CATEGORIES, GlobalParams
 from discountz.domain.topics import TOPIC_CODES
@@ -414,10 +415,13 @@ def test_check_config_fails_on_unknown_topic_mode(
 
 
 def test_seed_interests_load() -> None:
+    """La semilla carga y es coherente; no fija cuántos ni cuáles: David la edita."""
     cfg = load_interests()
-    assert cfg.daily_cards_per_interest == 3
-    assert len(cfg.seeds) == 55
+    assert cfg.daily_cards_per_interest >= 1
+    assert cfg.seeds
+    assert len({interest_key(i.name) for i in cfg.seeds}) == len(cfg.seeds)
     assert {i.topic for i in cfg.seeds} <= set(TOPIC_CODES) - {"errores", "comunidad_us"}
+    assert all(i.personal_id is None for i in cfg.seeds)
 
 
 def _interests_file(folder: Path, second: str) -> Path:

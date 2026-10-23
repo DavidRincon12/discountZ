@@ -11,6 +11,8 @@ import psycopg
 import pytest
 
 from discountz.app.inbox import process_inbox
+from discountz.config import InterestsConfig
+from discountz.domain.interests import compile_interest
 from discountz.domain.model import ListingRef
 from discountz.domain.money import Currency
 from discountz.domain.urls import SafeUrl
@@ -74,13 +76,25 @@ class Boom:
         raise RuntimeError("boom")
 
 
+# Semilla propia: las pruebas no dependen de config/interests.toml, que David edita.
+SEED = InterestsConfig(
+    3,
+    (
+        compile_interest("Portátil", "tecnologia", ["portatil", "laptop"]),
+        compile_interest("SSD", "tecnologia", ["ssd"]),
+        compile_interest("Multímetro", "ferreteria", ["multimetro", "multimeter"]),
+    ),
+)
+SEEDS = len(SEED.seeds)
+
+
 def run(
     db: psycopg.Connection,
     batches: list[list[Update]],
     sources: Mapping[str, Source] | None = None,
 ) -> tuple[int, FakeTelegram]:
     tg = FakeTelegram(batches)
-    n = process_inbox(db, tg, OWNER, CHAT, T, sources=sources or load_all())
+    n = process_inbox(db, tg, OWNER, CHAT, T, sources=sources or load_all(), interests=SEED)
     return n, tg
 
 
@@ -352,9 +366,6 @@ def test_source_on_after_off_closes_breaker_and_sets_ramp(db: psycopg.Connection
     assert "activada" in replies(db)[-1]
 
 
-SEEDS = 55  # intereses de config/interests.toml
-
-
 def test_interest_add_list_and_drop(db: psycopg.Connection) -> None:
     """La lista agrupa por tema, numera la semilla y luego los personales (spec del perfil §3.4)."""
     add = [msg(1, "/interes rtx 5070, RTX5070 #tecnologia"), msg(2, "/interes taladro percutor")]
@@ -372,12 +383,13 @@ def test_interest_add_list_and_drop(db: psycopg.Connection) -> None:
 
     run(db, [[msg(3, "/interes")]])
     listing = replies(db)[2]
-    assert "55 de la lista base (🌱) y 2 tuyos" in listing
+    assert "3 de la lista base (🌱) y 2 tuyos" in listing
     assert "\n1. 🌱 Portátil\n" in listing
     tech = listing.index("📱 Tecnología")
-    assert tech < listing.index("24. 🌱 Tableta gráfica") < listing.index(f"{rtx}. rtx 5070")
+    assert tech < listing.index("2. 🌱 SSD") < listing.index(f"{rtx}. rtx 5070")
     assert listing.index(f"{rtx}. rtx 5070") < listing.index("🔧 Ferretería y autos")
-    assert listing.index("🔧 Ferretería y autos") < listing.index(f"{drill}. taladro percutor")
+    ferreteria = listing.index("🔧 Ferretería y autos")
+    assert ferreteria < listing.index("3. 🌱 Multímetro") < listing.index(f"{drill}. taladro")
 
     run(db, [[msg(4, f"/interes quitar {rtx}"), msg(5, f"/interes quitar {rtx}")]])
     assert [r.name for r in repo.list_interests(db)] == ["taladro percutor"]
