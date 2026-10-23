@@ -293,6 +293,7 @@ def test_channel_due_every_three_minutes(db: psycopg.Connection) -> None:
         "tg_ofertu",
         "dealnews",
         "slickdeals_amazon",
+        "ninetofivetoys",
         "woot",
     }
     repo.save_channel_cursor(db, "tg_cajitatech", 100, T)

@@ -53,6 +53,7 @@ SOURCE_NAMES = {
     "tg_ofertu": "OFERTU",
     "dealnews": "DealNews",
     "slickdeals_amazon": "Slickdeals",
+    "ninetofivetoys": "9to5Toys",
     "ebay_us": "eBay",
     "woot": "Woot",
 }

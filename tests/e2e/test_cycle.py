@@ -37,6 +37,7 @@ from discountz.infra.migrate import migrate
 from discountz.infra.telegram import TelegramClient
 from discountz.sources.dealnews import FEED_URL as DEALNEWS_FEED
 from discountz.sources.fixtures import load_fixture
+from discountz.sources.ninetofivetoys import FEED_URL as NINETOFIVETOYS_FEED
 from discountz.sources.registry import load_all
 from discountz.sources.slickdeals import RSS_URL
 from discountz.sources.vtex import STORES
@@ -621,6 +622,55 @@ def test_cycle_marks_dealnews_feed_then_delivers_its_new_deal(conn: psycopg.Conn
             "Ver en DealNews",
             "https://www.dealnews.com/1080-p-Mini-Camera-Drone-2-Pack-for-30-free-shipping-w-Prime"
             "/22285975.html?iref=rss",
+        )
+    ]
+
+
+def test_cycle_marks_9to5toys_feed_then_delivers_its_new_deal(conn: psycopg.Connection) -> None:
+    now = datetime(2026, 10, 22, 17, 0, tzinfo=UTC)
+    conn.execute(
+        "UPDATE discountz.bot_state SET last_maintenance_on = %s, last_summary_on = %s",
+        (now.date(), now.date()),
+    )
+    for i, code in enumerate(load_topics().params, start=10):
+        repo.save_topic(conn, code, code, i)
+    feed = load_fixture("ninetofivetoys", "feed")
+    guid = feed.body.index(b"?p=1238356</guid>")  # monitor Odyssey G8 a US$600: Tecnología
+    start = feed.body.rindex(b"<item>", 0, guid)
+    end = feed.body.index(b"</item>", guid) + len(b"</item>")
+    before = feed.body[:start] + feed.body[end:]  # el feed antes del post 1238356
+    buf = io.BytesIO()
+    Image.new("RGB", (200, 200), (10, 120, 200)).save(buf, "JPEG")
+
+    def cycle(body: bytes, at: datetime) -> tuple[FakeHttp, _AnyPhoto]:
+        http = FakeHttp({NINETOFIVETOYS_FEED: HttpResponse(200, feed.url, {}, body, 1)})
+        photos = _AnyPhoto(buf.getvalue())
+        tg = FakeHttp(
+            {
+                **telegram().routes,
+                f"{TG}/sendPhoto": jresp({"ok": True, "result": {"message_id": 2}}),
+            }
+        )
+        run_cycle(replace(deps(conn, {"ninetofivetoys": http}, tg), photos=photos), at)
+        return tg, photos
+
+    tg, photos = cycle(before, now)
+    assert (tg.uploads, photos.urls) == ([], [])  # primera lectura: solo marca lo que hay
+    assert conn.execute("SELECT count(*) FROM discountz.outbox").fetchone() == (0,)
+    tg, photos = cycle(feed.body, now + timedelta(minutes=11))
+    assert len(tg.uploads) == 1 and len(photos.urls) == 1
+    assert photos.urls[0].startswith("https://9to5toys.com/wp-content/uploads/")
+    data, _ = tg.uploads[0]
+    assert data is not None
+    assert "Visto en 9to5Toys · sin verificar" in data["caption"]
+    assert "Compra por casillero" in data["caption"]
+    assert data["message_thread_id"] == str(repo.topic_threads(conn)["tecnologia"])
+    keyboard = json.loads(data["reply_markup"])["inline_keyboard"]
+    assert [(b["text"], b["url"]) for row in keyboard for b in row] == [
+        (
+            "Ver en 9to5Toys",
+            "https://9to5toys.com/2026/10/22/"
+            "samsung-27-inch-5k-dual-mode-odyssey-g8-gaming-monitor-best-price-yet-2/",
         )
     ]
 

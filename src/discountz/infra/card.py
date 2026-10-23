@@ -58,6 +58,7 @@ STORE_COLORS: Mapping[str, str] = MappingProxyType(
         # Feeds sin verificar: colores propios (no son los de sus marcas).
         "dealnews": "#7C3AED",
         "slickdeals_amazon": "#4D7C0F",
+        "ninetofivetoys": "#0F766E",
         "ebay_us": "#0064D2",
         "woot": "#B45309",
     }

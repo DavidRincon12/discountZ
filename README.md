@@ -133,6 +133,8 @@ Amazon bloquea las lecturas desde Actions, así que sus ofertas llegan por otro 
 
 Las ofertas repetidas con los canales llegan una sola vez y suman en la línea «Canales» del resumen diario. Para apagar un feed: `/fuente off dealnews` o `/fuente off slickdeals_amazon`.
 
+**9to5Toys.** El ciclo también lee el [RSS de 9to5Toys](https://9to5toys.com/feed/) como mucho cada 10 minutos (migración `0013`: corre *migrate* con `to = head` al fusionar). Su precio sale del título; los posts sin un precio claro (noticias, resúmenes «from $X», solo el ahorro «$50 off») no se envían. La tarjeta dice «📣 Visto en 9to5Toys · sin verificar», va siempre por casillero y su botón «Ver en 9to5Toys» abre el artículo. Para apagarlo: `/fuente off ninetofivetoys`.
+
 ### 12. Canal general de ofertas
 
 Opcional: un canal de Telegram de solo lectura que recibe una copia de cada oferta, sin importar la categoría. Los temas del grupo siguen igual y los comandos se siguen dando solo en el grupo.
@@ -167,7 +169,7 @@ Las dos están en VTEX, como Éxito y Olímpica, y se leen igual (sin secretos n
 Desde el 22 de octubre de 2026 llegan menos ofertas y mejores (ADR 0012):
 
 - **Rastreo de tiendas y eBay.** El «antes» cuesta al menos 100.000 COP o US$25 y el ahorro es de al menos 30.000 COP o US$5. Mercado no alerta. Un «error de precio» necesita los mismos 3 días de historia y solo vale para productos de la tienda, no del marketplace.
-- **Casillero.** «🇺🇸 Compra por casillero» sale siempre en eBay, Slickdeals, DealNews y Woot, y en los canales de Telegram solo si la publicación lo dice: lo de Amazon en esos canales suele enviar directo a Colombia. Lo que llega por casillero con precio menor a US$25, o de mercado, no se envía; lo que envía directo no tiene ese filtro.
+- **Casillero.** «🇺🇸 Compra por casillero» sale siempre en eBay, Slickdeals, DealNews, 9to5Toys y Woot, y en los canales de Telegram solo si la publicación lo dice: lo de Amazon en esos canales suele enviar directo a Colombia. Lo que llega por casillero con precio menor a US$25, o de mercado, no se envía; lo que envía directo no tiene ese filtro.
 - **Tope diario.** Cada fuente manda en tarjeta sus primeras 8 ofertas del día (hora de Bogotá); los errores de precio no cuentan. En las tiendas, las demás tallas o colores de una misma promoción (mismo tema y descuento a ±0,5 % en 24 h) tampoco salen en tarjeta. Lo demás llega a las 21:00 en el «Resumen de la noche», una línea por oferta, por fuente y de mayor a menor ahorro.
 
 1. **Migración `0010`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala. Mientras no corra, el ciclo y el rastreo se saltan con aviso.

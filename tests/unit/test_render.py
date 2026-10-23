@@ -822,6 +822,17 @@ def test_interest_list_without_interests() -> None:
     ]
 
 
+def test_9to5toys_deal_credits_9to5toys_and_links_to_its_article() -> None:
+    url = "https://9to5toys.com/2026/10/22/lisen-140w-cable/"
+    link = SafeUrl.parse(url, frozenset({"9to5toys.com"}))
+    post = _channel_post(
+        **{**SLICKDEALS, "channel": "ninetofivetoys", "link": link, "post_url": link}
+    )
+    msg = render_channel_deal(post, "tecnologia")
+    assert "Visto en 9to5Toys · sin verificar" in msg.html
+    assert msg.buttons == [[Button("Ver en 9to5Toys", url=url)]]
+
+
 def test_woot_card_names_woot_and_the_casillero() -> None:
     url = "https://computers.woot.com/offers/lenovo-ideapad"
     link = SafeUrl.parse(url, frozenset({"computers.woot.com"}))
