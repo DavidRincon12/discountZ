@@ -7,10 +7,10 @@
 - Perfil de temas (ADR 0013): Belleza, Mercado, Bebés y Mascotas apagados (no se rastrean ni se releen, y sus ofertas de canales quedan vistas); Hogar, Deportes y Otros solo por interés; el resto en tarjeta.
 - Intereses (esquema 12): 55 de la semilla (`config/interests.toml`) más los de `/interes`; lo que coincide (el término antes de «para», «con», «for»…) sale con «🎯», sin perfil, tope de la fuente ni mínimos de precio, hasta 3 por interés al día; después, lo que saldría sin el interés usa el tope de la fuente.
 - Dos chats: el grupo (todo, temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas y resúmenes de ofertas).
-- Suite: 1048 unitarias y 253 de integración en verde el 2026-10-23 (rama de Woot sobre main).
+- Suite: 1305 pruebas (unitarias e integración) en verde el 2026-10-23.
 
 ## Último cambio
-- Rama `claude/project-thread-w0wsxi` (Woot, migración `0014`, sobre 9to5Toys ya fusionado): adaptador `sources/woot.py` con los feeds Computers, Electronics y Tools, clave `DISCOUNTZ_WOOT_API_KEY` (secreto `WOOT_API_KEY`, en `cycle.yml`) y credenciales del ciclo en `run_channels`. Spec `docs/superpowers/specs/2026-10-23-woot-design.md`, plan `docs/superpowers/plans/2026-10-23-woot.md` terminado (Native).
+- Fix de las fotos (`app/deliver.py`): ante un 5xx o corte del CDN la tarjeta espera 3 min y reintenta hasta 3 veces antes de salir con el cuadro gris (visto en OFERTU: `photo_missing code=status http_status=502`). Antes: Woot (`0014`), 9to5Toys (`0013`) e intereses (`0012`), los tres fusionados y migrados.
 
 ## Siguiente paso
 - Al fusionar Woot: *Actions → migrate* con `to = head` (esquema 14; si 9to5Toys aún no se migró, corre la 13 y la 14). Hasta migrar, el ciclo se salta con aviso.
