@@ -80,6 +80,12 @@ def item(
         ("This set is now $5.99 shipped", 599),
         ("LEGO officially confirms partnership with Daft Punk on new upcoming Ideas set", None),
         ("Pay $0 for this app today", None),
+        ("Galaxy Tab bundle with a free $100 Amazon gift card at $799", 79900),
+        ("Get $30 back on AirPods Pro 3 at $199", 19900),
+        ("Score $100 in savings on this Roku TV, now $299", 29900),
+        ("Anker charger drops to $24, plus more", 2400),
+        ("Mint Mobile service from scratch at $15/mo", None),
+        ("Streaming plan at $1,2 for today", None),
     ],
 )
 def test_price_from_title(title: str, minor: int | None) -> None:

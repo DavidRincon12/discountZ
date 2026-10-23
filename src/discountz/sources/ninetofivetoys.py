@@ -36,10 +36,14 @@ TITLE_MAX = 200
 AMAZON_HOSTS = frozenset({"link.amazon", "amzn.to", "www.amazon.com", "amazon.com"})
 # Enlaces a los sitios de 9to5 (reseñas, otros posts): no son la tienda.
 _OWN_SITES = ("9to5toys.com", "9to5mac.com", "9to5google.com", "electrek.co")
-_AMOUNT_RE = re.compile(r"\$(\d[\d,]*(?:\.\d{1,2})?)")
-# Lo que sigue al monto o lo precede y lo vuelve ahorro o precio de antes, no el precio.
+# Miles con coma en grupos de 3; un monto seguido de «,dígito» no es legible y no se toma.
+_AMOUNT_RE = re.compile(r"\$((?:\d{1,3}(?:,\d{3})+|\d++)(?:\.\d{1,2})?)(?!,\d)")
+# Lo que sigue al monto y lo vuelve ahorro («$50 off», «$100 Amazon gift card», «$30 back»),
+# cuota («$15/mo») o comparación («$120 under the list price»), no el precio.
 _SAVING_AFTER_RE = re.compile(
-    r"^\s*(?:off|savings?|discount|less|credit|gift|rebate|under)\b", re.IGNORECASE
+    r"^\s*(?:(?:[\w.+-]+\s+){0,2}(?:off|savings?|discount|credit|gift|back|rebate)\b"
+    r"|(?:less|under)\b|/\s*(?:mo|month|yr|year)\b|(?:per|a)\s+(?:month|year)\b)",
+    re.IGNORECASE,
 )
 _BEFORE_PRICE_RE = re.compile(
     r"\b(?:reg\.?|regularly|was|save|saving|list|msrp|worth|value|up\s+to)\s*$", re.IGNORECASE
