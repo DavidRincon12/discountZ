@@ -2267,11 +2267,11 @@ def count_cards(conn: psycopg.Connection, source: str, day: date) -> int:
 
 
 def count_interest_cards(conn: psycopg.Connection, name: str, day: date) -> int:
-    """Tarjetas que sacó el interés en el día, de todas las fuentes."""
+    """Tarjetas que sacó el interés en el día, de todas las fuentes y sin los errores de precio."""
     row = _one(
         conn,
         """SELECT count(*) FROM discountz.offer_log
-            WHERE interest = %s AND day = %s AND carded""",
+            WHERE interest = %s AND day = %s AND carded AND kind <> 'price_error'""",
         (name, day),
     )
     return int(_required(row)[0])
