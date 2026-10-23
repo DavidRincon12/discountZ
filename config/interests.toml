@@ -5,9 +5,11 @@
 # Cada interés: `name` (1 a 40 caracteres, sin repetir), `topic` (el tema del grupo bajo el que
 # se lista en /interes), `terms` (1 a 10, en español y en inglés) y `exclude` (opcional).
 # Un término coincide si sus palabras aparecen seguidas en el título, sin importar mayúsculas,
-# tildes ni plural; un término de una sola palabra necesita al menos 3 letras (en `exclude`
-# sí vale una más corta, como «3d»). Si coinciden varios, gana el término con más palabras y,
-# a igual largo, el que aparece primero en este archivo (los de /interes van después).
+# tildes ni plural, y empiezan antes del primer «para», «con», «sin», «for», «with» o
+# «compatible» («Mochila para portátil» es un morral, no un portátil); `exclude` mira todo el
+# título. Un término de una sola palabra necesita al menos 3 letras (en `exclude` sí vale una
+# más corta, como «3d»). Si coinciden varios, gana el término con más palabras y, a igual
+# largo, el que aparece primero en este archivo (los de /interes van después).
 # Los intereses personales se agregan con /interes; los de este archivo se cambian con un PR.
 
 daily_cards_per_interest = 3  # tarjetas por interés al día de Bogotá; lo demás va al resumen
@@ -17,37 +19,53 @@ daily_cards_per_interest = 3  # tarjetas por interés al día de Bogotá; lo dem
 [[interests]]
 name = "Portátil"
 topic = "tecnologia"
-terms = ["portatil", "computador portatil", "laptop", "notebook", "macbook"]
+# «portátil» solo también es «portable» (cunas, secadores, parlantes) y «notebook», cuaderno.
+terms = [
+    "computador portatil", "laptop", "macbook", "portatil gamer", "portatil hp", "portatil lenovo",
+    "portatil asus", "portatil acer", "portatil dell", "portatil msi",
+]
 exclude = [
     "funda", "forro", "sleeve", "case", "protector", "sticker", "skin", "soporte", "stand",
-    "mochila", "backpack", "maletin", "bag",
+    "mochila", "backpack", "maletin", "bag", "base refrigerante", "cooling pad", "cargador",
+    "charger",
 ]
 
 [[interests]]
 name = "Monitor"
 topic = "tecnologia"
 terms = ["monitor"]
-exclude = ["bebe", "baby", "presion", "pressure", "cardiaco", "heart"]
+exclude = ["bebe", "baby", "presion", "pressure", "cardiaco", "frecuencia", "heart", "selfie"]
 
 [[interests]]
 name = "SSD"
 topic = "tecnologia"
 terms = ["disco solido", "unidad de estado solido", "ssd", "nvme"]
+exclude = ["mini pc", "portatil", "laptop", "computador"]
 
 [[interests]]
 name = "Memoria RAM"
 topic = "tecnologia"
 terms = ["memoria ram", "ram ddr4", "ram ddr5", "ddr4", "ddr5", "sodimm"]
+exclude = [
+    "placa madre", "placa base", "tarjeta madre", "motherboard", "computador de escritorio",
+    "pc gamer", "mini pc",
+]
 
 [[interests]]
 name = "Tarjeta gráfica"
 topic = "tecnologia"
 terms = ["tarjeta grafica", "tarjeta de video", "graphics card", "gpu", "geforce", "rtx", "radeon"]
+exclude = ["motherboard", "placa madre", "placa base", "portatil", "laptop", "pc gamer"]
 
 [[interests]]
 name = "Procesador"
 topic = "tecnologia"
-terms = ["procesador", "cpu", "ryzen", "intel core", "core ultra"]
+# «procesador» solo también es el de alimentos y aparece en los títulos de celulares y portátiles.
+terms = ["procesador amd", "procesador intel", "cpu", "ryzen", "intel core", "core ultra"]
+exclude = [
+    "portatil", "laptop", "notebook", "computador", "mini pc", "celular", "smartphone", "tablet",
+    "motherboard", "placa madre", "placa base", "alimento", "enfriador", "disipador", "cooler",
+]
 
 [[interests]]
 name = "Teclado mecánico"
@@ -64,7 +82,7 @@ exclude = ["pad", "alfombrilla"]
 name = "Audífonos"
 topic = "tecnologia"
 terms = ["audifonos", "auriculares", "diadema", "headphones", "earbuds", "headset", "airpods"]
-exclude = ["funda", "case", "estuche"]
+exclude = ["funda", "case", "estuche", "cabello", "hair", "parlante", "juguete", "fisher price"]
 
 [[interests]]
 name = "Parlante"
@@ -93,7 +111,7 @@ terms = ["hub usb c", "adaptador multipuerto", "usb c hub", "docking station"]
 name = "Tablet"
 topic = "tecnologia"
 terms = ["tablet", "tableta", "ipad", "galaxy tab"]
-exclude = ["funda", "case", "protector", "vidrio", "mica", "teclado"]
+exclude = ["funda", "case", "protector", "vidrio", "mica", "teclado", "cargador", "charger"]
 
 [[interests]]
 name = "Celular"
@@ -113,7 +131,8 @@ exclude = ["correa", "strap", "protector", "funda"]
 [[interests]]
 name = "Power bank"
 topic = "tecnologia"
-terms = ["bateria externa", "cargador portatil", "power bank"]
+terms = ["bateria externa", "bateria portatil", "cargador portatil", "power bank"]
+exclude = ["celular", "smartphone"]  # combos de celular con batería de regalo
 
 [[interests]]
 name = "Webcam"
@@ -288,9 +307,11 @@ terms = [
 [[interests]]
 name = "Libros de ingeniería"
 topic = "libros"
+# Sueltas, «estática» y «statics» sacaban bicicletas estáticas y pulseras antiestáticas.
 terms = [
-    "ingenieria", "calculo", "fisica universitaria", "termodinamica", "estatica", "engineering",
-    "calculus", "physics", "thermodynamics", "statics",
+    "libro de ingenieria", "libro de calculo", "calculo diferencial", "calculo integral",
+    "fisica universitaria", "termodinamica", "mecanica vectorial", "engineering mechanics",
+    "calculus", "thermodynamics",
 ]
 
 [[interests]]
@@ -312,6 +333,7 @@ terms = [
 name = "Morral"
 topic = "moda"
 terms = ["morral", "mochila", "maletin para portatil", "backpack", "laptop bag"]
+exclude = ["panalera", "bebe", "baby"]
 
 [[interests]]
 name = "Botas de seguridad"
@@ -324,7 +346,7 @@ terms = [
 [[interests]]
 name = "Chaqueta impermeable"
 topic = "moda"
-terms = ["chaqueta impermeable", "impermeable", "rain jacket", "waterproof jacket"]
+terms = ["chaqueta impermeable", "rain jacket", "waterproof jacket"]  # «impermeable» solo es adjetivo
 
 # 🛋️ Hogar y muebles
 
@@ -332,6 +354,7 @@ terms = ["chaqueta impermeable", "impermeable", "rain jacket", "waterproof jacke
 name = "Escritorio"
 topic = "hogar"
 terms = ["escritorio", "escritorio elevable", "desk", "standing desk"]
+exclude = ["computador de escritorio", "pc de escritorio", "organizador de escritorio"]
 
 [[interests]]
 name = "Silla de oficina"
@@ -370,4 +393,4 @@ terms = [
 name = "Bicicleta"
 topic = "deportes"
 terms = ["bicicleta", "bicycle", "bike"]
-exclude = ["infantil", "nino", "kids", "estatica", "stationary", "juguete"]
+exclude = ["infantil", "nino", "kids", "estatica", "stationary", "juguete", "short"]
