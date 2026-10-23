@@ -316,6 +316,16 @@ watch_interval_min = 30
 search_interval_min = 30
 max_batch = 1
 
+[sources.ninetofivetoys]  # RSS de 9to5Toys (ADR 0014): 1 petición por lectura
+group = "ninetofivetoys"
+min_pause_s = 2
+jitter_s = 1
+max_per_run = 1
+max_per_24h = 200
+watch_interval_min = 10
+search_interval_min = 10
+max_batch = 1
+
 # Canales de ofertas de Telegram (spec de canales §2): cada canal como máximo cada N minutos.
 [channels]
 interval_min = 3

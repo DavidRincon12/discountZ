@@ -68,9 +68,12 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "tg_ofertu",
         "dealnews",
         "slickdeals_amazon",
+        "ninetofivetoys",
     }
     assert p.budgets["tg_clubgratis"].max_per_run == 3  # hasta 3 páginas por lectura
     assert p.budgets["dealnews"].min_pause_s == 2  # su robots.txt pide `Crawl-delay: 2`
+    assert p.budgets["ninetofivetoys"].min_pause_s == 2
+    assert p.budgets["ninetofivetoys"].max_per_24h == 200
     # Mismo RSS que `slickdeals`, a su mismo ritmo, con presupuesto aparte.
     assert p.budgets["slickdeals_amazon"].group != p.budgets["slickdeals"].group
     assert p.budgets["slickdeals_amazon"].watch_interval == p.budgets["slickdeals"].watch_interval
