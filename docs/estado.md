@@ -2,17 +2,18 @@
 
 ## Estado actual
 - v1 en producción desde el 2026-10-14 (Supabase, `DISCOUNTZ_ACTIVO=true`); cron-job.org dispara el ciclo cada ~2 min y el rastreo cada hora.
-- Rastreo de catálogo (ADR 0004): Éxito, Panamericana, Jumbo y Pepe Ganga (VTEX), Alkosto (ADR 0009) y eBay (ADR 0008, `MODEL_LOW`). Carulla y Olímpica apagadas y sin catálogo (migración 0011).
+- Rastreo de catálogo (ADR 0004): Éxito, Panamericana, Jumbo y Pepe Ganga (VTEX), Alkosto (ADR 0009), Homecenter (ADR 0016, 13 categorías de herramientas y tecnología; en el PR de Homecenter) y eBay (ADR 0008, `MODEL_LOW`). Carulla y Olímpica apagadas y sin catálogo (migración 0011).
 - Canales de Telegram (ADR 0005: DescuentosTech, DescuentosHome, Clubgratis, cajitatech, OFERTU), Amazon de Slickdeals «sin verificar» (ADR 0006), 9to5Toys por su RSS (ADR 0014, precio desde el título) y Woot por su API (ADR 0015, en el PR #36), todos por casillero los de EE. UU. DealNews apagado (406 desde Actions). Best Buy y Walmart fuera; Amazon da CAPTCHA.
 - Perfil de temas (ADR 0013): Belleza, Mercado, Bebés y Mascotas apagados (no se rastrean ni se releen, y sus ofertas de canales quedan vistas); Hogar, Deportes y Otros solo por interés; el resto en tarjeta.
 - Intereses (esquema 12): 55 de la semilla (`config/interests.toml`) más los de `/interes`; lo que coincide (el término antes de «para», «con», «for»…) sale con «🎯», sin perfil, tope de la fuente ni mínimos de precio, hasta 3 por interés al día; después, lo que saldría sin el interés usa el tope de la fuente.
 - Dos chats: el grupo (todo, temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas y resúmenes de ofertas).
-- Suite: 1305 pruebas (unitarias e integración) en verde el 2026-10-23.
+- Suite: 1342 pruebas (1084 unitarias y 258 de integración) en verde el 2026-10-24.
 
 ## Último cambio
-- Fix de las fotos (`app/deliver.py`): ante un 5xx o corte del CDN la tarjeta espera 3 min y reintenta hasta 3 veces antes de salir con el cuadro gris (visto en OFERTU: `photo_missing code=status http_status=502`). Antes: Woot (`0014`), 9to5Toys (`0013`) e intereses (`0012`), los tres fusionados y migrados.
+- Homecenter como tienda rastreada (migración `0015`, esquema 15, ADR 0016); el PR de Falabella («Vendido por Falabella») sigue. Antes: fix de las fotos (`app/deliver.py`): ante un 5xx o corte del CDN la tarjeta espera 3 min y reintenta hasta 3 veces antes de salir con el cuadro gris (visto en OFERTU: `photo_missing code=status http_status=502`). Antes: Woot (`0014`), 9to5Toys (`0013`) e intereses (`0012`), los tres fusionados y migrados.
 
 ## Siguiente paso
+- Al fusionar Homecenter: *Actions → migrate* con `to = head` (esquema 15); revisar la primera vuelta (`crawl_done`, páginas por vuelta, precios por zona) y el peso de la BD. Después, el PR 2 de Falabella con ADR 0017 (partir por vendedor y subcategoría por el tope de 200 páginas) y ambas tiendas en `[[events]]` antes del 26-nov (Black Days).
 - Al fusionar Woot: *Actions → migrate* con `to = head` (esquema 14; si 9to5Toys aún no se migró, corre la 13 y la 14). Hasta migrar, el ciclo se salta con aviso.
 - Grabar la fixture real de Woot (`tests/fixtures/woot/computers`, hoy sintética) con un workflow temporal autorizado por David; revisar los valores reales de `Condition` y los hosts de `Url`. Revisar 2-3 días cuántos posts de 9to5Toys con «$» dan precio (ADR 0014).
 - Después: Mercado Libre (falta la app de desarrollador de David).

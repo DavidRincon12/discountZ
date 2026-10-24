@@ -1,6 +1,6 @@
 # discountZ
 
-Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana, Jumbo, Pepe Ganga, Alkosto) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las siete tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
+Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana, Jumbo, Pepe Ganga, Alkosto, Homecenter) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las siete tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
 
 Corre en GitHub Actions con una base de datos Supabase Postgres gratuita: costo operativo $0.
 
@@ -203,6 +203,13 @@ Woot (de Amazon) vende con descuento por pocos días. El ciclo lee sus categorí
 1. **Clave.** El secreto `WOOT_API_KEY` ya está en *Settings → Secrets and variables → Actions*; el ciclo lo pasa como `DISCOUNTZ_WOOT_API_KEY`. Sin él, Woot queda no disponible y su breaker lo pausa.
 2. **Migración `0014`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head`. Mientras no corra, el ciclo se salta con aviso.
 3. **Nada más.** La primera lectura solo marca lo que hay. Desde la siguiente, cada oferta nueva llega como tarjeta «📣 Visto en Woot · sin verificar» con «🇺🇸 Compra por casillero» y el botón «Ver en Woot». Solo pasan las nuevas que se pueden comprar en la web (sin agotadas, reacondicionadas ni las de la app) y, como todo lo de casillero, desde US$10. Para apagarlo: `/fuente off woot`.
+
+### 20. Homecenter
+
+Homecenter se lee por el JSON que trae cada página de categoría de su web (sin secretos nuevos), solo en 13 categorías de herramientas, computadores y sillas, y solo lo que vende la tienda. Sus términos limitan el contenido a «revisión, compra y consulta» y no mencionan lectores automáticos; se sumó igual por decisión tuya (ADR 0016). Si bloquea o reclama, se apaga con `/fuente off homecenter`.
+
+1. **Migración `0015`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala.
+2. Nada más: el job `crawl` ya trae `homecenter` en su matriz (~370 páginas por vuelta, 800 peticiones al día). No tiene `/buscar`: su `robots.txt` cierra el buscador.
 
 ### Si algo falla
 
