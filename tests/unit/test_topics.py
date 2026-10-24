@@ -339,3 +339,11 @@ def test_homecenter_categories_fall_in_the_profile_topics() -> None:
     got = {assign_topic(topics.rules, "homecenter", c.path) for c in CATEGORIES}
     assert got <= {"ferreteria", "tecnologia", "hogar"}
     assert {"ferreteria", "tecnologia", "hogar"} <= got
+
+
+def test_falabella_categories_fall_in_the_profile_topics() -> None:
+    from discountz.sources.falabella import CATEGORIES
+
+    topics = load_topics()
+    got = {assign_topic(topics.rules, "falabella", c.path) for c in CATEGORIES}
+    assert got == {"tecnologia", "electro", "moda", "libros"}

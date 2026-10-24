@@ -123,3 +123,10 @@ def test_route_homecenter_product_url() -> None:
     source, ref = route_url(url, load_all())
     assert source.descriptor.code == "homecenter"
     assert ref == ListingRef("homecenter", "915074")
+
+
+def test_route_falabella_product_url() -> None:
+    url = "https://www.falabella.com.co/falabella-co/product/73557831/port-14-ip-slim3"
+    source, ref = route_url(url, load_all())
+    assert source.descriptor.code == "falabella"
+    assert ref == ListingRef("falabella", "73557831")

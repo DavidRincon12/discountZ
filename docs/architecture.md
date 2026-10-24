@@ -3,7 +3,7 @@
 ## Contexto
 Monitor **personal** de ofertas para David (Colombia). Rastrea tiendas colombianas (COP) y de EE. UU. que envían a casillero (USD), filtra descuentos inflados con un histórico propio y avisa por Telegram. Escala: decenas a pocos cientos de productos, un solo usuario, costo $0. Diseño completo: `docs/superpowers/specs/2026-10-13-discountz-v1-design.md`; decisiones en `docs/decisions/`.
 
-Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×6, Algolia de Alkosto, el JSON de las categorías de Homecenter, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API), el RSS de Slickdeals, el RSS de Amazon de DealNews el RSS de 9to5Toys y la API de Woot.
+Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×6, Algolia de Alkosto, el JSON de las categorías de Homecenter y de Falabella, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API), el RSS de Slickdeals, el RSS de Amazon de DealNews el RSS de 9to5Toys y la API de Woot.
 
 ## Contenedores
 ```mermaid
@@ -90,6 +90,8 @@ Migración `0013_9to5toys` (ADR 0014): fuente `ninetofivetoys`, el RSS de 9to5To
 Migración `0014_woot` (ADR 0015): fuente `woot`, un canal sin orden de ids sobre `channel_post`.
 
 Migración `0015_homecenter` (ADR 0016): fuente `homecenter` (`sources/homecenter.py`), que lee el `__NEXT_DATA__` de las categorías de la tienda.
+
+Migración `0016_falabella` (ADR 0017): fuente `falabella` (`sources/falabella.py`), que lee el `__NEXT_DATA__` de los listados filtrados por vendedor.
 
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
