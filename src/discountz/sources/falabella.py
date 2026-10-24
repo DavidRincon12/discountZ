@@ -14,14 +14,43 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from discountz.domain.errors import ParseError, UnsafeUrl
+from discountz.domain.catalog import CatalogObservation
+from discountz.domain.errors import NotFound, ParseError, Unavailable, UnsafeUrl
+from discountz.domain.model import (
+    ExtractionPath,
+    Lead,
+    ListingRef,
+    Offer,
+    SearchSpec,
+    SellerClass,
+)
 from discountz.domain.money import Currency, Money
 from discountz.domain.urls import SafeUrl
+from discountz.infra.http import BlockKind, HttpResponse
 from discountz.infra.log import event
+from discountz.sources.base import (
+    Capability,
+    CardFacts,
+    CatalogPage,
+    CatalogPartition,
+    ListingFailed,
+    ListingFound,
+    ListingGone,
+    ListingOutcome,
+    NeedsResolution,
+    SearchPage,
+    SourceContext,
+    SourceDescriptor,
+    pack_unit_key,
+)
+from discountz.sources.blocks import detect_block_common
+from discountz.sources.registry import register
 
 CODE = "falabella"
 BASE = "https://www.falabella.com.co"
@@ -35,6 +64,11 @@ OWN_SELLER = (
 _NEXT_DATA = re.compile(rb'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
 _PRICE_TYPES = frozenset({"internetPrice", "eventPrice", "normalPrice"})  # cmrPrice nunca
 _AMOUNT = re.compile(r"^\d{1,3}(?:\.\d{3})*$|^\d+$")
+_PRODUCT_PATH = re.compile(r"^/falabella-co/product/(\d{1,12})(?:/|$)")
+PAGE_SIZE = 48
+MAX_SEEN = 100_000  # listados guardados en memoria para la confirmación y la tarjeta
+_REDIRECTS = frozenset({301, 302, 307, 308})
+SELLER_FILTER = "f.derived.variant.sellerId"
 
 log = logging.getLogger(__name__)
 
@@ -236,3 +270,178 @@ def parse_product(body: bytes) -> ProductInfo:
         marketplace=not own,
         url=f"{BASE}/falabella-co/product/{product.id}/{slug}" if slug else None,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class Category:
+    """Una categoría del perfil: su id y slug en la URL y la ruta con la que se asigna el tema."""
+
+    key: str
+    slug: str
+    path: str
+
+
+CATEGORIES: tuple[Category, ...] = (
+    Category("cat171006", "Computadores", "/tecnologia/computadores/"),
+    Category("cat1660941", "Celulares-y-Telefonos", "/tecnologia/celulares/"),
+    Category("cat10550940", "Audio", "/tecnologia/audio/"),
+    Category("cat1360967", "TV-y-Video", "/tecnologia/tv y video/"),
+    Category("cat10430953", "Smartwatch", "/tecnologia/smartwatch/"),
+    Category("cat50590", "Gaming", "/tecnologia/gaming/"),
+    Category("cat311003", "Fotografia", "/tecnologia/fotografia/"),
+    Category("cat10431000", "Smart-Home", "/tecnologia/smart home/"),
+    Category("cat50623", "Electrohogar", "/electrodomesticos/electrohogar/"),
+    Category("cat4670964", "Ropa-Mujer", "/moda/ropa mujer/"),
+    Category("cat4670965", "Ropa-para-hombre", "/moda/ropa hombre/"),
+    Category("CATG36088", "Calzado-y-tenis", "/moda/calzado/"),
+    Category("cat6871001", "Relojes", "/moda/relojes/"),
+    Category("cat591075", "Articulos-de-escritorio-y-papeleria", "/papeleria/utiles escolares/"),
+)
+_BY_KEY = {c.key: c for c in CATEGORIES}
+
+
+def _location(resp: HttpResponse) -> str:
+    return next((v for k, v in resp.headers.items() if k.lower() == "location"), "")
+
+
+class FalabellaSource:
+    def __init__(self) -> None:
+        self.descriptor = SourceDescriptor(
+            code=CODE,
+            kind="store",
+            currency=Currency.COP,
+            hosts=HOSTS,
+            client="httpx",
+            capabilities=frozenset({Capability.DETAIL, Capability.CONFIRM, Capability.CATALOG}),
+            max_batch=1,
+            external_id_re=EXTERNAL_ID_RE,
+            image_hosts=IMAGE_HOSTS,
+        )
+        self._seen: dict[str, FalabellaItem] = {}
+
+    # --- contrato de la v1 ------------------------------------------------------------------
+
+    def parse_url(self, url: SafeUrl) -> ListingRef | NeedsResolution | None:
+        m = _PRODUCT_PATH.match(url.path)
+        return ListingRef(CODE, m.group(1)) if m else None
+
+    def resolve(self, ctx: SourceContext, pending: NeedsResolution) -> ListingRef:
+        raise ParseError("no_resolution")  # los enlaces de Falabella ya traen el id
+
+    def fetch_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        return [self._outcome(ctx, ref) for ref in refs]
+
+    def fetch_catalog_listings(
+        self, ctx: SourceContext, refs: Sequence[ListingRef]
+    ) -> list[ListingOutcome]:
+        return self.fetch_listings(ctx, refs)  # la misma ficha y la misma regla de vendedor
+
+    def search(self, ctx: SourceContext, spec: SearchSpec, page: int) -> SearchPage:
+        return SearchPage((), 0)  # solo rastreo y /seguir (spec F4)
+
+    def confirm(self, ctx: SourceContext, offer: Offer) -> Offer | None:
+        outcome = self._outcome(ctx, offer.ref)
+        if isinstance(outcome, ListingFailed):
+            raise outcome.error
+        if isinstance(outcome, ListingGone) or not outcome.offer.in_stock:
+            return None
+        return outcome.offer
+
+    def fetch_leads(self, ctx: SourceContext) -> list[Lead]:
+        return []
+
+    def detect_block(self, resp: HttpResponse) -> BlockKind | None:
+        return detect_block_common(resp)
+
+    # --- fichas ---------------------------------------------------------------------------------
+
+    def _outcome(self, ctx: SourceContext, ref: ListingRef) -> ListingOutcome:
+        try:
+            info, path = self._product(ctx, ref.external_id)
+        except NotFound:
+            return ListingGone(ref)
+        except (Unavailable, ParseError) as exc:
+            return ListingFailed(ref, exc)
+        if info.marketplace:  # solo lo que vende Falabella (spec F1)
+            return ListingGone(ref)
+        price = info.price
+        offer = Offer(
+            ref=ref,
+            parent_external_id=None,
+            title=info.title,
+            price=price,
+            list_price=None,  # el «antes» de la tienda no se lee: el descuento sale del histórico
+            in_stock=info.in_stock and price is not None,
+            seller_class=SellerClass.FIRST_PARTY,
+            unit_key=pack_unit_key(info.title) or "un|1",
+            extraction=ExtractionPath.EMBEDDED_JSON,
+            observed_at=ctx.now,
+            url_path=path,
+        )
+        return ListingFound(offer)
+
+    def _product(self, ctx: SourceContext, external_id: str) -> tuple[ProductInfo, str]:
+        """La ficha y su ruta canónica; sin enlace guardado, el id solo (la web lo acepta)."""
+        seen = self._seen.get(external_id)
+        bare = f"/falabella-co/product/{external_id}"
+        resp = ctx.http.request("GET", BASE + (seen.url if seen and seen.url else bare))
+        info = parse_product(resp.body)
+        path = urlsplit(info.url).path if info.url else None
+        return info, path or (seen.url if seen and seen.url else bare)
+
+    # --- catálogo ---------------------------------------------------------------------------
+
+    def catalog_partitions(self, ctx: SourceContext) -> Sequence[CatalogPartition]:
+        return [CatalogPartition(c.key, c.path) for c in CATEGORIES]
+
+    def fetch_catalog_page(self, ctx: SourceContext, partition: str, page: int) -> CatalogPage:
+        """Una página de 48 productos de la tienda en la categoría; `page` cuenta desde 0."""
+        category = _BY_KEY.get(partition)
+        if category is None:
+            raise ParseError("bad_partition")
+        number = page + 1
+        resp = ctx.http.request(
+            "GET",
+            f"{BASE}/falabella-co/category/{category.key}/{category.slug}",
+            params={SELLER_FILTER: "FALABELLA", "page": str(number)},
+        )
+        if resp.status in _REDIRECTS:
+            # Con un solo resultado la web manda a su ficha: la página queda vacía.
+            if _PRODUCT_PATH.match(urlsplit(_location(resp)).path):
+                return CatalogPage((), False)
+            raise ParseError("bad_redirect")
+        parsed = parse_category(resp.body)
+        for item in parsed.items:
+            if item.external_id in self._seen or len(self._seen) < MAX_SEEN:
+                self._seen[item.external_id] = item
+        items = tuple(
+            CatalogObservation(
+                i.external_id, i.price, category.path, None, SellerClass.FIRST_PARTY, title=i.title
+            )
+            for i in parsed.items
+        )
+        return CatalogPage(items, number * PAGE_SIZE < parsed.total)
+
+    def fetch_changed(self, ctx: SourceContext, since: datetime, page: int) -> CatalogPage:
+        return CatalogPage((), False)  # la tienda no lista cambios
+
+    def fetch_catalog_items(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> list[CatalogObservation]:
+        return []  # sin lectura por id barata: la vuelta completa es el único recorrido
+
+    def fetch_card_facts(
+        self, ctx: SourceContext, external_ids: Sequence[str]
+    ) -> dict[str, CardFacts]:
+        """Solo de lo ya leído en esta corrida: sin red; el resto usa la ficha al confirmar."""
+        facts: dict[str, CardFacts] = {}
+        for external_id in external_ids:
+            item = self._seen.get(external_id)
+            if item is not None and item.url is not None:
+                facts[external_id] = CardFacts(item.title, BASE + item.url, item.image_url)
+        return facts
+
+
+register(FalabellaSource())
