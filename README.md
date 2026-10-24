@@ -1,6 +1,6 @@
 # discountZ
 
-Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana, Jumbo, Pepe Ganga, Alkosto, Homecenter) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las siete tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
+Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana, Jumbo, Pepe Ganga, Alkosto, Homecenter, Falabella) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las siete tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
 
 Corre en GitHub Actions con una base de datos Supabase Postgres gratuita: costo operativo $0.
 
@@ -210,6 +210,13 @@ Homecenter se lee por el JSON que trae cada página de categoría de su web (sin
 
 1. **Migración `0015`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala.
 2. Nada más: el job `crawl` ya trae `homecenter` en su matriz (~370 páginas por vuelta, 800 peticiones al día). No tiene `/buscar`: su `robots.txt` cierra el buscador.
+
+### 21. Falabella
+
+Falabella se lee por el JSON que trae cada listado de su web (sin secretos nuevos), solo en 14 categorías de tecnología, electrohogar, moda, relojes y papelería, y solo lo que vende la propia tienda («Vendido por FALABELLA»). Sus términos no mencionan lectores automáticos y su `robots.txt` solo cierra la cesta y la cuenta; se sumó por decisión tuya (ADR 0017). Si bloquea o reclama, se apaga con `/fuente off falabella`.
+
+1. **Migración `0016`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala.
+2. Nada más: el job `crawl` ya trae `falabella` en su matriz (~215 páginas por vuelta, 700 peticiones al día). No tiene `/buscar`.
 
 ### Si algo falla
 
