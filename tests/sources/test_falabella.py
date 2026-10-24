@@ -22,7 +22,13 @@ from discountz.sources.base import (
     NoCredentials,
     SourceContext,
 )
-from discountz.sources.falabella import HOSTS, FalabellaSource, parse_category, parse_product
+from discountz.sources.falabella import (
+    CATEGORIES,
+    HOSTS,
+    FalabellaSource,
+    parse_category,
+    parse_product,
+)
 from discountz.sources.fixtures import load_fixture
 
 _NEXT = re.compile(rb'(<script id="__NEXT_DATA__" type="application/json">)(.*?)(</script>)', re.S)
@@ -251,6 +257,18 @@ def test_a_filter_with_one_product_redirects_to_it_and_is_an_empty_page() -> Non
     moved = HttpResponse(301, url, {"location": BASE + LAPTOP_PATH}, b"", 0)
     page = FalabellaSource().fetch_catalog_page(ctx(routes(**{url: moved})), "cat171006", 0)
     assert page == CatalogPage((), False)
+
+
+def test_a_page_past_the_end_redirects_to_no_result_and_is_an_empty_page() -> None:
+    url = f"{COMPUTERS}?{FILTER}&page=9"
+    moved = HttpResponse(307, url, {"location": BASE + "/falabella-co/noResult?Ntt="}, b"", 0)
+    page = FalabellaSource().fetch_catalog_page(ctx(routes(**{url: moved})), "cat171006", 8)
+    assert page == CatalogPage((), False)
+
+
+def test_television_category_uses_its_canonical_slug() -> None:
+    tv = next(c for c in CATEGORIES if c.key == "cat1360967")
+    assert tv.slug == "Televisores-y-Video"
 
 
 def test_any_other_redirect_is_a_parse_error() -> None:
