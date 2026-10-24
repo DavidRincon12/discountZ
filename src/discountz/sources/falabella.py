@@ -69,6 +69,7 @@ PAGE_SIZE = 48
 MAX_SEEN = 100_000  # listados guardados en memoria para la confirmación y la tarjeta
 _REDIRECTS = frozenset({301, 302, 307, 308})
 SELLER_FILTER = "f.derived.variant.sellerId"
+NO_RESULT_PATH = "/falabella-co/noResult"
 
 log = logging.getLogger(__name__)
 
@@ -285,7 +286,7 @@ CATEGORIES: tuple[Category, ...] = (
     Category("cat171006", "Computadores", "/tecnologia/computadores/"),
     Category("cat1660941", "Celulares-y-Telefonos", "/tecnologia/celulares/"),
     Category("cat10550940", "Audio", "/tecnologia/audio/"),
-    Category("cat1360967", "TV-y-Video", "/tecnologia/tv y video/"),
+    Category("cat1360967", "Televisores-y-Video", "/tecnologia/tv y video/"),
     Category("cat10430953", "Smartwatch", "/tecnologia/smartwatch/"),
     Category("cat50590", "Gaming", "/tecnologia/gaming/"),
     Category("cat311003", "Fotografia", "/tecnologia/fotografia/"),
@@ -409,7 +410,11 @@ class FalabellaSource:
         )
         if resp.status in _REDIRECTS:
             # Con un solo resultado la web manda a su ficha: la página queda vacía.
-            if _PRODUCT_PATH.match(urlsplit(_location(resp)).path):
+            target = urlsplit(_location(resp)).path
+            if _PRODUCT_PATH.match(target):
+                return CatalogPage((), False)
+            # Una página pasada del final responde con la búsqueda sin resultados.
+            if target == NO_RESULT_PATH:
                 return CatalogPage((), False)
             raise ParseError("bad_redirect")
         parsed = parse_category(resp.body)
