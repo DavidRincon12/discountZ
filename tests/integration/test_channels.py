@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 import psycopg
@@ -15,7 +15,7 @@ from pydantic import SecretStr
 from discountz.app.channels import ChannelsResult, due_channels, run_channels
 from discountz.app.collect import SourceRun
 from discountz.app.held import Slot, admit
-from discountz.config import Topics, load_params
+from discountz.config import AppParams, Topics, load_params
 from discountz.domain.community import ChannelPost
 from discountz.domain.errors import ParseError
 from discountz.domain.health import BreakerState, effective_state
@@ -113,9 +113,10 @@ def run(
     now: datetime = T,
     topics: Topics = TOPICS,
     interests: tuple[Interest, ...] = (),
+    params: AppParams = PARAMS,
 ) -> ChannelsResult:
     runs = [run_for(f) for f in fakes]
-    return run_channels(conn, runs, now, PARAMS, topics, random.Random(1), 1e9, interests=interests)
+    return run_channels(conn, runs, now, params, topics, random.Random(1), 1e9, interests=interests)
 
 
 def page(
@@ -369,11 +370,11 @@ def test_past_the_daily_cap_the_deal_waits_for_the_digest(db: psycopg.Connection
         "Cámara web",
         "Silla ergonómica",
     ]
-    assert len(titles) == PARAMS.daily_cards + 1
+    capped = replace(PARAMS, daily_cards=len(titles) - 1)
     posts = [deal(code, 101 + i, title=t) for i, t in enumerate(titles)]
-    result = run(db, FakeChannel(code, [page(*posts)]))
-    assert (result.sent, result.held) == (PARAMS.daily_cards, 1)
-    assert len(outbox(db)) == PARAMS.daily_cards
+    result = run(db, FakeChannel(code, [page(*posts)]), params=capped)
+    assert (result.sent, result.held) == (capped.daily_cards, 1)
+    assert len(outbox(db)) == capped.daily_cards
     held = db.execute("SELECT line FROM discountz.offer_log WHERE NOT carded").fetchone()
     assert held is not None and titles[-1] in held[0]
     # Retenida, sigue siendo la original: la misma oferta en otro canal no sale en tarjeta.

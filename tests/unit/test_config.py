@@ -147,8 +147,8 @@ def test_quality_floors_come_from_the_toml(tmp_path: Path) -> None:
 
 
 def test_daily_cards_come_from_the_toml(tmp_path: Path) -> None:
-    assert load_params().daily_cards == 8
-    path = _bad_toml(tmp_path, "daily_per_source = 8", "daily_per_source = 5")
+    assert load_params().daily_cards == 50
+    path = _bad_toml(tmp_path, "daily_per_source = 50", "daily_per_source = 5")
     assert load_params(path).daily_cards == 5
 
 

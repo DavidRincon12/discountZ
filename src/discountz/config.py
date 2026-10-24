@@ -235,7 +235,7 @@ class _Channels(_Strict):
 
 
 class _Cards(_Strict):
-    daily_per_source: NonNeg = 8
+    daily_per_source: NonNeg = 50
 
 
 class _Ebay(_Strict):
@@ -282,7 +282,7 @@ class AppParams:
     crawl: Mapping[str, CrawlBudget] = MappingProxyType({})
     channel_interval: timedelta = timedelta(minutes=10)  # cada canal como máximo cada N
     ebay: EbayParams = EbayParams()
-    daily_cards: int = 8  # tarjetas por fuente al día; el resto va al resumen (ADR 0012)
+    daily_cards: int = 50  # tarjetas por fuente al día; el resto va al resumen (ADR 0012)
 
 
 def _days(n: int) -> timedelta:
