@@ -330,3 +330,12 @@ def test_crawl_wanted_unknown_root_follows_otros() -> None:
     assert crawl_wanted(_WANT_RULES, _WANT_PARAMS, "exito", "/Algo nuevo/")
     off_otros = _params({"otros": "off"})
     assert not crawl_wanted(_WANT_RULES, off_otros, "exito", "/Algo nuevo/")
+
+
+def test_homecenter_categories_fall_in_the_profile_topics() -> None:
+    from discountz.sources.homecenter import CATEGORIES
+
+    topics = load_topics()
+    got = {assign_topic(topics.rules, "homecenter", c.path) for c in CATEGORIES}
+    assert got <= {"ferreteria", "tecnologia", "hogar"}
+    assert {"ferreteria", "tecnologia", "hogar"} <= got

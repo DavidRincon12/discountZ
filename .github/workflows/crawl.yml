@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        source: [exito, carulla, olimpica, panamericana, jumbo, pepeganga, bestbuy_us, ebay_us, alkosto]
+        source: [exito, carulla, olimpica, panamericana, jumbo, pepeganga, bestbuy_us, ebay_us, alkosto, homecenter]
     concurrency:
       group: discountz-crawl-${{ matrix.source }}
       cancel-in-progress: false      # el cursor y el lease protegen igual; no se mata a mitad
