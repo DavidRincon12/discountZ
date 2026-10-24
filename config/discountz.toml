@@ -477,10 +477,10 @@ max_per_run = 100
 max_per_24h = 800
 hot_share_bp = 0
 
-[crawl.falabella]  # Next.js: 14 categorías, ~215 páginas por vuelta de ~2,2 MB; ~3 vueltas al día (ADR 0017)
-min_pause_s = 3
-jitter_s = 2
-max_per_run = 100
+[crawl.falabella]  # Next.js: 14 categorías, ~215 páginas por vuelta de ~2,2 MB; ~3 vueltas al día; 10 s entre peticiones desde el 403 del 2026-10-24 (ADR 0017)
+min_pause_s = 10
+jitter_s = 5
+max_per_run = 60
 max_per_24h = 700
 hot_share_bp = 0
 
