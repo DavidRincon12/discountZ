@@ -246,6 +246,16 @@ watch_interval_min = 60
 search_interval_min = 1440  # sin Capability.SEARCH: robots.txt cierra su buscador
 max_batch = 1
 
+[sources.falabella]  # /seguir y la confirmación (fichas); el rastreo tiene su propio presupuesto (ADR 0017)
+group = "falabella"
+min_pause_s = 3
+jitter_s = 2
+max_per_run = 10
+max_per_24h = 300
+watch_interval_min = 60
+search_interval_min = 1440  # sin Capability.SEARCH: solo rastreo y /seguir
+max_batch = 1
+
 [sources.slickdeals]
 group = "slickdeals"
 min_pause_s = 0
@@ -406,7 +416,7 @@ max_per_24h = 40000
 
 [[events]]
 name = "Hot Sale"  # Drops del 16 al 18 y Hot Sale del 19 al 23 de octubre de 2026
-sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga", "alkosto", "homecenter"]
+sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga", "alkosto", "homecenter", "falabella"]
 starts = "2026-10-16T00:00"
 ends = "2026-10-24T00:00"
 
@@ -418,7 +428,7 @@ ends = "2026-11-28T00:00"
 
 [[events]]
 name = "Black Days"
-sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga", "alkosto", "homecenter"]
+sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga", "alkosto", "homecenter", "falabella"]
 starts = "2026-11-26T00:00"
 ends = "2026-11-30T00:00"
 
@@ -465,6 +475,13 @@ min_pause_s = 3
 jitter_s = 2
 max_per_run = 100
 max_per_24h = 800
+hot_share_bp = 0
+
+[crawl.falabella]  # Next.js: 14 categorías, ~215 páginas por vuelta de ~2,2 MB; ~3 vueltas al día (ADR 0017)
+min_pause_s = 3
+jitter_s = 2
+max_per_run = 100
+max_per_24h = 700
 hot_share_bp = 0
 
 [ebay]  # spec de eBay §2 y §3

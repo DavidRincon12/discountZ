@@ -61,6 +61,7 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "ebay_us",
         "alkosto",
         "homecenter",
+        "falabella",
         "slickdeals",
         "tg_descuentostech",
         "tg_clubgratis",
@@ -110,7 +111,7 @@ def test_co_events_include_the_new_vtex_stores() -> None:
         event = next(e for e in events if e.name == name)
         assert {"jumbo", "pepeganga", "alkosto"} <= set(event.sources)
     black_days = next(e for e in events if e.name == "Black Days")
-    assert "homecenter" in black_days.sources
+    assert {"homecenter", "falabella"} <= set(black_days.sources)
 
 
 def test_hot_sale_october_2026_is_on_the_calendar() -> None:
@@ -238,7 +239,11 @@ def test_crawl_budgets_match_spec() -> None:
         "jumbo",
         "pepeganga",
         "homecenter",
+        "falabella",
     }
+    falabella = c["falabella"]
+    assert (falabella.min_pause_s, falabella.jitter_s) == (3, 2)
+    assert (falabella.max_per_run, falabella.max_per_24h, falabella.hot_share_bp) == (100, 700, 0)
     homecenter = c["homecenter"]
     assert (homecenter.min_pause_s, homecenter.jitter_s) == (3, 2)
     assert (homecenter.max_per_run, homecenter.max_per_24h) == (100, 800)
@@ -256,7 +261,9 @@ def test_crawl_budgets_match_spec() -> None:
     assert (ebay.max_per_run, ebay.max_per_24h, ebay.hot_share_bp) == (170, 4000, 3000)
     assert homecenter.hot_share_bp == 0  # sin lectura barata por id: no hay capa caliente
     assert all(
-        b.hot_share_bp == 2500 for code, b in c.items() if code not in ("ebay_us", "homecenter")
+        b.hot_share_bp == 2500
+        for code, b in c.items()
+        if code not in ("ebay_us", "homecenter", "falabella")
     )
     assert all(b.max_per_run <= b.max_per_24h for b in c.values())
 
