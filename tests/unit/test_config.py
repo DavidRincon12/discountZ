@@ -60,6 +60,7 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "bestbuy_us",
         "ebay_us",
         "alkosto",
+        "homecenter",
         "slickdeals",
         "tg_descuentostech",
         "tg_clubgratis",
@@ -108,6 +109,8 @@ def test_co_events_include_the_new_vtex_stores() -> None:
     for name in ("Black Days", "Hot Sale"):
         event = next(e for e in events if e.name == name)
         assert {"jumbo", "pepeganga", "alkosto"} <= set(event.sources)
+    black_days = next(e for e in events if e.name == "Black Days")
+    assert "homecenter" in black_days.sources
 
 
 def test_hot_sale_october_2026_is_on_the_calendar() -> None:
@@ -234,7 +237,11 @@ def test_crawl_budgets_match_spec() -> None:
         "alkosto",
         "jumbo",
         "pepeganga",
+        "homecenter",
     }
+    homecenter = c["homecenter"]
+    assert (homecenter.min_pause_s, homecenter.jitter_s) == (3, 2)
+    assert (homecenter.max_per_run, homecenter.max_per_24h) == (100, 800)
     alkosto = c["alkosto"]
     assert (alkosto.min_pause_s, alkosto.jitter_s) == (2, 1)
     assert (alkosto.max_per_run, alkosto.max_per_24h, alkosto.hot_share_bp) == (60, 1000, 2500)
@@ -247,7 +254,10 @@ def test_crawl_budgets_match_spec() -> None:
     assert (c["bestbuy_us"].min_pause_s, c["bestbuy_us"].max_per_24h) == (0.25, 40_000)
     ebay = c.pop("ebay_us") if isinstance(c, dict) else c["ebay_us"]
     assert (ebay.max_per_run, ebay.max_per_24h, ebay.hot_share_bp) == (170, 4000, 3000)
-    assert all(b.hot_share_bp == 2500 for code, b in c.items() if code != "ebay_us")
+    assert homecenter.hot_share_bp == 0  # sin lectura barata por id: no hay capa caliente
+    assert all(
+        b.hot_share_bp == 2500 for code, b in c.items() if code not in ("ebay_us", "homecenter")
+    )
     assert all(b.max_per_run <= b.max_per_24h for b in c.values())
 
 
