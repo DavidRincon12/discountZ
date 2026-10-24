@@ -116,3 +116,10 @@ def test_route_alkosto_product_url() -> None:
     source, ref = route_url("https://www.alkosto.com/tv-kalley/p/7705946474559", load_all())
     assert source.descriptor.code == "alkosto"
     assert ref == ListingRef("alkosto", "7705946474559")
+
+
+def test_route_homecenter_product_url() -> None:
+    url = "https://www.homecenter.com.co/homecenter-co/product/915074/taladro/915074/"
+    source, ref = route_url(url, load_all())
+    assert source.descriptor.code == "homecenter"
+    assert ref == ListingRef("homecenter", "915074")
