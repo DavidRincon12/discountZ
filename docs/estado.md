@@ -13,7 +13,7 @@
 - Falabella como tienda rastreada (migración `0016`, esquema 16, ADR 0017) tras Homecenter (`0015`, PR #41). Antes: fix de las fotos (`app/deliver.py`): ante un 5xx o corte del CDN la tarjeta espera 3 min y reintenta hasta 3 veces antes de salir con el cuadro gris (visto en OFERTU: `photo_missing code=status http_status=502`). Antes: Woot (`0014`), 9to5Toys (`0013`) e intereses (`0012`), los tres fusionados y migrados.
 
 ## Siguiente paso
-- Al fusionar Falabella: *Actions → migrate* con `to = head` (esquema 16, que incluye la 15 de Homecenter); revisar la primera vuelta de ambas (`crawl_done`, páginas por vuelta, precios por zona, filas nuevas) y el peso de la BD. Ambas ya están en el evento Black Days (26-29 nov); las alertas necesitan precio estable 24 h y 2 lecturas.
+- Falabella: Actions recibe 403 desde el 2026-10-25 (bloqueo por IP); apagarla con `/fuente off falabella`, no se evade. Antes, al fusionar Falabella: *Actions → migrate* con `to = head` (esquema 16, que incluye la 15 de Homecenter); revisar la primera vuelta de ambas (`crawl_done`, páginas por vuelta, precios por zona, filas nuevas) y el peso de la BD. Ambas ya están en el evento Black Days (26-29 nov); las alertas necesitan precio estable 24 h y 2 lecturas.
 - Al fusionar Woot: *Actions → migrate* con `to = head` (esquema 14; si 9to5Toys aún no se migró, corre la 13 y la 14). Hasta migrar, el ciclo se salta con aviso.
 - Grabar la fixture real de Woot (`tests/fixtures/woot/computers`, hoy sintética) con un workflow temporal autorizado por David; revisar los valores reales de `Condition` y los hosts de `Url`. Revisar 2-3 días cuántos posts de 9to5Toys con «$» dan precio (ADR 0014).
 - Después: Mercado Libre (falta la app de desarrollador de David).
