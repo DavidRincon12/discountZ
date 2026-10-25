@@ -242,8 +242,8 @@ def test_crawl_budgets_match_spec() -> None:
         "falabella",
     }
     falabella = c["falabella"]
-    assert (falabella.min_pause_s, falabella.jitter_s) == (3, 2)
-    assert (falabella.max_per_run, falabella.max_per_24h, falabella.hot_share_bp) == (100, 700, 0)
+    assert (falabella.min_pause_s, falabella.jitter_s) == (10, 5)  # su WAF dio 403 a 3 s
+    assert (falabella.max_per_run, falabella.max_per_24h, falabella.hot_share_bp) == (60, 700, 0)
     homecenter = c["homecenter"]
     assert (homecenter.min_pause_s, homecenter.jitter_s) == (3, 2)
     assert (homecenter.max_per_run, homecenter.max_per_24h) == (100, 800)

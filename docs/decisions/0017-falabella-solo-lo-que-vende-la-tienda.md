@@ -27,3 +27,6 @@ Falabella (`falabella.com.co`, COP) mezcla su catálogo con el de cientos de ven
 ## Cuándo revisar
 - Se sostiene con (hoy): ~9.800 productos propios, ~215 páginas por vuelta, 700 peticiones al día.
 - Revisar si: `__NEXT_DATA__` cambia de forma, Falabella pone un desafío, el filtro de vendedor deja de funcionar o la BD pasa de 450 MB.
+## Ajuste (2026-10-24)
+
+La primera vuelta real (3 s entre peticiones) pasó con 20 peticiones, pero la siguiente recibió `403` desde Actions tras 6 páginas y abrió el interruptor. Se baja el ritmo a 10 s (±5) y 60 peticiones por corrida; el cursor reanuda donde quedó. No se evade ninguna protección: si vuelve el `403`, `/fuente off falabella`.
