@@ -25,6 +25,7 @@ from discountz.sources.woot import (
 )
 
 NOW = datetime(2026, 10, 23, 12, 0, tzinfo=UTC)
+RECORDED = datetime(2026, 10, 28, 23, 23, tzinfo=UTC)  # grabación de los feeds reales
 OFFER_ID = "2a3deba2-6f5a-43df-875a-ea84709c9a30"
 
 
@@ -104,6 +105,11 @@ def test_unusable_offer_id_has_no_post_id(raw: object) -> None:
         {"EndDate": "2026-10-23T11:59:00+00:00"},
         {"Condition": "Refurbished"},
         {"Condition": "Used - Very Good"},
+        # valores reales de los feeds (2026-10-28)
+        {"Condition": "New; Open Box"},
+        {"Condition": "Grade A Refurbished"},
+        {"Condition": "Like-New"},
+        {"Condition": "Scratch & Dent"},
     ],
 )
 def test_offers_that_cannot_be_bought_new_on_the_web_are_skipped_quietly(
@@ -115,8 +121,9 @@ def test_offers_that_cannot_be_bought_new_on_the_web_are_skipped_quietly(
     assert page.unparsed == 0
 
 
-def test_new_condition_is_kept() -> None:
-    assert len(parse_woot_feeds([feed(offer(Condition="New"))], NOW).posts) == 1
+@pytest.mark.parametrize("condition", ["New", "NEW", "New "])  # las tres salen en los feeds
+def test_new_condition_is_kept(condition: str) -> None:
+    assert len(parse_woot_feeds([feed(offer(Condition=condition))], NOW).posts) == 1
 
 
 @pytest.mark.parametrize(
@@ -163,11 +170,39 @@ def test_body_that_is_not_a_feed_page_is_a_parse_error(body: bytes) -> None:
         parse_woot_feeds([body], NOW)
 
 
-def test_fixture_feed_reads_its_offers() -> None:
-    page = parse_woot_feeds([load_fixture("woot", "computers").body], NOW)
-    assert len(page.posts) == 2
-    assert page.skipped == 1  # una agotada
-    assert all(p.price.currency is Currency.USD for p in page.posts)
+@pytest.mark.parametrize(
+    ("name", "posts", "skipped"),
+    [("computers", 261, 347), ("electronics", 482, 264), ("tools", 1481, 101)],
+)
+def test_real_feed_is_read_without_format_errors(name: str, posts: int, skipped: int) -> None:
+    page = parse_woot_feeds([load_fixture("woot", name).body], RECORDED)
+    assert (len(page.posts), page.skipped, page.unparsed) == (posts, skipped, 0)
+    assert all(p.price.currency is Currency.USD and p.price.minor > 0 for p in page.posts)
+    assert all(p.image_url is not None for p in page.posts)  # todas las fotos en su CDN
+
+
+def test_real_offer_keeps_its_fields() -> None:
+    page = parse_woot_feeds([load_fixture("woot", "computers").body], RECORDED)
+    wanted = offer_post_id("a3692bc8-970b-4d9e-85b5-e6073e844654")
+    (post,) = (p for p in page.posts if p.post_id == wanted)
+    assert post.title == "PowerA MOGA XP5-A Plus Bluetooth Controller"
+    assert post.price == Money(14_99, Currency.USD)
+    assert post.published_at == datetime(2026, 10, 26, 5, 0, tzinfo=UTC)
+    assert str(post.link) == (
+        "https://computers.woot.com/offers/powera-moga-xp5-a-plus-bluetooth-controller"
+    )
+    assert post.image_url is not None
+    assert post.image_url.host == "d3gqasl9vmjfd8.cloudfront.net"
+    assert post.hashtags == ("pc", "peripherals", "accessories")
+
+
+def test_real_feeds_together_count_shared_offers_once() -> None:
+    bodies = [load_fixture("woot", feed_name.lower()).body for feed_name in FEEDS]
+    alone = [parse_woot_feeds([body], RECORDED) for body in bodies]
+    together = parse_woot_feeds(bodies, RECORDED)
+    unique = {p.post_id for page in alone for p in page.posts}
+    assert sum(len(page.posts) for page in alone) > len(together.posts)  # hay ofertas repetidas
+    assert len(together.posts) == len(unique) == 2204
 
 
 class _Recorder:
