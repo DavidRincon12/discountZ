@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from functools import partial
@@ -41,7 +42,9 @@ from discountz.domain.catalog import (
 )
 from discountz.domain.errors import (
     BudgetExhausted,
+    CredentialUnavailable,
     HardBlock,
+    NotFound,
     ParseError,
     SourceError,
     Unavailable,
@@ -156,11 +159,13 @@ class _Batch:
 
 
 class _Stop(Exception):
-    """Fin anticipado de la corrida con su estado."""
+    """Fin anticipado de la corrida con su estado. `failed`: la petición en curso falló (no se
+    acabaron el tope, el plazo ni la cuota), así que su producto o EAN cuenta como pedido."""
 
-    def __init__(self, status: CrawlStatus) -> None:
+    def __init__(self, status: CrawlStatus, *, failed: bool = False) -> None:
         super().__init__(status)
         self.status = status
+        self.failed = failed
 
 
 class _Run:
@@ -190,7 +195,7 @@ class _Run:
         self.ctx = SourceContext(self.http, deps.credentials, end, now)
         self.pages = self.items = self.changes = self.alerts = 0
         self.off_profile = 0  # candidatos de temas que no van en tarjeta (ADR 0013)
-        self.parse_streak = 0
+        self.fail_streak = 0  # lecturas fallidas seguidas
         self.ok_pages = 0
         self.stored: int | None = None  # publicaciones guardadas o seguidas, para el tope
         self.seeds_searched = self.seeds_found = 0
@@ -317,11 +322,11 @@ class _Run:
         for t in chunk:
             if self.http.used >= limit or not self.time_left():
                 return
-            got = self.guarded(partial(src.fetch_catalog_items, self.ctx, [t.external_id]))
-            if got is None:  # ilegible: no se marca y se repite en la próxima corrida
-                continue
-            batch.checked.append(t.external_id)  # con o sin precio
-            batch.add(got, t.ean, t.topic)
+            with self.attempt(partial(batch.checked.append, t.external_id)):
+                read = partial(src.fetch_catalog_items, self.ctx, [t.external_id])
+                got = self.guarded(read, item=True)
+            batch.checked.append(t.external_id)  # con o sin precio, o fallida: vuelve en 6 h
+            batch.add(got or (), t.ean, t.topic)
 
     def seeds_allowed(self) -> bool:
         """Las semillas paran con la BD casi llena o con el tope de productos seguidos."""
@@ -366,8 +371,9 @@ class _Run:
                 continue
             if not self.time_left():
                 return
-            found = self.guarded(partial(src.find_by_ean, self.ctx, s.ean))
-            if found is None:  # no está, o la respuesta no se pudo leer
+            with self.attempt(partial(batch.lookups.append, (s.ean, None))):
+                found = self.guarded(partial(src.find_by_ean, self.ctx, s.ean), item=True)
+            if found is None:  # no está, o la búsqueda falló
                 batch.lookups.append((s.ean, None))
             else:
                 hits.append((s, found))
@@ -377,11 +383,24 @@ class _Run:
             if product not in seen:
                 if not self.time_left():
                     return
-                got = self.guarded(partial(src.fetch_catalog_items, self.ctx, [product])) or ()
+                with self.attempt(partial(batch.lookups.append, (s.ean, product))):
+                    read = partial(src.fetch_catalog_items, self.ctx, [product])
+                    got = self.guarded(read, item=True) or ()
                 seen.add(product)
                 batch.add(got, s.ean, s.topic)
                 batch.new += len(got)
             batch.lookups.append((s.ean, product))
+
+    @contextmanager
+    def attempt(self, done: Callable[[], None]) -> Iterator[None]:
+        """Un producto o EAN que se pide: si la corrida para porque esa petición falló, `done` lo
+        da por pedido, para que uno roto no vuelva primero en cada corrida."""
+        try:
+            yield
+        except _Stop as stop:
+            if stop.failed:
+                done()
+            raise
 
     def batched(self, fill: Callable[[_Batch], None]) -> None:
         """Llena un lote y lo guarda; si la corrida para, guarda lo hecho sin confirmar nada."""
@@ -419,43 +438,65 @@ class _Run:
         )
         self.save_cursor()
 
-    def guarded[R](self, call: Callable[[], R]) -> R | None:
+    def guarded[R](self, call: Callable[[], R], *, item: bool = False) -> R | None:
         """Ejecuta una petición de la fuente; `None` si la página no se pudo leer.
 
         Un error pasajero (red, 5xx) repite la misma petición tras una pausa, hasta
         `UNAVAILABLE_TRIES` veces; después la corrida para y la próxima sigue desde esa página.
+
+        Con `item`, la petición es de un solo producto o EAN (fuente sembrada): un error propio de
+        ese producto (ilegible, 4xx) lo salta en vez de parar la corrida, `PARSE_STOP` fallas
+        seguidas sí la paran, y una lectura buena tras una falla se lo dice al breaker, que así
+        solo cuenta las fallas seguidas y no las sueltas entre miles de productos.
         """
         for attempt in range(1, UNAVAILABLE_TRIES + 1):
             try:
                 result = call()
             except ParseError as exc:
                 self.log_error(exc)
-                self.parse_streak += 1
+                self.fail_streak += 1
                 self.breaker_event(BreakerEvent.PARSE_ERROR)
-                if self.parse_streak >= PARSE_STOP:
-                    self.cursor = replace(self.cursor, page=self.cursor.page + 1)
-                    raise _Stop("partial") from None
+                if self.fail_streak >= PARSE_STOP:
+                    if not item:
+                        self.cursor = replace(self.cursor, page=self.cursor.page + 1)
+                    raise _Stop("partial", failed=True) from None
                 return None
             except BudgetExhausted:
                 raise _Stop("ok") from None
             except HardBlock as exc:
                 self.log_error(exc)
                 self.breaker_event(BreakerEvent.HARD_BLOCK)
-                raise _Stop("blocked") from None
+                raise _Stop("blocked", failed=True) from None
             except SourceError as exc:
                 self.log_error(exc)
                 if exc.code != QUOTA:  # la cuota vuelve sola mañana: no cuenta para el breaker
                     self.breaker_event(BreakerEvent.UNAVAILABLE)
-                if not self.can_retry(exc, attempt):
-                    raise _Stop("partial") from None
-                self.deps.sleep(UNAVAILABLE_PAUSE_S)
-                continue
-            if attempt > 1:  # se recuperó: sus fallas ya no son seguidas para el breaker
+                if self.can_retry(exc, attempt):
+                    self.deps.sleep(UNAVAILABLE_PAUSE_S)
+                    continue
+                if item and self.skips(exc):
+                    self.fail_streak += 1
+                    if self.fail_streak < PARSE_STOP:
+                        return None
+                failed = exc.code not in ("deadline", QUOTA)
+                failed = failed and not isinstance(exc, CredentialUnavailable)
+                raise _Stop("partial", failed=failed) from None
+            if attempt > 1 or (item and self.fail_streak):  # sus fallas ya no son seguidas
                 self.breaker_event(BreakerEvent.OK)
-            self.parse_streak = 0
+            self.fail_streak = 0
             self.ok_pages += 1
             return result
         raise AssertionError("inalcanzable")  # el último intento retorna o para la corrida
+
+    def skips(self, exc: SourceError) -> bool:
+        """Un error de un solo producto (4xx, 404, demasiado grande): no un corte, la cuota, las
+        credenciales ni un breaker que ya se abrió."""
+        return (
+            isinstance(exc, (Unavailable, NotFound))
+            and exc.code not in TRANSIENT_CODES
+            and exc.code != QUOTA
+            and effective_state(self.breaker, self.now) != "open"
+        )
 
     def can_retry(self, exc: SourceError, attempt: int) -> bool:
         """Solo un corte pasajero, con intentos, breaker cerrado y tiempo para la pausa."""

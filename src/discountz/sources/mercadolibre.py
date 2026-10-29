@@ -383,13 +383,15 @@ class MercadoLibreSource:
         return self._leaders[seller_id]
 
     def _read_leader(self, ctx: SourceContext, seller_id: int) -> str | None:
-        """Un perfil que no se deja leer (403, 404 o cambiado) deja al vendedor por fuera."""
+        """Un perfil que no se deja leer (4xx o cambiado) deja al vendedor por fuera; un corte
+        pasajero (red, 5xx, 429) sube, para no anotarlo como «no es líder» en todo el proceso."""
         try:
             return parse_leader(self._get(ctx, f"/users/{seller_id}"))
         except NotFound:
             return None
         except Unavailable as exc:
-            if exc.http_status != 403:
+            status = exc.http_status
+            if status is None or not 400 <= status < 500 or status == 429:
                 raise
             return None
         except ParseError as exc:

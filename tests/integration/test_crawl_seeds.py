@@ -12,7 +12,8 @@ import pytest
 
 from discountz.app.crawl import run_crawl
 from discountz.domain.catalog import CatalogObservation, CatalogState
-from discountz.domain.errors import ParseError, Unavailable
+from discountz.domain.errors import CredentialUnavailable, HardBlock, ParseError, Unavailable
+from discountz.domain.health import effective_state
 from discountz.domain.model import ExtractionPath, ListingRef, Offer, SellerClass
 from discountz.domain.money import Currency, Money
 from discountz.infra import db as repo
@@ -43,12 +44,14 @@ class FakeEanCatalog(FakeCatalog):
 
     by_ean: dict[str, str] = field(default_factory=dict)
     reads_ok: int | None = None  # lecturas que responden antes de que la red falle del todo
-    unreadable: set[str] = field(default_factory=set)  # productos cuya lectura no se entiende
+    broken: dict[str, Exception] = field(default_factory=dict)  # EAN o producto → su falla
     code: str = ML
     max_batch: int = 1
 
     def find_by_ean(self, ctx: SourceContext, ean: str) -> str | None:
         ctx.http.request("GET", f"https://fake/search/{ean}")
+        if ean in self.broken:
+            raise self.broken[ean]
         return self.by_ean.get(ean)
 
     def fetch_catalog_items(
@@ -59,9 +62,10 @@ class FakeEanCatalog(FakeCatalog):
                 ctx.http.request("GET", "https://fake/items")
                 raise Unavailable(self.code, "retries_exhausted")
             self.reads_ok -= 1
-        if self.unreadable & set(external_ids):
-            ctx.http.request("GET", "https://fake/items")
-            raise ParseError("schema")
+        for ext in external_ids:
+            if ext in self.broken:
+                ctx.http.request("GET", "https://fake/items")
+                raise self.broken[ext]
         return list(super().fetch_catalog_items(ctx, external_ids))
 
 
@@ -107,6 +111,19 @@ def lookups(conn: psycopg.Connection) -> dict[str, str | None]:
 
 def tracked(conn: psycopg.Connection) -> int:
     return count(conn, "catalog_item", f"source = '{ML}'")
+
+
+def checked(conn: psycopg.Connection) -> dict[str, datetime | None]:
+    rows = conn.execute(
+        "SELECT external_id, checked_at FROM discountz.catalog_item WHERE source = %s", (ML,)
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def aged(conn: psycopg.Connection, *exts: str) -> None:
+    """Productos seguidos y por releer, del más viejo al más nuevo."""
+    for i, ext in enumerate(exts):
+        store_row(conn, ML, ext, gtin(100 + i), at=T - (20 - i) * HOUR)
 
 
 def test_seeds_track_found_products_with_seed_ean_and_topic(
@@ -193,17 +210,104 @@ def test_refresh_reads_tracked_items_and_marks_checked(db: psycopg.Connection) -
     assert transport.kinds().count("items") == 3
 
 
-def test_refresh_does_not_mark_an_unreadable_read(db: psycopg.Connection) -> None:
-    store_row(db, ML, "MCO1", A, price=1_000_000, at=T - 7 * HOUR)
-    store_row(db, ML, "MCO2", B, price=1_000_000, at=T - 7 * HOUR)
-    hot = {"MCO1": meli("MCO1", 1_000_000), "MCO2": meli("MCO2", 1_000_000)}
-    src = FakeEanCatalog({}, hot=hot, unreadable={"MCO1"})
+def test_unreadable_read_is_marked_and_read_once(db: psycopg.Connection) -> None:
+    aged(db, "MCO1", "MCO2")
+    store_row(db, "exito", "1", E)
+    hot = {"MCO2": meli("MCO2", 2_000_000), "MCO9": meli("MCO9", 1_900_000)}
+    broken: dict[str, Exception] = {"MCO1": ParseError("schema")}
+    src = FakeEanCatalog({}, by_ean={E: "MCO9"}, hot=hot, broken=broken)
+    d, transport = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=30).status == "ok"
+    assert checked(db) == {"MCO1": T, "MCO2": T, "MCO9": None}
+    assert transport.kinds().count("items") == 3  # la ilegible no se repite en la otra pasada
+    assert lookups(db) == {E: "MCO9"}
+
+
+def test_scattered_failures_do_not_open_the_breaker(db: psycopg.Connection) -> None:
+    ids = ("MCO1", "MCO2", "MCO3", "MCO4", "MCO5", "MCO6")
+    aged(db, *ids)
+    hot = {i: meli(i, 2_000_000) for i in ids[1::2]}
+    src = FakeEanCatalog({}, hot=hot, broken=dict.fromkeys(ids[::2], ParseError("schema")))
     d, _ = deps(db, src, Clock())
     assert run_crawl(d, T, minutes=30).status == "ok"
-    rows = db.execute(
-        "SELECT external_id, checked_at FROM discountz.catalog_item ORDER BY external_id"
-    ).fetchall()
-    assert rows == [("MCO1", None), ("MCO2", T)]  # la ilegible se repite en la próxima corrida
+    assert effective_state(repo.load_breakers(db)[ML], T) == "closed"
+
+
+def test_product_that_always_errors_is_skipped_and_marked(db: psycopg.Connection) -> None:
+    aged(db, "MCO1", "MCO2")
+    store_row(db, "exito", "1", E)
+    hot = {"MCO2": meli("MCO2", 2_000_000), "MCO9": meli("MCO9", 1_900_000)}
+    broken: dict[str, Exception] = {"MCO1": Unavailable(ML, "http_error", 400)}
+    src = FakeEanCatalog({}, by_ean={E: "MCO9"}, hot=hot, broken=broken)
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=30).status == "ok"
+    assert checked(db) == {"MCO1": T, "MCO2": T, "MCO9": None}
+    assert lookups(db) == {E: "MCO9"}
+
+
+def test_product_with_a_lasting_5xx_does_not_come_back_first(db: psycopg.Connection) -> None:
+    aged(db, "MCO1", "MCO2")
+    broken: dict[str, Exception] = {"MCO1": Unavailable(ML, "retries_exhausted")}
+    src = FakeEanCatalog({}, hot={"MCO2": meli("MCO2", 2_000_000)}, broken=broken)
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=30).status == "partial"  # tras los reintentos, la corrida para
+    assert checked(db) == {"MCO1": T, "MCO2": None}  # pero ese producto cuenta como pedido
+    d2, _ = deps(db, src, Clock())
+    assert run_crawl(d2, T + HOUR, minutes=30).status == "ok"
+    assert checked(db) == {"MCO1": T, "MCO2": T + HOUR}
+
+
+@pytest.mark.parametrize("bad", [Unavailable(ML, "http_error", 400), ParseError("schema")])
+def test_three_failures_in_a_row_stop_the_run(db: psycopg.Connection, bad: Exception) -> None:
+    aged(db, "MCO1", "MCO2", "MCO3", "MCO4")
+    broken: dict[str, Exception] = dict.fromkeys(("MCO1", "MCO2", "MCO3"), bad)
+    src = FakeEanCatalog({}, hot={"MCO4": meli("MCO4", 2_000_000)}, broken=broken)
+    d, transport = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=30).status == "partial"
+    assert transport.kinds().count("items") == 3
+    assert checked(db) == {"MCO1": T, "MCO2": T, "MCO3": T, "MCO4": None}
+
+
+def test_blocked_product_is_marked(db: psycopg.Connection) -> None:
+    aged(db, "MCO1", "MCO2")
+    broken: dict[str, Exception] = {"MCO1": HardBlock(ML, "forbidden", 403)}
+    src = FakeEanCatalog({}, hot={"MCO2": meli("MCO2", 2_000_000)}, broken=broken)
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=30).status == "blocked"
+    assert checked(db) == {"MCO1": T, "MCO2": None}
+
+
+def test_seed_whose_product_fails_is_recorded(db: psycopg.Connection) -> None:
+    store_row(db, "exito", "1", A)
+    store_row(db, "exito", "2", B, price=1_500_000)
+    broken: dict[str, Exception] = {"MCO1": Unavailable(ML, "http_error", 400)}
+    hot = {"MCO2": meli("MCO2", 1_400_000)}
+    src = FakeEanCatalog({}, by_ean={A: "MCO1", B: "MCO2"}, hot=hot, broken=broken)
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=30).status == "ok"
+    assert lookups(db) == {A: "MCO1", B: "MCO2"}
+    assert tracked(db) == 1
+
+
+@pytest.mark.parametrize(
+    "error", [CredentialUnavailable(ML, "bad_key", 401), Unavailable(ML, "deadline")]
+)
+def test_stop_that_is_not_the_products_fault_records_nothing(
+    db: psycopg.Connection, error: Exception
+) -> None:
+    store_row(db, "exito", "1", A)
+    src = FakeEanCatalog({}, by_ean={A: "MCO1"}, broken={"MCO1": error})
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=30).status == "partial"
+    assert lookups(db) == {}  # la semilla se repite en la próxima corrida
+
+
+def test_seed_whose_search_keeps_failing_is_recorded(db: psycopg.Connection) -> None:
+    store_row(db, "exito", "1", A)
+    src = FakeEanCatalog({}, broken={A: Unavailable(ML, "retries_exhausted")})
+    d, _ = deps(db, src, Clock())
+    assert run_crawl(d, T, minutes=30).status == "partial"
+    assert lookups(db) == {A: None}  # no vuelve primero en cada corrida
 
 
 def test_refresh_leaves_room_for_seeds(db: psycopg.Connection) -> None:
@@ -255,7 +359,8 @@ def test_failure_mid_chunk_keeps_what_was_done(db: psycopg.Connection) -> None:
     d, _ = deps(db, src, Clock())
     assert run_crawl(d, T, minutes=30).status == "partial"
     assert tracked(db) == 3
-    assert lookups(db) == {A: "MCO0", B: "MCO1", C: "MCO2"}
+    # La semilla que se leía al parar cuenta como buscada: un producto roto no vuelve primero.
+    assert lookups(db) == {A: "MCO0", B: "MCO1", C: "MCO2", D: "MCO3"}
 
 
 def test_drop_after_warmup_alerts_with_card(db: psycopg.Connection) -> None:

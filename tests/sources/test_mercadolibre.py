@@ -17,7 +17,7 @@ import pytest
 from pydantic import SecretStr
 
 from discountz.domain.catalog import CatalogObservation
-from discountz.domain.errors import CredentialUnavailable, HardBlock, ParseError
+from discountz.domain.errors import CredentialUnavailable, HardBlock, ParseError, Unavailable
 from discountz.domain.model import ListingRef, SearchSpec, SellerClass
 from discountz.domain.money import Currency, Money
 from discountz.domain.scheduling import SourceBudget
@@ -511,6 +511,26 @@ def test_user_403_or_404_skips_the_seller_without_blocking(status: int) -> None:
     [obs] = src.fetch_catalog_items(ctx(http), [PRODUCT])
     assert obs.seller_class is SellerClass.FIRST_PARTY
     assert http.blocked is None
+
+
+@pytest.mark.parametrize("status", [400, 410])
+def test_user_4xx_skips_the_seller_once(status: int) -> None:
+    other = "MCO99"
+    body = items(seller(CHEAP, price=400000))
+    bad = resp({"message": "bad request", "status": status}, status)
+    src, api, c = setup(
+        {ITEMS: body, f"GET /products/{other}/items": body, f"GET /users/{CHEAP}": bad}
+    )
+    found = src.fetch_catalog_items(c, [PRODUCT, other])
+    assert [o.seller_class for o in found] == [SellerClass.FIRST_PARTY] * 2
+    assert api.paths("/users/") == [f"/users/{CHEAP}"]  # el perfil roto no se pide otra vez
+
+
+def test_user_5xx_fails_the_read() -> None:
+    down = resp({"message": "internal error", "status": 500}, 500)
+    src, _api, c = setup({ITEMS: items(seller(CHEAP, price=400000)), f"GET /users/{CHEAP}": down})
+    with pytest.raises(Unavailable):  # pasajero: no se anota como «no es líder»
+        src.fetch_catalog_items(c, [PRODUCT])
 
 
 def test_unreadable_user_skips_the_seller() -> None:
