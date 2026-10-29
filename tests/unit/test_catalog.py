@@ -15,6 +15,7 @@ from discountz.domain.catalog import (
     CatalogCandidate,
     CatalogObservation,
     CatalogState,
+    is_fee_listing_title,
     is_service_title,
     median_low,
     meets_floors,
@@ -408,3 +409,28 @@ def test_products_that_mention_a_warranty_are_still_products() -> None:
         "",
     ):
         assert not is_service_title(title), title
+
+
+def test_seller_fee_listings_are_not_products() -> None:
+    for title in (
+        "1PC ACS320-03U-08A8-4 for VIP",
+        "1PC 8906-CCFL-A-A161 for vip",
+        "Extra shipping fee Balance",
+        "Shipping fee balance for order #123",
+        "Extra Shipping Cost",
+        "Pay the difference - custom order",
+        "Price difference payment",
+        "Balance payment for your order",
+    ):
+        assert is_fee_listing_title(title), title
+
+
+def test_real_products_are_not_fee_listings() -> None:
+    for title in (
+        "Apple iPhone 15 128GB Unlocked",
+        "VIP Fitness Resistance Bands Set",
+        "Fan for VIPER gaming case 120mm",
+        "Router with free shipping included",
+        "",
+    ):
+        assert not is_fee_listing_title(title), title

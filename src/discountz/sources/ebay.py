@@ -21,7 +21,7 @@ from urllib.parse import quote
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from discountz.config import PARAMS_PATH, EbayParams, load_params
-from discountz.domain.catalog import CatalogObservation
+from discountz.domain.catalog import CatalogObservation, is_fee_listing_title
 from discountz.domain.errors import (
     CredentialUnavailable,
     NotFound,
@@ -266,6 +266,8 @@ def _item(listing: _Listing, rules: EbayRules) -> EbayItem | None:
     if listing.itemGroupHref and not rules.allow_variants:
         return None
     if listing.lotSize is not None and listing.lotSize > 1:
+        return None
+    if is_fee_listing_title(listing.title):  # pagos de envío y enlaces «for VIP»
         return None
     seller_class, pct, score = _seller(listing, rules)
     statuses = [a.estimatedAvailabilityStatus for a in listing.estimatedAvailabilities]

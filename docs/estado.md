@@ -10,7 +10,7 @@
 - Suite: 1394 pruebas (1134 unitarias y de fuentes, 260 de integración) en verde el 2026-10-28.
 
 ## Último cambio
-- Jumbo y Homecenter (2026-10-29): las garantías y servicios listados como producto («Garantía Extendida 36 Meses») ya no alertan (`is_service_title`, `domain/catalog.py`), y la tarjeta de Homecenter toma la foto de la ficha que leyó la confirmación cuando el listado no la trae. Antes: fixtures reales de Woot (PR #48).
+- eBay (2026-10-29): los anuncios de pago de envío o diferencia y los enlaces «for VIP» ya no entran (`is_fee_listing_title`, `domain/catalog.py`, filtrados en `sources/ebay.py`); eran «errores de precio» falsos contra la mediana de su `epid`. Antes: garantías de Jumbo (PR #49).
 
 ## Siguiente paso
 - Mercado Libre: la búsqueda pública da 403 aun con token y el catálogo responde con token de aplicación. Plan en el informe «Plan para sumar Mercado Libre a discountZ» (https://claude.ai/artifact/RDLrKpPRSFenZg5xTQ74im). Falta que David cree la app y suba `MELI_CLIENT_ID` y `MELI_CLIENT_SECRET`; luego, prueba desde Actions (token, y `/products/search` y `/products/{id}/items` con 200 en MCO) antes del spec.

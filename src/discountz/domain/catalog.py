@@ -40,6 +40,26 @@ def is_service_title(title: str | None) -> bool:
     return title is not None and _SERVICE_TITLE.match(title.strip()) is not None
 
 
+# Anuncios de eBay que no venden un producto: pagos de diferencia de envío o de precio y enlaces
+# privados de un vendedor («for VIP»). Comparten el `epid` de un producto real con precio de
+# centavos y disparan un «error de precio» falso.
+_FEE_TITLE = re.compile(
+    r"\bfor\s+vip\s*$"
+    r"|\bextra\s+(shipping|postage|freight)\b"
+    r"|\b(shipping|postage|freight)\s+(fee\s+|cost\s+|charge\s+)?"
+    r"(balance|difference|supplement|top[\s-]?up)\b"
+    r"|\bpay(ment)?\s+(the\s+|for\s+the\s+)?(price\s+)?difference\b"
+    r"|\bprice\s+difference\b"
+    r"|\bbalance\s+pay(ment)?\b",
+    re.IGNORECASE,
+)
+
+
+def is_fee_listing_title(title: str | None) -> bool:
+    """¿El título es el pago de una diferencia de envío o precio, o un enlace «for VIP»?"""
+    return title is not None and _FEE_TITLE.search(title.strip()) is not None
+
+
 @dataclass(frozen=True, slots=True)
 class CatalogObservation:
     external_id: str
