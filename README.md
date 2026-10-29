@@ -224,7 +224,7 @@ Mercado Libre se lee por su API oficial, con la app de solo lectura que creaste 
 
 1. **Secretos.** `MELI_CLIENT_ID` y `MELI_CLIENT_SECRET` ya están en *Settings → Secrets and variables → Actions*; `crawl` y `cycle` los pasan como `DISCOUNTZ_MELI_CLIENT_ID` y `DISCOUNTZ_MELI_CLIENT_SECRET`. Sin ellos, el job `crawl` de `mercadolibre` termina en verde con «sin credenciales; se omite».
 2. **Migración `0017`.** Justo después de fusionar y antes del primer rastreo de `mercadolibre`: *Actions → migrate → Run workflow* con `to = head` y apruébala.
-3. Nada más: el job `crawl` ya trae `mercadolibre` en su matriz (hasta 2.000 peticiones por corrida y 20 mil al día, la mayor parte para releer). Las tarjetas llegan cuando un producto lleva 24 h con precio estable. No tiene `/buscar`; `/seguir` acepta los enlaces de producto (`…/p/MCO…`), no los de `articulo.mercadolibre.com.co`. Si suspenden la app o la API bloquea, se apaga con `/fuente off mercadolibre`.
+3. Nada más: el job `crawl` ya trae `mercadolibre` en su matriz (hasta 2.000 peticiones por corrida y 20 mil al día, la mayor parte para releer). Un producto recién hallado necesita 3 días de historia antes de su primera tarjeta. No tiene `/buscar`; `/seguir` acepta los enlaces de producto (`…/p/MCO…`), no los de `articulo.mercadolibre.com.co`. Si suspenden la app o la API bloquea, se apaga con `/fuente off mercadolibre`.
 
 ### Si algo falla
 

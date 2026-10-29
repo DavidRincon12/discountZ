@@ -7,10 +7,10 @@
 - Perfil de temas (ADR 0013): Belleza, Mercado, Bebés y Mascotas apagados (no se rastrean ni se releen, y sus ofertas de canales quedan vistas); el resto en tarjeta.
 - Intereses (esquema 12): semilla de `config/interests.toml` más los de `/interes`; lo que coincide sale con «🎯», hasta 3 por interés al día. Mercado Libre no entra (su lectura no trae título).
 - Dos chats: el grupo (todo, temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas y resúmenes de ofertas).
-- Suite: 1493 pruebas (1210 unitarias y de fuentes, 283 de integración) en verde el 2026-10-29.
+- Suite: 1507 pruebas (1214 unitarias y de fuentes, 293 de integración) en verde el 2026-10-29.
 
 ## Último cambio
-- Rama `claude/project-thread-xsztn5`: Mercado Libre por su API con token de aplicación (`MELI_CLIENT_ID`/`MELI_CLIENT_SECRET`), migración `0017` (`ean_lookup`, `catalog_item.checked_at`, esquema 17), `domain/gtin.py`, protocolo `EanCatalogSource` y rastreo sembrado en `app/crawl.py` (spec `docs/superpowers/specs/2026-10-29-mercadolibre-design.md`, plan ejecutado completo en modo Native). Antes: garantías y servicios listados como producto ya no alertan (`is_service_title`) y la tarjeta de Homecenter toma la foto de la ficha (PR #49).
+- Rama `claude/project-thread-xsztn5`: Mercado Libre por su API con token de aplicación (`MELI_CLIENT_ID`/`MELI_CLIENT_SECRET`), migración `0017` (`ean_lookup`, `catalog_item.checked_at`, esquema 17), `domain/gtin.py`, protocolo `EanCatalogSource` y rastreo sembrado en `app/crawl.py` (spec `docs/superpowers/specs/2026-10-29-mercadolibre-design.md`, plan ejecutado completo en modo Native). La revisión final arregló que un producto roto frenara toda la fuente y el reintento de los EAN con ceros (UPC de 12 dígitos). Antes: garantías y servicios listados como producto ya no alertan (`is_service_title`) y la tarjeta de Homecenter toma la foto de la ficha (PR #49).
 
 ## Siguiente paso
 - Al fusionar: *Actions → migrate* (`to = head`, esquema 17) antes del primer rastreo de `mercadolibre`.
@@ -34,4 +34,5 @@
 - Desde la nube de la sesión: Newegg, Best Buy, Amazon, `*.vtexassets.com`, Jumbo, Pepe Ganga y la API de Mercado Libre bloqueados (no desde Actions); sus fixtures se graban con un workflow temporal. `record-fixture` no sigue redirecciones.
 - Homecenter sin foto: no se vio el porqué en los logs (ni `photo_missing` ni `photo_deferred`); si sigue el cuadro gris, revisar `crawl_done` y la foto de la ficha.
 - Ofertas con el tema equivocado: término en `channel_rules` y oferta en `tests/fixtures/topics/ofertas-etiquetadas.jsonl` (`test_topic_precision.py` exige ≥ 95 %).
+- Mercado Libre, menores de la revisión final sin hacer: falta en `SOURCE_NAMES`/`STORE_COLORS` (sus tarjetas dicen «mercadolibre» y salen grises, como Alkosto, Homecenter y Falabella); `ean_seeds` filtra tema y precio antes del `DISTINCT ON` (spec §1.3); `save_batch` anota las búsquedas antes que el catálogo; `day_requests` solo se guarda al final; `crawl_seeds` sin `duration_ms`; un MercadoLíder más barato tapa a la tienda oficial en tecnología (M3); el README dice «24 h con precio estable» en Alkosto y Jumbo, pero un producto nuevo pide 3 días (`WARMUP`).
 - Falta: `pg_terminate_backend` tras 3 `skipped_locked`; reloj fijo por corrida; orden del barrido VTEX sin medir; parámetros de eBay leídos al importar. Hot Sale 2027 sin fecha publicada.
