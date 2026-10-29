@@ -58,41 +58,29 @@ jobs:
               print(f"{label}: {st} {short}")
               return st, body
 
-          show("users/me", "/users/me")
-          show("users/id", f"/users/{tok.get('user_id')}")
-          show("categories", "/categories/MCO1648")
-          show("sites/MCO sin token", "/sites/MCO", auth=False)
-          show("sites/MCO", "/sites/MCO")
-          show("search q", "/sites/MCO/search?q=portatil&limit=5")
-          show("highlights", "/highlights/MCO/category/MCO1648")
-          show("domain_discovery", "/sites/MCO/domain_discovery/search?q=portatil&limit=3")
-
-          total = 0
-          for q in ("portatil", "televisor", "taladro"):
-              st, body = show(f"products/search {q}", f"/products/search?status=active&site_id=MCO&q={q}&limit=50")
+          import collections
+          for q in ("portatil lenovo", "televisor samsung", "taladro inalambrico"):
+              st, body = show(f"products/search {q}", "/products/search?status=active&site_id=MCO&q=" + urllib.parse.quote(q) + "&limit=50")
               if st != 200:
                   continue
               res = body.get("results", [])
-              total += len(res)
-              domains = sorted({r.get("domain_id") for r in res})
-              print(f"  {q}: {len(res)} de {body.get('paging', {}).get('total')} dominios {domains[:5]}")
-              with_winner = 0
-              for r in res[:3]:
-                  pid = r["id"]
-                  st2, prod = show(f"  products/{pid}", f"/products/{pid}")
-                  if st2 == 200:
-                      bw = prod.get("buy_box_winner") or {}
-                      pics = prod.get("pictures") or []
-                      host = urllib.parse.urlsplit(pics[0]["url"]).hostname if pics else None
-                      link = urllib.parse.urlsplit(prod.get("permalink") or "").hostname
-                      print(f"    winner={bool(bw)} price={bw.get('price')} orig={bw.get('original_price')} cur={bw.get('currency_id')} "
-                            f"official={bw.get('official_store_id')} cond={bw.get('condition')} foto={host} enlace={link}")
-                      with_winner += bool(bw)
-                  st3, items = show(f"  products/{pid}/items", f"/products/{pid}/items")
+              keys = sorted(res[0]) if res else []
+              print("  campos del resultado:", keys)
+              wins, offs, stores, sample = 0, 0, collections.Counter(), None
+              for r in res[:40]:
+                  st2, prod = call("GET", f"/products/{r['id']}", token)
+                  bw = (prod.get("buy_box_winner") if st2 == 200 else None) or {}
+                  if bw:
+                      wins += 1
+                      offs += bool(bw.get("original_price"))
+                      stores[bool(bw.get("official_store_id"))] += 1
+                      sample = sample or (r["id"], bw.get("item_id"), bw.get("price"), bw.get("original_price"), bw.get("currency_id"), bw.get("condition"), sorted(bw)[:30])
+              print(f"  {q}: {wins}/40 con buy_box_winner, {offs} con precio de antes, tienda oficial {dict(stores)}")
+              print("  ejemplo:", sample)
+              if sample:
+                  st3, items = show("  items del producto", f"/products/{sample[0]}/items")
                   if st3 == 200:
-                      rs = items.get("results", [])
-                      print(f"    items={len(rs)} precios={[i.get('price') for i in rs[:3]]} tiendas={[i.get('official_store_id') for i in rs[:3]]}")
-                      if rs:
-                          show(f"    items/{rs[0]['item_id']}", f"/items/{rs[0]['item_id']}")
-              print(f"  {q}: {with_winner}/3 con buy_box_winner")
-          print("TOTAL productos:", total)
+                      print("   n=", len(items.get("results", [])), "campos", sorted(items["results"][0])[:30])
+                  show("  items/{id}", f"/items/{sample[1]}")
+                  show("  items?ids=", f"/items?ids={sample[1]}")
+                  show("  sale_price", f"/items/{sample[1]}/sale_price")
