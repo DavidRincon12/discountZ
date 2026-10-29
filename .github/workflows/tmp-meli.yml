@@ -55,24 +55,22 @@ jobs:
           def err(body):
               return body if isinstance(body, str) else ""
 
-          # Señales de un producto con vendedores frente a uno sin ellos
-          for pid in ("MCO18924972", "MCO29284591"):
-              st, p = get(f"/products/{pid}")
-              if st == 200:
-                  print(pid, {k: p.get(k) for k in ("status", "quality_type", "search_type", "tags", "settings")})
+          # Búsqueda por EAN (GTIN) del producto con vendedores
+          st, p = get("/products/MCO18924972")
+          gtins = [v.get("name") for a in (p.get("attributes") or []) if a.get("id") == "GTIN" for v in (a.get("values") or [])]
+          print("GTIN de MCO18924972:", gtins)
+          for g in gtins[:1]:
+              st, b = get(f"/products/search?status=active&site_id=MCO&product_identifier={g}")
+              print("  por GTIN:", st, err(b), [r["id"] for r in b.get("results", [])] if isinstance(b, dict) else "")
 
-          # Más vendidos (permiso «Métricas del negocio»)
-          st, b = get("/highlights/MCO/category/MCO1648")
-          print("highlights:", st, b if isinstance(b, str) else str(b)[:300])
-
-          # Barrido de un dominio: ¿cuántos productos tienen vendedores?
-          for domain in ("MCO-ELECTRIC_DRILLS", "MCO-TELEVISIONS"):
-              st, body = get(f"/products/search?status=active&site_id=MCO&domain_id={domain}&limit=50")
-              print(f"\n{domain}: {st} {err(body)}")
+          # Barrido con palabra y dominio: ¿cuántos productos tienen vendedores?
+          for q, domain in (("taladro", "MCO-ELECTRIC_DRILLS"), ("televisor", "MCO-TELEVISIONS"), ("portatil", "MCO-NOTEBOOKS")):
+              st, body = get(f"/products/search?status=active&site_id=MCO&q={q}&domain_id={domain}&limit=50")
+              print(f"\n{q} / {domain}: {st} {err(body)}")
               if st != 200:
                   continue
               res = body.get("results", [])
-              print("  total:", body.get("paging", {}).get("total"), "en esta página:", len(res))
+              print("  total:", body.get("paging", {}).get("total"), "en esta página:", len(res), "dominios:", sorted({r.get("domain_id") for r in res}))
               t0, hits, offs, prices = time.time(), 0, 0, []
               for r in res:
                   st2, its = get(f"/products/{r['id']}/items")
@@ -83,8 +81,8 @@ jobs:
                       offs += bool(low.get("original_price"))
                       prices.append((r["id"], low["price"], low.get("original_price"), len(rs), r.get("name", "")[:40]))
               print(f"  con vendedores: {hits}/{len(res)}, con precio de antes: {offs}, {time.time() - t0:.0f} s")
-              for x in prices[:5]:
+              for x in prices[:4]:
                   print("   ", x)
               for off in (950, 1000, 5000):
-                  st3, b3 = get(f"/products/search?status=active&site_id=MCO&domain_id={domain}&limit=50&offset={off}")
+                  st3, b3 = get(f"/products/search?status=active&site_id=MCO&q={q}&domain_id={domain}&limit=50&offset={off}")
                   print(f"  offset {off}: {st3} {err(b3)[:120]} n={len(b3.get('results', [])) if isinstance(b3, dict) else 0}")
