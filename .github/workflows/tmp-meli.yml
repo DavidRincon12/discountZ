@@ -1,4 +1,4 @@
-# Temporal: prueba si la API de Mercado Libre responde con el token de la app. Se borra en el commit siguiente.
+# Temporal: prueba si la API de Mercado Libre responde con el token de la app (intento 3). Se borra después.
 name: tmp-meli
 on:
   push:
