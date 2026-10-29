@@ -58,6 +58,9 @@ jobs:
               print(f"{label}: {st} {short}")
               return st, body
 
+          show("users/me", "/users/me")
+          show("users/id", f"/users/{tok.get('user_id')}")
+          show("categories", "/categories/MCO1648")
           show("sites/MCO sin token", "/sites/MCO", auth=False)
           show("sites/MCO", "/sites/MCO")
           show("search q", "/sites/MCO/search?q=portatil&limit=5")
