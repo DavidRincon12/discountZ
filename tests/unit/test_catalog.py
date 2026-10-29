@@ -257,9 +257,21 @@ def test_model_candidate_price_error() -> None:
     assert cand.kind is AlertKind.PRICE_ERROR
 
 
+def test_model_candidate_extreme_drop_is_only_model_low() -> None:
+    # -97 %: casi siempre un anuncio que no es el producto (pago de envío, repuesto)
+    cand = model_candidate(None, T0, usd(300), [10_000] * 5, TECH, GLOB)
+    assert cand is not None
+    assert cand.kind is AlertKind.MODEL_LOW
+    just_below = model_candidate(None, T0, usd(500), [10_000] * 5, TECH, GLOB)  # -95 % exacto
+    assert just_below is not None
+    assert just_below.kind is AlertKind.PRICE_ERROR
+
+
 def test_model_candidate_marketplace_price_error_is_none() -> None:
     mkt = replace(usd(4_000), seller_class=SellerClass.MARKETPLACE)
     assert model_candidate(None, T0, mkt, [10_000] * 5, TECH, GLOB) is None
+    extreme = replace(usd(300), seller_class=SellerClass.MARKETPLACE)
+    assert model_candidate(None, T0, extreme, [10_000] * 5, TECH, GLOB) is None
 
 
 def test_model_candidate_median_below_min_price_is_none() -> None:

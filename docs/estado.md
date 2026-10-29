@@ -10,7 +10,7 @@
 - Suite: 1394 pruebas (1134 unitarias y de fuentes, 260 de integración) en verde el 2026-10-28.
 
 ## Último cambio
-- eBay (2026-10-29): los anuncios de pago de envío o diferencia y los enlaces «for VIP» ya no entran (`is_fee_listing_title`, `domain/catalog.py`, filtrados en `sources/ebay.py`); eran «errores de precio» falsos contra la mediana de su `epid`. Antes: garantías de Jumbo (PR #49).
+- eBay (2026-10-29): una caída > 95 % contra la mediana del modelo sale como MODEL_LOW, no como error de precio (`MODEL_ERROR_MAX_BP`); los anuncios de pago de envío o diferencia y los enlaces «for VIP» ya no entran (`is_fee_listing_title`, `domain/catalog.py`, filtrados en `sources/ebay.py`); eran «errores de precio» falsos contra la mediana de su `epid`. Antes: garantías de Jumbo (PR #49).
 
 ## Siguiente paso
 - Mercado Libre: la búsqueda pública da 403 aun con token y el catálogo responde con token de aplicación. Plan en el informe «Plan para sumar Mercado Libre a discountZ» (https://claude.ai/artifact/RDLrKpPRSFenZg5xTQ74im). Falta que David cree la app y suba `MELI_CLIENT_ID` y `MELI_CLIENT_SECRET`; luego, prueba desde Actions (token, y `/products/search` y `/products/{id}/items` con 200 en MCO) antes del spec.
