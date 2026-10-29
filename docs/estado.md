@@ -10,7 +10,7 @@
 - Suite: 1394 pruebas (1134 unitarias y de fuentes, 260 de integración) en verde el 2026-10-28.
 
 ## Último cambio
-- Fixtures reales de Woot (`tests/fixtures/woot/{computers,electronics,tools}`, grabadas el 2026-10-28 con un workflow temporal): 2.936 ofertas sin formato roto, con los hosts de `Url` y las fotos ya cubiertos; `tests/sources/test_woot.py` fija sus conteos. Antes: Falabella (`0016`, ADR 0017) y Homecenter (`0015`, PR #41).
+- Jumbo y Homecenter (2026-10-29): las garantías y servicios listados como producto («Garantía Extendida 36 Meses») ya no alertan (`is_service_title`, `domain/catalog.py`), y la tarjeta de Homecenter toma la foto de la ficha que leyó la confirmación cuando el listado no la trae. Antes: fixtures reales de Woot (PR #48).
 
 ## Siguiente paso
 - Mercado Libre: la búsqueda pública da 403 aun con token y el catálogo responde con token de aplicación. Plan en el informe «Plan para sumar Mercado Libre a discountZ» (https://claude.ai/artifact/RDLrKpPRSFenZg5xTQ74im). Falta que David cree la app y suba `MELI_CLIENT_ID` y `MELI_CLIENT_SECRET`; luego, prueba desde Actions (token, y `/products/search` y `/products/{id}/items` con 200 en MCO) antes del spec.
@@ -34,4 +34,5 @@
 - Resumen diario (13:00Z): `catalog_daily_stats` a veces pasa el `statement_timeout` de 15 s y se reintenta; el peso sale en el log `maintenance db_mb=`.
 - Desde la nube de la sesión: Newegg, Best Buy, Amazon, `*.vtexassets.com`, Jumbo y Pepe Ganga bloqueados (no desde Actions); sus fixtures se graban con un workflow temporal. La API y los docs de Mercado Libre dan 403 (PolicyAgent) desde la nube. `record-fixture` no sigue redirecciones.
 - Ofertas con el tema equivocado: agregar el término a `channel_rules` y la oferta a `tests/fixtures/topics/ofertas-etiquetadas.jsonl` (`tests/unit/test_topic_precision.py` exige ≥ 95 %). Con el perfil, un tema equivocado esconde la oferta: 34 de las 946 etiquetadas (`test_profile_hides_few_card_offers` fija ese techo); se baja con términos en `channel_rules` o con intereses.
+- Homecenter sin foto: no se pudo ver el porqué en los logs (ni `photo_missing` ni `photo_deferred`); si sigue el cuadro gris, revisar `crawl_done` y la foto de la ficha. `media.falabella.com` no se alcanza desde la nube.
 - Falta: `pg_terminate_backend` tras 3 `skipped_locked` (separar antes el `application_name` del ciclo y del rastreo); reloj fijo por corrida; orden del barrido VTEX sin medir; parámetros de eBay leídos al importar. Hot Sale 2027 sin fecha publicada.

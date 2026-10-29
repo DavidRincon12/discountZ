@@ -15,6 +15,7 @@ from discountz.domain.catalog import (
     CatalogCandidate,
     CatalogObservation,
     CatalogState,
+    is_service_title,
     median_low,
     meets_floors,
     model_candidate,
@@ -385,3 +386,25 @@ def test_meets_floors_needs_the_min_price_and_the_min_saving() -> None:
     assert meets_floors(cand(70_000, 100_000), PROD)  # justo en los dos mínimos
     assert not meets_floors(cand(59_900, 79_900), PROD)  # «antes» bajo el mínimo
     assert not meets_floors(cand(180_000, 199_900), PROD)  # ahorro de 19.900
+
+
+def test_warranties_and_service_plans_are_not_products() -> None:
+    for title in (
+        "Garantía Extendida 36 Meses",
+        "GARANTIA PREMIUM Cencosud",
+        "Garantía extendida Samsung 24 meses",
+        "Seguro de Protección Total 12 meses",
+        "Servicio de instalación de televisor",
+    ):
+        assert is_service_title(title), title
+
+
+def test_products_that_mention_a_warranty_are_still_products() -> None:
+    for title in (
+        "Televisor LG 55 pulgadas con garantía de 2 años",
+        "Celular Samsung Galaxy A15 128 GB",
+        "Soporte para televisor con servicio de instalación incluido",
+        None,
+        "",
+    ):
+        assert not is_service_title(title), title
