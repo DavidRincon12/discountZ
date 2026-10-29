@@ -1,0 +1,6 @@
+{
+  "status": 200,
+  "url": "https://api.mercadolibre.com/products/MCO18924972/items",
+  "recorded_at": "2026-10-29",
+  "recorte": "Grabada desde Actions; cada vendedor solo con seller_id, price, original_price, currency_id, condition, official_store_id, international_delivery_mode, listing_type_id, shipping, tags, deal_ids."
+}
