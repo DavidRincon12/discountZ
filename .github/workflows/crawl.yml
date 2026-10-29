@@ -41,6 +41,8 @@ jobs:
           DISCOUNTZ_BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
           DISCOUNTZ_EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}
           DISCOUNTZ_EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}
+          DISCOUNTZ_MELI_CLIENT_ID: ${{ secrets.MELI_CLIENT_ID }}
+          DISCOUNTZ_MELI_CLIENT_SECRET: ${{ secrets.MELI_CLIENT_SECRET }}
           DISCOUNTZ_GH_RUN_ID: ${{ github.run_id }}
           DISCOUNTZ_GH_RUN_ATTEMPT: ${{ github.run_attempt }}
           DISCOUNTZ_TRIGGER: ${{ github.event_name }}

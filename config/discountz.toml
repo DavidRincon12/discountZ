@@ -256,6 +256,16 @@ watch_interval_min = 60
 search_interval_min = 1440  # sin Capability.SEARCH: solo rastreo y /seguir
 max_batch = 1
 
+[sources.mercadolibre]  # /seguir y la confirmación por la API; el rastreo tiene su propio presupuesto (ADR 0018)
+group = "mercadolibre"
+min_pause_s = 1
+jitter_s = 1
+max_per_run = 10
+max_per_24h = 1000
+watch_interval_min = 120
+search_interval_min = 1440  # la búsqueda general da 403 con el token de la app: sin /buscar
+max_batch = 1  # una petición de vendedores por producto
+
 [sources.slickdeals]
 group = "slickdeals"
 min_pause_s = 0
@@ -416,7 +426,7 @@ max_per_24h = 40000
 
 [[events]]
 name = "Hot Sale"  # Drops del 16 al 18 y Hot Sale del 19 al 23 de octubre de 2026
-sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga", "alkosto", "homecenter", "falabella"]
+sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga", "alkosto", "homecenter", "falabella", "mercadolibre"]
 starts = "2026-10-16T00:00"
 ends = "2026-10-24T00:00"
 
@@ -428,7 +438,7 @@ ends = "2026-11-28T00:00"
 
 [[events]]
 name = "Black Days"
-sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga", "alkosto", "homecenter", "falabella"]
+sources = ["exito", "carulla", "olimpica", "panamericana", "jumbo", "pepeganga", "alkosto", "homecenter", "falabella", "mercadolibre"]
 starts = "2026-11-26T00:00"
 ends = "2026-11-30T00:00"
 
@@ -477,6 +487,13 @@ max_per_run = 100
 max_per_24h = 800
 hot_share_bp = 0
 
+[crawl.mercadolibre]  # API: relee lo seguido cada ~24 h y busca EAN nuevos; ~20 mil peticiones al día (ADR 0018)
+min_pause_s = 0.5
+jitter_s = 0.5
+max_per_run = 2000
+max_per_24h = 20000
+hot_share_bp = 7000  # parte de la corrida para releer lo seguido; el resto, semillas
+
 [crawl.falabella]  # Next.js: 14 categorías, ~215 páginas por vuelta de ~2,2 MB; ~3 vueltas al día; 10 s entre peticiones desde el 403 del 2026-10-24 (ADR 0017)
 min_pause_s = 10
 jitter_s = 5
@@ -492,3 +509,6 @@ min_feedback_pct = 98
 min_feedback_score = 100
 # Raíces fuera: coleccionables, arte, servicios, boletas, bienes raíces y tarjetas regalo.
 excluded_roots = [1, 99, 237, 260, 316, 550, 870, 1305, 3252, 10542, 11116, 20081, 45100, 64482, 172008]
+
+[mercadolibre]  # spec de Mercado Libre §1.3
+max_items = 12000  # productos seguidos: las semillas paran al llegar

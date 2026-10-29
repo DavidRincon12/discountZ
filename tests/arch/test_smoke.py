@@ -67,6 +67,24 @@ def test_cycle_workflow_passes_ebay_credentials_and_probe_is_gone() -> None:
     assert not WORKFLOWS.joinpath("ebay-probe.yml").exists()
 
 
+def test_workflows_pass_meli_credentials() -> None:
+    for name in ("crawl.yml", "cycle.yml"):
+        text = WORKFLOWS.joinpath(name).read_text(encoding="utf-8")
+        assert "DISCOUNTZ_MELI_CLIENT_ID: ${{ secrets.MELI_CLIENT_ID }}" in text
+        assert "DISCOUNTZ_MELI_CLIENT_SECRET: ${{ secrets.MELI_CLIENT_SECRET }}" in text
+
+
+def test_crawl_meli_without_credentials_is_skipped(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for name, value in ENV.items():
+        monkeypatch.setenv(name, value)
+    for name in ("DISCOUNTZ_MELI_CLIENT_ID", "DISCOUNTZ_MELI_CLIENT_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+    assert main(["crawl", "--source", "mercadolibre"]) == EXIT_OK  # la BD es inalcanzable
+    assert "sin credenciales" in capsys.readouterr().out
+
+
 def test_exit_codes_are_distinct() -> None:
     """En Actions, una tienda bloqueada no debe leerse como la BD caída (spec v1 §1.4)."""
     codes = (EXIT_OK, EXIT_BUG, EXIT_CONFIG, EXIT_DB, EXIT_BLOCKED)

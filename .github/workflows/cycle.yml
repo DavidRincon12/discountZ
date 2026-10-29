@@ -49,3 +49,5 @@ jobs:
           DISCOUNTZ_EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}
           DISCOUNTZ_EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}
           DISCOUNTZ_WOOT_API_KEY: ${{ secrets.WOOT_API_KEY }}
+          DISCOUNTZ_MELI_CLIENT_ID: ${{ secrets.MELI_CLIENT_ID }}
+          DISCOUNTZ_MELI_CLIENT_SECRET: ${{ secrets.MELI_CLIENT_SECRET }}

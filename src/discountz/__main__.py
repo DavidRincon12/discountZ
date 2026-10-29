@@ -308,7 +308,9 @@ def _cmd_crawl(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         print(f"crawl: {exc}", file=sys.stderr)
         return EXIT_CONFIG
-    if args.source == "ebay_us" and settings.ebay_cert_id is None:
+    if (args.source == "ebay_us" and settings.ebay_cert_id is None) or (
+        args.source == "mercadolibre" and settings.meli_client_secret is None
+    ):
         print(f"crawl: {args.source} sin credenciales; se omite")
         return EXIT_OK
     source = load_all().get(args.source)

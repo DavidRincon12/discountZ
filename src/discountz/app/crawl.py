@@ -680,8 +680,10 @@ def _error_line(store: str, title: str, cand: CatalogCandidate, listing_id: int)
 
 
 def crawl_max_items(code: str, params: AppParams) -> int | None:
-    """Tope de publicaciones guardadas: solo eBay lo tiene (spec de eBay §3)."""
-    return params.ebay.max_items if code == "ebay_us" else None
+    """Tope de publicaciones guardadas (eBay) o seguidas (Mercado Libre); las demás no tienen."""
+    if code == "ebay_us":
+        return params.ebay.max_items
+    return params.meli.max_items if code == "mercadolibre" else None
 
 
 def run_crawl(deps: CrawlDeps, now: datetime, minutes: int) -> CrawlResult:
