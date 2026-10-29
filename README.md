@@ -1,6 +1,6 @@
 # discountZ
 
-Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana, Jumbo, Pepe Ganga, Alkosto, Homecenter, Falabella) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las siete tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
+Monitor personal de ofertas: sigue productos y búsquedas en tiendas de Colombia (Éxito, Carulla, Olímpica, Panamericana, Jumbo, Pepe Ganga, Alkosto, Homecenter, Falabella, Mercado Libre) y de EE. UU. (Amazon, Newegg, Walmart, Best Buy, más el feed de Slickdeals), guarda un histórico de precios propio, descarta descuentos inflados y avisa por Telegram. Además rastrea el catálogo completo con stock de las siete tiendas colombianas y de Best Buy, y publica cada bajada real como una tarjeta con foto en un grupo de Telegram con un tema por categoría.
 
 Corre en GitHub Actions con una base de datos Supabase Postgres gratuita: costo operativo $0.
 
@@ -217,6 +217,14 @@ Falabella se lee por el JSON que trae cada listado de su web (sin secretos nuevo
 
 1. **Migración `0016`.** Justo después de fusionar: *Actions → migrate → Run workflow* con `to = head` y apruébala.
 2. Nada más: el job `crawl` ya trae `falabella` en su matriz (~215 páginas por vuelta, 700 peticiones al día). No tiene `/buscar`.
+
+### 22. Mercado Libre
+
+Mercado Libre se lee por su API oficial, con la app de solo lectura que creaste (ADR 0018). Su búsqueda general está cerrada, así que el rastreo no recorre categorías: busca en Mercado Libre el EAN de lo que las tiendas colombianas venden en los temas en tarjeta (desde 100.000 COP, del más caro al más barato) y relee cada 6 h o más los productos que encuentra, hasta 12 mil. El precio es el del vendedor elegible más barato: tienda oficial, o MercadoLíder Platinum o Gold con reputación verde, con producto nuevo y sin envío internacional; en tecnología solo alertan las tiendas oficiales. La tarjeta va al tema que le dio la tienda colombiana y abre `mercadolibre.com.co/p/MCO…`.
+
+1. **Secretos.** `MELI_CLIENT_ID` y `MELI_CLIENT_SECRET` ya están en *Settings → Secrets and variables → Actions*; `crawl` y `cycle` los pasan como `DISCOUNTZ_MELI_CLIENT_ID` y `DISCOUNTZ_MELI_CLIENT_SECRET`. Sin ellos, el job `crawl` de `mercadolibre` termina en verde con «sin credenciales; se omite».
+2. **Migración `0017`.** Justo después de fusionar y antes del primer rastreo de `mercadolibre`: *Actions → migrate → Run workflow* con `to = head` y apruébala.
+3. Nada más: el job `crawl` ya trae `mercadolibre` en su matriz (hasta 2.000 peticiones por corrida y 20 mil al día, la mayor parte para releer). Las tarjetas llegan cuando un producto lleva 24 h con precio estable. No tiene `/buscar`; `/seguir` acepta los enlaces de producto (`…/p/MCO…`), no los de `articulo.mercadolibre.com.co`. Si suspenden la app o la API bloquea, se apaga con `/fuente off mercadolibre`.
 
 ### Si algo falla
 
