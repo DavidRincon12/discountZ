@@ -441,6 +441,21 @@ def test_find_by_ean_retries_without_leading_zeros() -> None:
     assert all((q["status"], q["site_id"]) == ("active", "MCO") for q in searched)
 
 
+def test_find_by_ean_retries_with_the_twelve_digit_upc() -> None:
+    src, api, c = setup(
+        {
+            "GET /products/search?0045496590420": fx("search-empty"),
+            "GET /products/search?045496590420": fx("search-ean"),
+            "GET /products/search?00740617344806": fx("search-empty"),
+            "GET /products/search?740617344806": fx("search-ean"),
+        }
+    )
+    assert src.find_by_ean(c, "0045496590420") == "MCO39410080"  # UPC-A del sistema 0
+    assert src.find_by_ean(c, "00740617344806") == "MCO39410080"  # GTIN-14
+    searched = [q["product_identifier"] for m, p, q, h in api.calls if p == "/products/search"]
+    assert searched == ["0045496590420", "045496590420", "00740617344806", "740617344806"]
+
+
 @pytest.mark.parametrize("status", [400, 404])
 def test_find_by_ean_400_is_parse_error(status: int) -> None:
     bad = resp({"message": "invalid product_identifier", "status": status}, status)

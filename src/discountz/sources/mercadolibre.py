@@ -450,11 +450,11 @@ class MercadoLibreSource:
     # --- catálogo ---------------------------------------------------------------------------
 
     def find_by_ean(self, ctx: SourceContext, ean: str) -> str | None:
-        """El producto del catálogo con ese EAN; si no hay y empieza por 0, sin los ceros."""
+        """El producto del catálogo con ese EAN; si no hay y le sobran ceros adelante, el de su
+        forma UPC-A de 12 dígitos (`0045496590420` → `045496590420`), que es la que se publica."""
         found = self._search(ctx, ean)
-        bare = ean.lstrip("0")
-        if found is None and bare and bare != ean:
-            found = self._search(ctx, bare)
+        if found is None and len(ean) > 12 and not ean[:-12].strip("0"):
+            found = self._search(ctx, ean[-12:])
         return found
 
     def catalog_partitions(self, ctx: SourceContext) -> Sequence[CatalogPartition]:
