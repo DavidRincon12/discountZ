@@ -34,6 +34,7 @@ from discountz.domain.catalog import (
     CatalogCandidate,
     CatalogObservation,
     CatalogState,
+    is_service_title,
     meets_floors,
     model_candidate,
     observe,
@@ -536,6 +537,8 @@ class _Run:
             )
             self.items += 1
             self.changes += int(changed)
+            if is_service_title(o.title):  # garantías y servicios no son ofertas
+                continue
             best = self.best_candidate(prev, o, cand, peers, topic, interest)
             if best is None:
                 continue

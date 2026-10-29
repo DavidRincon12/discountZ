@@ -336,6 +336,36 @@ def test_card_facts_come_from_the_listing_page_already_read() -> None:
     assert facts[WELDER].title.startswith("Soldador Inversor")
 
 
+def test_card_facts_use_the_product_page_when_the_listing_was_not_read() -> None:
+    """La foto sale de la ficha que ya leyó la confirmación, no del cuadro gris."""
+    bare = f"{BASE}/homecenter-co/product/{WELDER}/x/{WELDER}/"
+    http = routes(**{bare: HttpResponse(301, bare, {"location": BASE + WELDER_PATH}, b"", 0)})
+    src = HomecenterSource()
+    c = ctx(http)
+    outcome = src.fetch_catalog_listings(c, [ListingRef("homecenter", WELDER)])
+    assert isinstance(outcome[0], ListingFound)
+    calls = len(http.calls)
+    facts = src.fetch_card_facts(c, [WELDER])
+    assert len(http.calls) == calls  # sin red
+    assert facts[WELDER].image_url == "https://media.falabella.com/sodimacCO/915074/public"
+    assert facts[WELDER].url == BASE + WELDER_PATH
+    assert facts[WELDER].title.startswith("Soldador Inversor")
+
+
+def test_card_facts_take_the_photo_from_the_product_page_when_the_listing_has_none() -> None:
+    def no_media(data: dict[str, object]) -> None:
+        for row in _results(data):
+            row["mediaUrls"] = []
+
+    http = routes(**{BIG: HttpResponse(200, BIG, {}, _edit("category-page", no_media), 0)})
+    src = HomecenterSource()
+    c = ctx(http)
+    src.fetch_catalog_page(c, "cat1670400", 0)
+    src.fetch_catalog_listings(c, [ListingRef("homecenter", WELDER)])
+    facts = src.fetch_card_facts(c, [WELDER])
+    assert facts[WELDER].image_url == "https://media.falabella.com/sodimacCO/915074/public"
+
+
 def test_there_is_no_hot_tier_nor_changed_feed_nor_search() -> None:
     src = HomecenterSource()
     c = ctx(FakeHttp({}))

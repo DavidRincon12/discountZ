@@ -91,6 +91,7 @@ class ProductInfo:
     in_stock: bool
     marketplace: bool
     url: str | None
+    image_url: str | None = None
 
 
 class _Price(BaseModel):
@@ -129,11 +130,18 @@ class _Availability(BaseModel):
     hasStock: bool = False
 
 
+class _Media(BaseModel):
+    model_config = ConfigDict(strict=True, extra="ignore", hide_input_in_errors=True)
+
+    url: str = ""
+
+
 class _Variant(BaseModel):
     model_config = ConfigDict(strict=True, extra="ignore", hide_input_in_errors=True)
 
     price: list[_Price] = Field(default_factory=list)
     availability: list[_Availability] = Field(default_factory=list)
+    images: list[_Media] = Field(default_factory=list)
 
 
 class _Attribute(BaseModel):
@@ -260,6 +268,7 @@ def parse_product(body: bytes) -> ProductInfo:
         in_stock=any(a.hasStock for a in variant.availability),
         marketplace=flag.values[0].strip().lower() == "true",
         url=_canonical(canonical),
+        image_url=_image([m.url for m in variant.images]),
     )
 
 
@@ -333,6 +342,7 @@ class HomecenterSource:
             image_hosts=IMAGE_HOSTS,
         )
         self._seen: dict[str, HomecenterItem] = {}
+        self._products: dict[str, tuple[ProductInfo, str]] = {}  # fichas leídas al confirmar
 
     # --- contrato de la v1 ------------------------------------------------------------------
 
@@ -413,7 +423,10 @@ class HomecenterSource:
         info = parse_product(resp.body)
         if info.url is not None:
             path = urlsplit(info.url).path
-        return info, path or f"/homecenter-co/product/{external_id}/x/{external_id}/"
+        path = path or f"/homecenter-co/product/{external_id}/x/{external_id}/"
+        if len(self._products) < MAX_SEEN:
+            self._products[external_id] = (info, path)
+        return info, path
 
     # --- catálogo ---------------------------------------------------------------------------
 
@@ -454,12 +467,18 @@ class HomecenterSource:
     def fetch_card_facts(
         self, ctx: SourceContext, external_ids: Sequence[str]
     ) -> dict[str, CardFacts]:
-        """Solo de lo ya leído en esta corrida: sin red; el resto usa la ficha al confirmar."""
+        """Solo de lo ya leído en esta corrida: sin red. El listado manda; la foto que le falta
+        (o todo, si no se leyó) sale de la ficha que ya leyó la confirmación."""
         facts: dict[str, CardFacts] = {}
         for external_id in external_ids:
             item = self._seen.get(external_id)
+            product = self._products.get(external_id)
             if item is not None and item.path is not None:
-                facts[external_id] = CardFacts(item.title, BASE + item.path, item.image_url)
+                image = item.image_url or (product[0].image_url if product else None)
+                facts[external_id] = CardFacts(item.title, BASE + item.path, image)
+            elif product is not None:
+                info, path = product
+                facts[external_id] = CardFacts(info.title, BASE + path, info.image_url)
         return facts
 
 

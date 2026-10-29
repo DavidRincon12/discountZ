@@ -7,10 +7,10 @@
 - Perfil de temas (ADR 0013): Belleza, Mercado, Bebés y Mascotas apagados (no se rastrean ni se releen, y sus ofertas de canales quedan vistas); el resto en tarjeta.
 - Intereses (esquema 12): semilla de `config/interests.toml` más los de `/interes`; lo que coincide sale con «🎯», hasta 3 por interés al día. Mercado Libre no entra (su lectura no trae título).
 - Dos chats: el grupo (todo, temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas y resúmenes de ofertas).
-- Suite: 1488 pruebas (1206 unitarias y de fuentes, 282 de integración) en verde el 2026-10-29.
+- Suite: 1493 pruebas (1210 unitarias y de fuentes, 283 de integración) en verde el 2026-10-29.
 
 ## Último cambio
-- Rama `claude/project-thread-xsztn5`: Mercado Libre por su API con token de aplicación (`MELI_CLIENT_ID`/`MELI_CLIENT_SECRET`), migración `0017` (`ean_lookup`, `catalog_item.checked_at`, esquema 17), `domain/gtin.py`, protocolo `EanCatalogSource` y rastreo sembrado en `app/crawl.py` (spec `docs/superpowers/specs/2026-10-29-mercadolibre-design.md`, plan ejecutado completo en modo Native).
+- Rama `claude/project-thread-xsztn5`: Mercado Libre por su API con token de aplicación (`MELI_CLIENT_ID`/`MELI_CLIENT_SECRET`), migración `0017` (`ean_lookup`, `catalog_item.checked_at`, esquema 17), `domain/gtin.py`, protocolo `EanCatalogSource` y rastreo sembrado en `app/crawl.py` (spec `docs/superpowers/specs/2026-10-29-mercadolibre-design.md`, plan ejecutado completo en modo Native). Antes: garantías y servicios listados como producto ya no alertan (`is_service_title`) y la tarjeta de Homecenter toma la foto de la ficha (PR #49).
 
 ## Siguiente paso
 - Al fusionar: *Actions → migrate* (`to = head`, esquema 17) antes del primer rastreo de `mercadolibre`.
@@ -32,5 +32,6 @@
 - BD: el rastreo reconecta hasta 2 veces (`db_reconnect`); el ciclo no. Supabase: el migrador necesita `GRANT CREATE ON DATABASE postgres TO discountz_owner`. Postgres en la nube: `service postgresql start` y `ALTER USER postgres PASSWORD 'postgres'`.
 - Resumen diario (13:00Z): `catalog_daily_stats` a veces pasa el `statement_timeout` de 15 s y se reintenta.
 - Desde la nube de la sesión: Newegg, Best Buy, Amazon, `*.vtexassets.com`, Jumbo, Pepe Ganga y la API de Mercado Libre bloqueados (no desde Actions); sus fixtures se graban con un workflow temporal. `record-fixture` no sigue redirecciones.
+- Homecenter sin foto: no se vio el porqué en los logs (ni `photo_missing` ni `photo_deferred`); si sigue el cuadro gris, revisar `crawl_done` y la foto de la ficha.
 - Ofertas con el tema equivocado: término en `channel_rules` y oferta en `tests/fixtures/topics/ofertas-etiquetadas.jsonl` (`test_topic_precision.py` exige ≥ 95 %).
 - Falta: `pg_terminate_backend` tras 3 `skipped_locked`; reloj fijo por corrida; orden del barrido VTEX sin medir; parámetros de eBay leídos al importar. Hot Sale 2027 sin fecha publicada.

@@ -734,6 +734,18 @@ def test_drop_in_a_card_topic_still_alerts(db: psycopg.Connection) -> None:
     assert count(db, "alert") == 1
 
 
+def test_a_warranty_listed_as_a_product_never_alerts(db: psycopg.Connection) -> None:
+    """«Garantía Extendida 36 Meses» baja de precio pero no es una oferta (Jumbo, 2026-10-29)."""
+    seed_history(db, "123", 288_000)
+    warranty = replace(obs("123", 223_978), title="Garantía Extendida 36 Meses")
+    src = FakeCatalog({"C:/1/": [[warranty]]}, offers={"123": offer("123", 223_978)})
+    d, _ = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.alerts == 0
+    assert count(db, "alert") == 0
+    assert count(db, "catalog_item", "external_id = '123' AND price_minor = 223978") == 1
+
+
 def test_crawl_price_error_also_posts_line_in_category(db: psycopg.Connection) -> None:
     seed_history(db, "123", 199_900)
     src = FakeCatalog({"C:/1/": [[obs("123", 39_900)]]}, offers={"123": offer("123", 39_900)})
