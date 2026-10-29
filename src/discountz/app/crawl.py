@@ -3,6 +3,9 @@
 Una corrida: lease propio, capa caliente (relectura de lo que cambió hace poco), vuelta completa
 desde el cursor, detección por producto, confirmación por la ficha y alerta encolada con su
 tarjeta. Para al acabar el plazo, el presupuesto o la vuelta, o ante un bloqueo.
+
+Una fuente sembrada con EAN (Mercado Libre, ADR 0018) no tiene vuelta: relee lo que sigue y busca
+los EAN de las demás tiendas.
 """
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ from __future__ import annotations
 import logging
 import random
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any, Literal
@@ -42,11 +45,12 @@ from discountz.domain.errors import (
     SourceError,
     Unavailable,
 )
+from discountz.domain.gtin import gtin_ok
 from discountz.domain.guards import check_offer
 from discountz.domain.health import BreakerEvent, BreakerState, breaker_transition, effective_state
 from discountz.domain.interests import Interest, match_interest
 from discountz.domain.model import AlertKind, ListingRef, Maturity, Offer, SellerClass
-from discountz.domain.money import format_money
+from discountz.domain.money import Currency, format_money
 from discountz.domain.scheduling import CrawlBudget
 from discountz.domain.segments import Observation, SegmentStatus, gap_h
 from discountz.domain.topics import TopicParams, assign_topic, crawl_wanted
@@ -58,6 +62,7 @@ from discountz.sources.base import (
     CatalogPartition,
     CrawlSource,
     CredentialStore,
+    EanCatalogSource,
     ListingFailed,
     ListingFound,
     SourceContext,
@@ -85,6 +90,10 @@ TRANSIENT_CODES = frozenset({"network", "timeout", "deadline", "retries_exhauste
 CONFIRM_TOL_PCT = 1  # la relectura debe quedar a ±1 % del precio visto
 SAMPLE_GAP = gap_h(timedelta(hours=6))
 ERRORS_TOPIC = "errores"
+# Fuentes sembradas con EAN (spec de Mercado Libre §1.3).
+REFRESH_AFTER = timedelta(hours=6)  # lo seguido y leído hace menos no se relee
+SEED_CHUNK = 20  # lecturas que se guardan juntas (y se conservan si la corrida para)
+SEED_QUERY = 200  # semillas por consulta a la BD
 
 # Con la BD en ≥ 450 MB el mantenimiento pausa el descubrimiento: también el rastreo de las
 # tiendas más grandes (spec del rastreo §7.2).
@@ -105,7 +114,7 @@ class CrawlDeps:
     monotonic: Callable[[], float]
     sleep: Callable[[float], None]
     rnd: random.Random
-    max_items: int | None = None  # tope de publicaciones guardadas (eBay: 150 mil)
+    max_items: int | None = None  # tope de guardadas (eBay: 150 mil) o seguidas (Mercado Libre)
     interests: tuple[Interest, ...] = ()  # semilla y personales (`active_interests`)
     interest_cap: int = 3  # tarjetas por interés al día (`daily_cards_per_interest`)
 
@@ -127,6 +136,22 @@ class _Found:
     topic: str
     peers: int = 0  # > 0: la referencia es la mediana de esos pares del mismo modelo
     interest: str | None = None  # el interés que la saca (spec del perfil §3.3)
+
+
+@dataclass
+class _Batch:
+    """Lo leído en un lote de una fuente sembrada: se guarda aunque la corrida pare."""
+
+    obs: list[CatalogObservation] = field(default_factory=list)
+    topics: dict[str, str] = field(default_factory=dict)  # tema de la semilla o de la fila
+    lookups: list[tuple[str, str | None]] = field(default_factory=list)  # EAN → producto
+    checked: list[str] = field(default_factory=list)  # relecturas terminadas
+    new: int = 0  # productos nuevos para la fuente
+
+    def add(self, items: Sequence[CatalogObservation], ean: str | None, topic: str) -> None:
+        for o in items:
+            self.obs.append(replace(o, ean=ean))
+            self.topics[o.external_id] = topic
 
 
 class _Stop(Exception):
@@ -166,7 +191,8 @@ class _Run:
         self.off_profile = 0  # candidatos de temas que no van en tarjeta (ADR 0013)
         self.parse_streak = 0
         self.ok_pages = 0
-        self.stored: int | None = None  # publicaciones guardadas, para el tope de eBay
+        self.stored: int | None = None  # publicaciones guardadas o seguidas, para el tope
+        self.seeds_searched = self.seeds_found = 0
 
     # ───────────── Bucle
 
@@ -176,8 +202,13 @@ class _Run:
     def run(self) -> CrawlStatus:
         if self.cap == 0:
             return "ok"
+        if isinstance(self.deps.source, EanCatalogSource):
+            return self.seeded(self.deps.source)
         self.hot_tier()
         return self.sweep()
+
+    def topics_in(self, mode: str) -> list[str]:
+        return [c for c, p in self.deps.topics.params.items() if p.mode == mode]
 
     def hot_tier(self) -> None:
         cap = self.cap * self.deps.budget.hot_share_bp // 10_000
@@ -202,7 +233,7 @@ class _Run:
                 self.cursor = replace(self.cursor, changed_since=self.now)
             return
         # Lo de un tema apagado no se relee: no puede alertar y así vence con la retención.
-        off = [c for c, p in self.deps.topics.params.items() if p.mode == "off"]
+        off = self.topics_in("off")
         since = self.now - HOT_WINDOW
         ids = db.hot_catalog_ids(self.conn, self.code, since, cap * d.max_batch, off)
         for i in range(0, len(ids), d.max_batch):
@@ -255,6 +286,118 @@ class _Run:
                     return "ok"
             self.save_cursor()
         return "ok"
+
+    # ───────────── Fuentes sembradas con EAN (spec de Mercado Libre §1.3)
+
+    def seeded(self, src: EanCatalogSource) -> CrawlStatus:
+        """Relee lo seguido, busca EAN nuevos y, con lo que quede de la corrida, relee más."""
+        self.refresh(self.cap * self.deps.budget.hot_share_bp // 10_000)
+        if self.seeds_allowed():
+            self.seed(src)
+        self.refresh(self.cap)
+        return "ok"
+
+    def refresh(self, limit: int) -> None:
+        """Lo seguido que no se pidió en `REFRESH_AFTER`, primero lo pedido hace más tiempo."""
+        room = limit - self.http.used
+        if room <= 0 or not self.time_left():
+            return
+        before = self.now - REFRESH_AFTER
+        off = self.topics_in("off")  # no puede alertar: vence con la retención
+        due = db.catalog_refresh_items(self.conn, self.code, before, room, off)
+        for i in range(0, len(due), SEED_CHUNK):
+            if self.http.used >= limit or not self.time_left():
+                return
+            self.check_breaker()
+            self.batched(partial(self.read_tracked, due[i : i + SEED_CHUNK], limit))
+
+    def read_tracked(self, chunk: Sequence[db.TrackedItem], limit: int, batch: _Batch) -> None:
+        src = self.deps.source
+        for t in chunk:
+            if self.http.used >= limit or not self.time_left():
+                return
+            got = self.guarded(partial(src.fetch_catalog_items, self.ctx, [t.external_id]))
+            if got is None:  # ilegible: no se marca y se repite en la próxima corrida
+                continue
+            batch.checked.append(t.external_id)  # con o sin precio
+            batch.add(got, t.ean, t.topic)
+
+    def seeds_allowed(self) -> bool:
+        """Las semillas paran con la BD casi llena o con el tope de productos seguidos."""
+        cap = self.deps.max_items
+        if cap is not None:
+            if self.stored is None:
+                self.stored = db.count_catalog_items(self.conn, self.code)
+            if self.stored >= cap:
+                return False
+        return not db.bot_state(self.conn).discovery_paused
+
+    def seed(self, src: EanCatalogSource) -> None:
+        """EAN de los temas en tarjeta que la fuente no sigue, del más caro al más barato."""
+        cards = self.topics_in("card")
+        floor = self.deps.params.glob.min_price[Currency.COP]
+        try:
+            while self.time_left() and self.seeds_allowed():
+                seeds = db.ean_seeds(self.conn, self.code, cards, floor, SEED_QUERY)
+                if not seeds:
+                    return
+                for i in range(0, len(seeds), SEED_CHUNK):
+                    if not self.time_left() or not self.seeds_allowed():
+                        return
+                    self.check_breaker()
+                    self.batched(partial(self.read_seeds, src, seeds[i : i + SEED_CHUNK]))
+        finally:
+            event(
+                log,
+                "crawl_seeds",
+                source=self.code,
+                count=self.seeds_searched,
+                found=self.seeds_found,
+            )
+
+    def read_seeds(self, src: EanCatalogSource, chunk: Sequence[db.EanSeed], batch: _Batch) -> None:
+        """Busca cada EAN y lee una sola vez cada producto nuevo, con el EAN y el tema de su
+        semilla. Una semilla se anota cuando termina: si la corrida para antes, se repite."""
+        hits: list[tuple[db.EanSeed, str]] = []
+        for s in chunk:
+            if not gtin_ok(s.ean):  # código interno o roto: ningún catálogo lo tiene
+                batch.lookups.append((s.ean, None))
+                continue
+            if not self.time_left():
+                return
+            found = self.guarded(partial(src.find_by_ean, self.ctx, s.ean))
+            if found is None:  # no está, o la respuesta no se pudo leer
+                batch.lookups.append((s.ean, None))
+            else:
+                hits.append((s, found))
+        ids = [p for _, p in hits]
+        seen = set(db.load_catalog_states(self.conn, self.code, ids)) if ids else set()
+        for s, product in hits:
+            if product not in seen:
+                if not self.time_left():
+                    return
+                got = self.guarded(partial(src.fetch_catalog_items, self.ctx, [product])) or ()
+                seen.add(product)
+                batch.add(got, s.ean, s.topic)
+                batch.new += len(got)
+            batch.lookups.append((s.ean, product))
+
+    def batched(self, fill: Callable[[_Batch], None]) -> None:
+        """Llena un lote y lo guarda; si la corrida para, guarda lo hecho sin confirmar nada."""
+        batch = _Batch()
+        try:
+            fill(batch)
+        except _Stop:
+            self.save_batch(batch, confirm=False)
+            raise
+        self.save_batch(batch, confirm=True)
+
+    def save_batch(self, batch: _Batch, *, confirm: bool) -> None:
+        db.record_ean_lookups(self.conn, self.code, batch.lookups, self.now)
+        db.mark_catalog_checked(self.conn, self.code, batch.checked, self.now)
+        self.seeds_searched += len(batch.lookups)
+        self.seeds_found += batch.new
+        self.process(batch.obs, batch.topics, confirm=confirm)
 
     def wanted(self, parts: Sequence[CatalogPartition]) -> tuple[str, ...]:
         """Claves de las particiones que entran en el perfil de temas (ADR 0013)."""
@@ -360,7 +503,15 @@ class _Run:
 
     # ───────────── Detección
 
-    def process(self, items: Sequence[CatalogObservation]) -> None:
+    def process(
+        self,
+        items: Sequence[CatalogObservation],
+        topics: Mapping[str, str] | None = None,
+        *,
+        confirm: bool = True,
+    ) -> None:
+        """Detecta, guarda y confirma. `topics` da el tema de cada producto de una fuente
+        sembrada; `confirm=False` guarda sin pedir nada a la fuente (la corrida está parando)."""
         if not items:
             return
         self.pages += 1
@@ -371,7 +522,7 @@ class _Run:
         rows: dict[str, db.CatalogRow] = {}
         found: list[_Found] = []
         for o in items:
-            topic = assign_topic(self.deps.topics.rules, self.code, o.category_path)
+            topic = self.topic_of(o, topics)
             prev = states.get(o.external_id)
             hit = match_interest(o.title or "", self.deps.interests)
             interest = hit.name if hit is not None else None
@@ -401,8 +552,15 @@ class _Run:
             if prev is not None:
                 rows[ext] = replace(row, state=prev)
         db.save_catalog_page(self.conn, self.code, list(rows.values()), self.now)
-        if fresh:
+        if fresh and confirm:
             self.confirm(fresh, real)
+
+    def topic_of(self, o: CatalogObservation, topics: Mapping[str, str] | None) -> str:
+        """El tema dado (semilla o fila) si sigue en el perfil; si no, el de la ruta."""
+        given = topics.get(o.external_id) if topics else None
+        if given is not None and given in self.deps.topics.params:
+            return given
+        return assign_topic(self.deps.topics.rules, self.code, o.category_path)
 
     def within_cap(
         self, items: Sequence[CatalogObservation], states: Mapping[str, CatalogState]

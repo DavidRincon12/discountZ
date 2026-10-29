@@ -35,6 +35,7 @@ ALLOWED_FIELDS = frozenset(
         "skipped",
         "held",
         "db_mb",
+        "found",
     }
 )
 _REDACT = (
