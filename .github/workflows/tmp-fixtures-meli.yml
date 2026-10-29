@@ -1,0 +1,112 @@
+# Temporal: graba las fixtures de Mercado Libre con el token de la app (la nube de la sesión no tiene las claves). Sube las fixtures a la rama (plan aprobado por David); se borra después. El token nunca se imprime ni se guarda.
+name: tmp-fixtures-meli
+on:
+  push:
+    branches: [claude/project-thread-xsztn5]
+    paths: [.github/workflows/tmp-fixtures-meli.yml]
+permissions:
+  contents: write
+jobs:
+  grabar:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa  # v10.3.1
+        with:
+          version-file: pyproject.toml
+          python-version: '3.13'
+      - run: uv sync --locked --no-dev
+      - name: Grabar
+        env:
+          MELI_CLIENT_ID: ${{ secrets.MELI_CLIENT_ID }}
+          MELI_CLIENT_SECRET: ${{ secrets.MELI_CLIENT_SECRET }}
+        run: |
+          uv run --no-sync python - <<'EOF'
+          import json, os, time
+          from datetime import UTC, datetime
+
+          import httpx
+
+          from discountz.infra.http import HttpResponse
+          from discountz.sources.fixtures import FIXTURES_DIR, save_fixture
+
+          API = "https://api.mercadolibre.com"
+          client = httpx.Client(timeout=20.0, follow_redirects=False)
+          tok = client.post(
+              f"{API}/oauth/token",
+              data={
+                  "grant_type": "client_credentials",
+                  "client_id": os.environ["MELI_CLIENT_ID"],
+                  "client_secret": os.environ["MELI_CLIENT_SECRET"],
+              },
+              headers={"Accept": "application/json"},
+          )
+          print("token:", tok.status_code)
+          tok.raise_for_status()
+          headers = {"Authorization": f"Bearer {tok.json()['access_token']}", "Accept": "application/json"}
+          today = datetime.now(UTC).date().isoformat()
+
+          def get(path, params=None):
+              time.sleep(0.5)
+              r = client.get(f"{API}{path}", params=params, headers=headers)
+              print(path, params or "", "->", r.status_code)
+              return r
+
+          def save(name, r, data, recorte):
+              body = json.dumps(data, ensure_ascii=False).encode()
+              path = save_fixture(FIXTURES_DIR, "mercadolibre", name, HttpResponse(r.status_code, str(r.url), {}, body, 0), recorded_at=today)
+              meta_path = path.parent / f"{name}.meta.json"
+              meta = json.loads(meta_path.read_text())
+              meta["recorte"] = recorte
+              meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
+
+          def search(name, ean):
+              r = get("/products/search", {"status": "active", "site_id": "MCO", "product_identifier": ean})
+              d = r.json()
+              if isinstance(d, dict) and isinstance(d.get("results"), list):
+                  results = [{k: x.get(k) for k in ("id", "name", "domain_id", "status")} for x in d["results"]]
+                  d = {"paging": d.get("paging"), "results": results}
+                  print("  resultados:", [x["id"] for x in results])
+              save(name, r, d, "Grabada desde Actions; solo paging y results[].{id, name, domain_id, status}.")
+
+          search("search-ean", "0740617344806")
+          search("search-ean-no-zeros", "740617344806")
+          search("search-empty", "0195950637151")
+
+          keep = ("seller_id", "price", "original_price", "currency_id", "condition", "official_store_id",
+                  "international_delivery_mode", "listing_type_id", "shipping", "tags", "deal_ids")
+          r = get("/products/MCO18924972/items")
+          items = r.json()
+          items = {**{k: v for k, v in items.items() if k != "results"},
+                   "results": [{k: x.get(k) for k in keep} for x in items.get("results", [])]}
+          for x in items["results"]:
+              print("  vendedor:", x["price"], x["official_store_id"], x["condition"], x["international_delivery_mode"])
+          save("items", r, items, "Grabada desde Actions; cada vendedor solo con " + ", ".join(keep) + ".")
+
+          r = get("/products/MCO24785005/items")
+          save("items-none", r, r.json(), "Grabada desde Actions; sin recorte.")
+
+          r = get("/products/MCO18924972")
+          p = r.json()
+          p = {"id": p.get("id"), "name": p.get("name"), "status": p.get("status"),
+               "domain_id": p.get("domain_id"), "pictures": (p.get("pictures") or [])[:3]}
+          save("product", r, p, "Grabada desde Actions; solo id, name, status, domain_id y las 3 primeras pictures.")
+
+          seller = next(x["seller_id"] for x in items["results"] if x.get("official_store_id") is None)
+          r = get(f"/users/{seller}")
+          u = r.json()
+          rep = u.get("seller_reputation") or {}
+          u = {"id": u.get("id"), "user_type": u.get("user_type"), "status": u.get("status"),
+               "seller_reputation": {"level_id": rep.get("level_id"), "power_seller_status": rep.get("power_seller_status")}}
+          print("  reputación:", u["seller_reputation"])
+          save("user-leader", r, u, "Grabada desde Actions; solo id, user_type, status y seller_reputation.{level_id, power_seller_status}.")
+          EOF
+      - name: Subir
+        run: |
+          set -euo pipefail
+          ls -la tests/fixtures/mercadolibre/
+          git config user.name "David Santiago Rincón Bautista"
+          git config user.email "davidsantiagorb@ufps.edu.co"
+          git add tests/fixtures/mercadolibre
+          git commit -m "test(mercadolibre): fixtures reales de la API"
+          git push origin HEAD:claude/project-thread-xsztn5
