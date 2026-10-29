@@ -55,50 +55,36 @@ jobs:
           def err(body):
               return body if isinstance(body, str) else ""
 
-          # 1. Productos con página /p/ en la web (tienen vendedores)
-          item_ids = []
-          for pid in ("MCO18924972", "MCO19687218"):
+          # Señales de un producto con vendedores frente a uno sin ellos
+          for pid in ("MCO18924972", "MCO29284591"):
               st, p = get(f"/products/{pid}")
-              print(f"\nproducts/{pid}: {st} {err(p)}")
               if st == 200:
-                  bw = p.get("buy_box_winner")
-                  print("  status:", p.get("status"), "| buy_box_winner:", None if bw is None else {k: bw.get(k) for k in ("item_id", "price", "original_price", "currency_id", "official_store_id", "condition")})
-                  print("  campos con precio o ganador:", [k for k in p if any(w in k for w in ("price", "buy_box", "winner", "item"))])
-                  print("  parent_id:", p.get("parent_id"), "children:", len(p.get("children_ids") or []))
-              st, its = get(f"/products/{pid}/items")
-              print(f"products/{pid}/items: {st} {err(its)}")
-              if st == 200:
-                  rs = its.get("results", [])
-                  print("  n =", len(rs), "| paging:", its.get("paging"))
-                  for i in rs[:5]:
-                      print("   ", {k: i.get(k) for k in ("item_id", "price", "original_price", "currency_id", "official_store_id", "condition", "listing_type_id")})
+                  print(pid, {k: p.get(k) for k in ("status", "quality_type", "search_type", "tags", "settings")})
+
+          # Más vendidos (permiso «Métricas del negocio»)
+          st, b = get("/highlights/MCO/category/MCO1648")
+          print("highlights:", st, b if isinstance(b, str) else str(b)[:300])
+
+          # Barrido de un dominio: ¿cuántos productos tienen vendedores?
+          for domain in ("MCO-ELECTRIC_DRILLS", "MCO-TELEVISIONS"):
+              st, body = get(f"/products/search?status=active&site_id=MCO&domain_id={domain}&limit=50")
+              print(f"\n{domain}: {st} {err(body)}")
+              if st != 200:
+                  continue
+              res = body.get("results", [])
+              print("  total:", body.get("paging", {}).get("total"), "en esta página:", len(res))
+              t0, hits, offs, prices = time.time(), 0, 0, []
+              for r in res:
+                  st2, its = get(f"/products/{r['id']}/items")
+                  rs = its.get("results", []) if st2 == 200 else []
                   if rs:
-                      print("  campos:", sorted(rs[0]))
-                  item_ids += [i["item_id"] for i in rs[:3]]
-
-          # 2. Fichas de los vendedores
-          for iid in item_ids[:2]:
-              for path in (f"/items/{iid}", f"/items/{iid}/sale_price", f"/items/{iid}/prices"):
-                  st, b = get(path)
-                  extra = {k: b.get(k) for k in ("price", "original_price", "amount", "regular_amount", "status", "catalog_product_id")} if isinstance(b, dict) else err(b)
-                  print(f"{path}: {st} {extra}")
-          if item_ids:
-              ids = ",".join(item_ids[:3])
-              st, b = get(f"/items?ids={ids}&attributes=id,price,original_price,status,catalog_product_id")
-              print(f"items?ids: {st} {b if isinstance(b, list) else err(b)}")
-
-          # 3. Más vendidos y tendencias (permiso «Métricas del negocio»)
-          for path in ("/highlights/MCO/category/MCO1648", "/highlights/MCO/category/MCO1000", "/trends/MCO"):
-              st, b = get(path)
-              n = len(b.get("content", [])) if isinstance(b, dict) else (len(b) if isinstance(b, list) else 0)
-              sample = b.get("content", [])[:3] if isinstance(b, dict) else (b[:2] if isinstance(b, list) else err(b))
-              print(f"{path}: {st} n={n} {sample}")
-
-          # 4. Búsqueda por modelo: ¿los hijos o los padres tienen ganador?
-          st, body = get("/products/search?status=active&site_id=MCO&q=" + urllib.parse.quote("dewalt dcd7781") + "&limit=20")
-          print(f"\nproducts/search dewalt dcd7781: {st} {err(body)}")
-          if st == 200:
-              for r in body.get("results", [])[:10]:
-                  st2, p = get(f"/products/{r['id']}")
-                  bw = p.get("buy_box_winner") if st2 == 200 else "?"
-                  print(f"  {r['id']} hijos={len(r.get('children_ids') or [])} padre={r.get('parent_id')} ganador={'sí' if bw else 'no'} {r.get('name', '')[:60]}")
+                      hits += 1
+                      low = min(rs, key=lambda i: i["price"])
+                      offs += bool(low.get("original_price"))
+                      prices.append((r["id"], low["price"], low.get("original_price"), len(rs), r.get("name", "")[:40]))
+              print(f"  con vendedores: {hits}/{len(res)}, con precio de antes: {offs}, {time.time() - t0:.0f} s")
+              for x in prices[:5]:
+                  print("   ", x)
+              for off in (950, 1000, 5000):
+                  st3, b3 = get(f"/products/search?status=active&site_id=MCO&domain_id={domain}&limit=50&offset={off}")
+                  print(f"  offset {off}: {st3} {err(b3)[:120]} n={len(b3.get('results', [])) if isinstance(b3, dict) else 0}")
