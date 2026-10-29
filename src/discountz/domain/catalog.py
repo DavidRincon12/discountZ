@@ -7,6 +7,7 @@ existe en este modelo (en el marketplace llega inflado: spec §0.3).
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -26,6 +27,17 @@ MODEL_REALERT = timedelta(days=30)
 MAX_MIN_DAYS = 90
 MIN_WINDOW = timedelta(days=MAX_MIN_DAYS)  # el mínimo de precios estables vence a los 90 días
 MIN_PEERS = 5  # publicaciones del mismo modelo para comparar (spec de eBay §4.2)
+# Garantías, seguros e instalaciones que las tiendas listan como un producto más: no se compran
+# como ofertas. Solo cuenta el título que empieza así: un televisor «con garantía» sí lo es.
+_SERVICE_TITLE = re.compile(
+    r"^(garant[ií]a|seguro|servicio\s+de|plan\s+de\s+(protecci[oó]n|servicio))\b",
+    re.IGNORECASE,
+)
+
+
+def is_service_title(title: str | None) -> bool:
+    """¿El título es una garantía, un seguro o un servicio y no un producto físico?"""
+    return title is not None and _SERVICE_TITLE.match(title.strip()) is not None
 
 
 @dataclass(frozen=True, slots=True)
