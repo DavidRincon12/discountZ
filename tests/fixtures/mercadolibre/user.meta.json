@@ -1,0 +1,6 @@
+{
+  "status": 200,
+  "url": "https://api.mercadolibre.com/users/272545453",
+  "recorded_at": "2026-10-29",
+  "recorte": "Grabada desde Actions; solo id, user_type, status y seller_reputation.{level_id, power_seller_status}."
+}

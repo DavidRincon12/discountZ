@@ -1,0 +1,6 @@
+{
+  "status": 200,
+  "url": "https://api.mercadolibre.com/products/search",
+  "recorded_at": "2026-10-29",
+  "recorte": "Grabada desde Actions; solo paging y results[].{id, name, domain_id, status}."
+}

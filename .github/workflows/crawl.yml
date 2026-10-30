@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        source: [exito, carulla, olimpica, panamericana, jumbo, pepeganga, bestbuy_us, ebay_us, alkosto, homecenter, falabella]
+        source: [exito, carulla, olimpica, panamericana, jumbo, pepeganga, bestbuy_us, ebay_us, alkosto, homecenter, falabella, mercadolibre]
     concurrency:
       group: discountz-crawl-${{ matrix.source }}
       cancel-in-progress: false      # el cursor y el lease protegen igual; no se mata a mitad
@@ -41,6 +41,8 @@ jobs:
           DISCOUNTZ_BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
           DISCOUNTZ_EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}
           DISCOUNTZ_EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}
+          DISCOUNTZ_MELI_CLIENT_ID: ${{ secrets.MELI_CLIENT_ID }}
+          DISCOUNTZ_MELI_CLIENT_SECRET: ${{ secrets.MELI_CLIENT_SECRET }}
           DISCOUNTZ_GH_RUN_ID: ${{ github.run_id }}
           DISCOUNTZ_GH_RUN_ATTEMPT: ${{ github.run_attempt }}
           DISCOUNTZ_TRIGGER: ${{ github.event_name }}

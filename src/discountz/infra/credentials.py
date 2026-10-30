@@ -1,4 +1,4 @@
-"""Credenciales leídas del entorno: clave de Best Buy, firma RSA de Walmart y eBay.
+"""Credenciales leídas del entorno: clave de Best Buy, firma RSA de Walmart, eBay y Mercado Libre.
 
 Nunca se registran ni se ponen en `repr`; los errores llevan solo el proveedor y un código.
 """
@@ -25,6 +25,9 @@ class EnvCredentials:
         if settings.ebay_app_id and settings.ebay_cert_id:
             pair = f"{settings.ebay_app_id}:{settings.ebay_cert_id.get_secret_value()}"
             self._ebay = SecretStr(base64.b64encode(pair.encode()).decode("ascii"))
+        self._meli: tuple[str, SecretStr] | None = None
+        if settings.meli_client_id and settings.meli_client_secret:
+            self._meli = (settings.meli_client_id, settings.meli_client_secret)
         self._walmart: tuple[str, str, SecretStr] | None = None
         self._publisher = settings.walmart_publisher_id
         if (
@@ -42,7 +45,7 @@ class EnvCredentials:
         return (
             f"EnvCredentials(bestbuy={self._bestbuy is not None}, "
             f"walmart={self._walmart is not None}, ebay={self._ebay is not None}, "
-            f"woot={self._woot is not None})"
+            f"woot={self._woot is not None}, mercadolibre={self._meli is not None})"
         )
 
     def bearer(self, provider: str) -> SecretStr:
@@ -52,11 +55,15 @@ class EnvCredentials:
             return self._ebay  # `Basic` del token de aplicación (base64 de app_id:cert_id)
         if provider == "woot" and self._woot is not None:
             return self._woot  # va en la cabecera `x-api-key`
+        if provider == "mercadolibre" and self._meli is not None:
+            return self._meli[1]  # `client_secret` del token de la app
         raise CredentialUnavailable(provider, "missing")
 
     def public_id(self, provider: str) -> str:
         if provider == "walmart" and self._walmart is not None and self._publisher:
             return self._publisher
+        if provider == "mercadolibre" and self._meli is not None:
+            return self._meli[0]  # `client_id` de la app
         raise CredentialUnavailable(provider, "missing")
 
     def signed_headers(self, provider: str, now: datetime) -> Mapping[str, str]:

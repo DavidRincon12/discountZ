@@ -89,6 +89,9 @@ class Settings(BaseSettings):
     ebay_cert_id: SecretStr | None = None
     # Woot (ADR 0015): clave de su API; sin ella, el canal de Woot queda no disponible.
     woot_api_key: SecretStr | None = None
+    # Mercado Libre (ADR 0018): id y secreto de la app; sin ellos, Mercado Libre no rastrea.
+    meli_client_id: str | None = None
+    meli_client_secret: SecretStr | None = None
 
     @field_validator(
         "bestbuy_api_key",
@@ -100,6 +103,8 @@ class Settings(BaseSettings):
         "walmart_private_key",
         "walmart_publisher_id",
         "woot_api_key",
+        "meli_client_id",
+        "meli_client_secret",
         mode="before",
     )
     @classmethod
@@ -122,6 +127,12 @@ class Settings(BaseSettings):
     def _ebay_both_or_none(self) -> Settings:
         if (self.ebay_app_id is None) != (self.ebay_cert_id is None):
             raise PydanticCustomError("ebay_incomplete", "faltan credenciales de ebay")
+        return self
+
+    @model_validator(mode="after")
+    def _meli_both_or_none(self) -> Settings:
+        if (self.meli_client_id is None) != (self.meli_client_secret is None):
+            raise PydanticCustomError("meli_incomplete", "faltan credenciales de Mercado Libre")
         return self
 
 
@@ -247,6 +258,10 @@ class _Ebay(_Strict):
     excluded_roots: list[Pos] = Field(default_factory=list)
 
 
+class _Meli(_Strict):
+    max_items: Pos = 12_000
+
+
 class _Params(_Strict):
     quiet_hours: _Quiet
     pricing: _Pricing
@@ -257,6 +272,7 @@ class _Params(_Strict):
     channels: _Channels = Field(default_factory=_Channels)
     cards: _Cards = Field(default_factory=_Cards)
     ebay: _Ebay = Field(default_factory=_Ebay)
+    mercadolibre: _Meli = Field(default_factory=_Meli)
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +288,13 @@ class EbayParams:
 
 
 @dataclass(frozen=True, slots=True)
+class MeliParams:
+    """Parámetros del rastreo de Mercado Libre (spec de Mercado Libre §1.3)."""
+
+    max_items: int = 12_000  # productos seguidos: las semillas paran al llegar
+
+
+@dataclass(frozen=True, slots=True)
 class AppParams:
     categories: Mapping[str, CategoryParams]
     glob: GlobalParams
@@ -282,6 +305,7 @@ class AppParams:
     crawl: Mapping[str, CrawlBudget] = MappingProxyType({})
     channel_interval: timedelta = timedelta(minutes=10)  # cada canal como máximo cada N
     ebay: EbayParams = EbayParams()
+    meli: MeliParams = MeliParams()
     daily_cards: int = 50  # tarjetas por fuente al día; el resto va al resumen (ADR 0012)
 
 
@@ -411,6 +435,7 @@ def load_params(path: Path = PARAMS_PATH) -> AppParams:
             min_feedback_score=raw.ebay.min_feedback_score,
             excluded_roots=frozenset(raw.ebay.excluded_roots),
         ),
+        meli=MeliParams(max_items=raw.mercadolibre.max_items),
     )
 
 

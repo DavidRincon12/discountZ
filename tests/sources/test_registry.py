@@ -130,3 +130,10 @@ def test_route_falabella_product_url() -> None:
     source, ref = route_url(url, load_all())
     assert source.descriptor.code == "falabella"
     assert ref == ListingRef("falabella", "73557831")
+
+
+def test_route_mercadolibre_product_url() -> None:
+    url = "https://www.mercadolibre.com.co/taladro-dewalt/p/MCO18924972"
+    source, ref = route_url(url, load_all())
+    assert source.descriptor.code == "mercadolibre"
+    assert ref == ListingRef("mercadolibre", "MCO18924972")
