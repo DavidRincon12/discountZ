@@ -9,7 +9,7 @@ import pytest
 
 from discountz.domain.catalog import CatalogState
 from discountz.infra import db as repo
-from discountz.infra.db import CatalogRow, CrawlCursor
+from discountz.infra.db import CatalogRow, CrawlCursor, SeedMark
 
 pytestmark = pytest.mark.integration
 T = datetime(2026, 10, 16, 12, tzinfo=UTC)
@@ -85,6 +85,7 @@ def test_cursor_roundtrip(db: psycopg.Connection) -> None:
     empty = repo.get_cursor(db, "exito")
     assert empty == CrawlCursor("exito", 0, 0, 0, None, None, None, None)
     assert (empty.partitions, empty.day, empty.day_requests) == ((), None, 0)
+    assert empty.seed_after is None
     saved = CrawlCursor(
         "exito",
         2,
@@ -97,6 +98,7 @@ def test_cursor_roundtrip(db: psycopg.Connection) -> None:
         partitions=("C:/1/", "C:/2/|P:[1 TO 99]"),
         day=T.date(),
         day_requests=321,
+        seed_after=SeedMark(2_000_000, 41),
     )
     repo.save_cursor(db, saved)
     assert repo.get_cursor(db, "exito") == saved

@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -1769,6 +1769,14 @@ class CatalogRow:
 
 
 @dataclass(frozen=True, slots=True)
+class SeedMark:
+    """Última fila leída por las semillas (ADR 0019): la próxima ventana empieza después."""
+
+    price_minor: int
+    item_id: int  # `catalog_item.id`: desempata a igual precio
+
+
+@dataclass(frozen=True, slots=True)
 class CrawlCursor:
     source: str
     sweep_no: int
@@ -1781,6 +1789,7 @@ class CrawlCursor:
     partitions: tuple[str, ...] = ()  # particiones de la vuelta en curso (con las ya partidas)
     day: date | None = None  # día UTC de `day_requests`
     day_requests: int = 0  # peticiones del rastreo en ese día (tope de 24 h)
+    seed_after: SeedMark | None = None  # fuentes sembradas; None: la vuelta empieza arriba
 
 
 def load_catalog_states(
@@ -1915,7 +1924,8 @@ def get_cursor(conn: psycopg.Connection, source: str) -> CrawlCursor:
     row = _one(
         conn,
         """SELECT source, sweep_no, partition_idx, page, sweep_started_at, last_sweep_s,
-                  last_run_at, changed_since, partitions, day_start, day_requests
+                  last_run_at, changed_since, partitions, day_start, day_requests,
+                  seed_price_minor, seed_item_id
              FROM discountz.crawl_cursor WHERE source = %s""",
         (source,),
     )
@@ -1933,6 +1943,7 @@ def get_cursor(conn: psycopg.Connection, source: str) -> CrawlCursor:
         partitions=tuple(str(p) for p in row[8]),
         day=row[9],
         day_requests=int(row[10]),
+        seed_after=None if row[11] is None else SeedMark(int(row[11]), int(row[12])),
     )
 
 
@@ -1940,14 +1951,16 @@ def save_cursor(conn: psycopg.Connection, c: CrawlCursor) -> None:
     conn.execute(
         """INSERT INTO discountz.crawl_cursor (source, sweep_no, partition_idx, page,
                sweep_started_at, last_sweep_s, last_run_at, changed_since, partitions,
-               day_start, day_requests)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               day_start, day_requests, seed_price_minor, seed_item_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (source) DO UPDATE SET sweep_no = EXCLUDED.sweep_no,
                partition_idx = EXCLUDED.partition_idx, page = EXCLUDED.page,
                sweep_started_at = EXCLUDED.sweep_started_at,
                last_sweep_s = EXCLUDED.last_sweep_s, last_run_at = EXCLUDED.last_run_at,
                changed_since = EXCLUDED.changed_since, partitions = EXCLUDED.partitions,
-               day_start = EXCLUDED.day_start, day_requests = EXCLUDED.day_requests""",
+               day_start = EXCLUDED.day_start, day_requests = EXCLUDED.day_requests,
+               seed_price_minor = EXCLUDED.seed_price_minor,
+               seed_item_id = EXCLUDED.seed_item_id""",
         (
             c.source,
             c.sweep_no,
@@ -1960,6 +1973,8 @@ def save_cursor(conn: psycopg.Connection, c: CrawlCursor) -> None:
             Jsonb(list(c.partitions)),
             c.day,
             c.day_requests,
+            None if c.seed_after is None else c.seed_after.price_minor,
+            None if c.seed_after is None else c.seed_after.item_id,
         ),
     )
 
@@ -2045,7 +2060,7 @@ def save_topic(conn: psycopg.Connection, code: str, title: str, thread_id: int |
 @dataclass(frozen=True, slots=True)
 class EanSeed:
     ean: str
-    topic: str  # el de la fila vista más recientemente en las demás tiendas
+    topic: str  # el de su fila más cara de un tema en tarjeta (ADR 0019)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2055,30 +2070,61 @@ class TrackedItem:
     topic: str
 
 
-def ean_seeds(
-    conn: psycopg.Connection, source: str, topics: Sequence[str], min_minor: int, limit: int
-) -> list[EanSeed]:
-    """EAN en pesos de las demás tiendas que `source` no sigue ni buscó, del más caro al más barato.
+SEED_FLOOR_MINOR = 100_000  # COP: piso del índice parcial `catalog_item_seed_ix` (migración 0018)
 
-    Si el EAN está en varias tiendas, mandan el tema y el precio de la fila vista más
-    recientemente. Lo buscado vence con el mantenimiento (`delete_old_ean_lookups`).
+
+@dataclass(frozen=True, slots=True)
+class SeedWindow:
+    seeds: tuple[EanSeed, ...]  # lo que hay que buscar, sin EAN repetidos
+    after: SeedMark | None  # dónde sigue la próxima ventana; None: se acabó el catálogo
+
+
+def ean_seed_window(
+    conn: psycopg.Connection,
+    source: str,
+    topics: Sequence[str],
+    min_minor: int,
+    after: SeedMark | None,
+    limit: int,
+) -> SeedWindow:
+    """Hasta `limit` filas en pesos con EAN después de `after`, del más caro al más barato (ADR
+    0019), y de ellas las semillas: tema en `topics`, EAN no buscado ni seguido por `source`.
+
+    Cada consulta lee una ventana acotada del índice parcial, nunca el catálogo entero. Si un EAN
+    está en varias tiendas, manda su fila más cara de un tema en `topics`. El piso va como literal
+    y nunca por debajo del índice, para que cualquier plan pueda usarlo.
     """
+    floor = max(min_minor, SEED_FLOOR_MINOR)
+    resume = "AND (c.price_minor, c.id) < (%(price)s, %(item)s)" if after else ""
     rows = conn.execute(
-        """SELECT ean, topic FROM (
-             SELECT DISTINCT ON (c.ean) c.ean, c.topic, c.price_minor
-               FROM discountz.catalog_item c
-              WHERE c.source <> %(src)s AND c.currency = 'COP' AND c.ean IS NOT NULL
-                AND c.topic = ANY(%(topics)s::text[]) AND c.price_minor >= %(min)s
-                AND NOT EXISTS (SELECT 1 FROM discountz.catalog_item m
-                                 WHERE m.source = %(src)s AND m.ean = c.ean)
-                AND NOT EXISTS (SELECT 1 FROM discountz.ean_lookup l
-                                 WHERE l.source = %(src)s AND l.ean = c.ean)
-              ORDER BY c.ean, c.last_seen_at DESC) s
-            ORDER BY price_minor DESC, ean
-            LIMIT %(limit)s""",
-        {"src": source, "topics": list(topics), "min": min_minor, "limit": limit},
+        f"""WITH w AS MATERIALIZED (
+              SELECT c.price_minor, c.id, c.ean, c.topic FROM discountz.catalog_item c
+               WHERE c.currency = 'COP' AND c.ean IS NOT NULL AND c.price_minor >= {floor:d}
+                     {resume}
+               ORDER BY c.price_minor DESC, c.id DESC
+               LIMIT %(limit)s)
+            SELECT price_minor, id, ean, topic,
+                   CASE WHEN topic <> ALL(%(topics)s::text[]) THEN false
+                        WHEN EXISTS (SELECT 1 FROM discountz.ean_lookup l
+                                      WHERE l.source = %(src)s AND l.ean = w.ean) THEN false
+                        ELSE NOT EXISTS (SELECT 1 FROM discountz.catalog_item m
+                                          WHERE m.source = %(src)s AND m.ean = w.ean) END
+              FROM w
+             ORDER BY price_minor DESC, id DESC""",
+        {
+            "src": source,
+            "topics": list(topics),
+            "limit": limit,
+            "price": after.price_minor if after else None,
+            "item": after.item_id if after else None,
+        },
     ).fetchall()
-    return [EanSeed(r[0], r[1]) for r in rows]
+    seeds: dict[str, EanSeed] = {}
+    for _, _, ean, topic, wanted in rows:
+        if wanted and ean not in seeds:
+            seeds[ean] = EanSeed(ean, topic)
+    last = SeedMark(int(rows[-1][0]), int(rows[-1][1])) if len(rows) == limit else None
+    return SeedWindow(tuple(seeds.values()), last)
 
 
 def record_ean_lookups(

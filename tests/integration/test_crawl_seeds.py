@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import psycopg
 import pytest
 
+from discountz.app import crawl
 from discountz.app.crawl import run_crawl
 from discountz.domain.catalog import CatalogObservation, CatalogState
 from discountz.domain.errors import CredentialUnavailable, HardBlock, ParseError, Unavailable
@@ -17,7 +18,7 @@ from discountz.domain.health import effective_state
 from discountz.domain.model import ExtractionPath, ListingRef, Offer, SellerClass
 from discountz.domain.money import Currency, Money
 from discountz.infra import db as repo
-from discountz.infra.db import CatalogRow
+from discountz.infra.db import CatalogRow, SeedMark
 from discountz.sources.base import SourceContext
 from tests.integration.test_crawl import Clock, FakeCatalog, T, count, deps
 
@@ -361,6 +362,56 @@ def test_failure_mid_chunk_keeps_what_was_done(db: psycopg.Connection) -> None:
     assert tracked(db) == 3
     # La semilla que se leía al parar cuenta como buscada: un producto roto no vuelve primero.
     assert lookups(db) == {A: "MCO0", B: "MCO1", C: "MCO2", D: "MCO3"}
+
+
+def search(*eans: str) -> list[str]:
+    return [f"https://fake/search/{ean}" for ean in eans]
+
+
+def seed_mark(conn: psycopg.Connection, source: str, ext: str) -> SeedMark:
+    row = conn.execute(
+        """SELECT price_minor, id FROM discountz.catalog_item
+            WHERE source = %s AND external_id = %s""",
+        (source, ext),
+    ).fetchone()
+    assert row is not None
+    return SeedMark(row[0], row[1])
+
+
+def test_seeds_go_on_after_the_last_finished_window(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(crawl, "SEED_WINDOW", 2)
+    for i, ean in enumerate((A, B, C, D)):
+        store_row(db, "exito", str(i), ean, price=2_000_000 - i * 100_000)
+    src = FakeEanCatalog({})
+    d, transport = deps(db, src, Clock(), max_per_run=3)  # la segunda ventana queda a medias
+    run_crawl(d, T, minutes=30)
+    assert transport.urls == search(A, B, C)
+    assert repo.get_cursor(db, ML).seed_after == seed_mark(db, "exito", "1")
+    top = gtin(9)
+    store_row(db, "jumbo", "9", top, price=3_000_000)  # entra por encima de la marca
+    d2, transport2 = deps(db, src, Clock())
+    run_crawl(d2, T + HOUR, minutes=30)
+    assert transport2.urls == search(D)  # relee la ventana cortada sin repetir C
+    assert repo.get_cursor(db, ML).seed_after is None  # se acabó el catálogo
+    d3, transport3 = deps(db, src, Clock())
+    run_crawl(d3, T + 2 * HOUR, minutes=30)
+    assert transport3.urls == search(top)  # la vuelta nueva empieza por el más caro
+
+
+def test_seeds_read_at_most_seed_windows_per_run(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(crawl, "SEED_WINDOW", 1)
+    monkeypatch.setattr(crawl, "SEED_WINDOWS", 2)
+    for i, ean in enumerate((A, B, C, D)):
+        store_row(db, "exito", str(i), ean, price=2_000_000 - i * 100_000)
+    repo.record_ean_lookups(db, ML, [(ean, None) for ean in (A, B, C, D)], T - HOUR)
+    d, transport = deps(db, FakeEanCatalog({}), Clock())
+    run_crawl(d, T, minutes=30)
+    assert transport.urls == []
+    assert repo.get_cursor(db, ML).seed_after == seed_mark(db, "exito", "1")
 
 
 def test_drop_after_warmup_alerts_with_card(db: psycopg.Connection) -> None:
