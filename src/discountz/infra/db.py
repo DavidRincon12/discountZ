@@ -2096,6 +2096,63 @@ def ean_seeds(
     return [EanSeed(r[0], r[1]) for r in rows]
 
 
+SEED_FLOOR_MINOR = 100_000  # COP: piso del índice parcial `catalog_item_seed_ix` (migración 0018)
+
+
+@dataclass(frozen=True, slots=True)
+class SeedWindow:
+    seeds: tuple[EanSeed, ...]  # lo que hay que buscar, sin EAN repetidos
+    after: SeedMark | None  # dónde sigue la próxima ventana; None: se acabó el catálogo
+
+
+def ean_seed_window(
+    conn: psycopg.Connection,
+    source: str,
+    topics: Sequence[str],
+    min_minor: int,
+    after: SeedMark | None,
+    limit: int,
+) -> SeedWindow:
+    """Hasta `limit` filas en pesos con EAN después de `after`, del más caro al más barato (ADR
+    0019), y de ellas las semillas: tema en `topics`, EAN no buscado ni seguido por `source`.
+
+    Cada consulta lee una ventana acotada del índice parcial, nunca el catálogo entero. Si un EAN
+    está en varias tiendas, manda su fila más cara. El piso va como literal y nunca por debajo del
+    índice, para que cualquier plan pueda usarlo.
+    """
+    floor = max(min_minor, SEED_FLOOR_MINOR)
+    resume = "AND (c.price_minor, c.id) < (%(price)s, %(item)s)" if after else ""
+    rows = conn.execute(
+        f"""WITH w AS MATERIALIZED (
+              SELECT c.price_minor, c.id, c.ean, c.topic FROM discountz.catalog_item c
+               WHERE c.currency = 'COP' AND c.ean IS NOT NULL AND c.price_minor >= {floor:d}
+                     {resume}
+               ORDER BY c.price_minor DESC, c.id DESC
+               LIMIT %(limit)s)
+            SELECT price_minor, id, ean, topic,
+                   CASE WHEN topic <> ALL(%(topics)s::text[]) THEN false
+                        WHEN EXISTS (SELECT 1 FROM discountz.ean_lookup l
+                                      WHERE l.source = %(src)s AND l.ean = w.ean) THEN false
+                        ELSE NOT EXISTS (SELECT 1 FROM discountz.catalog_item m
+                                          WHERE m.source = %(src)s AND m.ean = w.ean) END
+              FROM w
+             ORDER BY price_minor DESC, id DESC""",
+        {
+            "src": source,
+            "topics": list(topics),
+            "limit": limit,
+            "price": after.price_minor if after else None,
+            "item": after.item_id if after else None,
+        },
+    ).fetchall()
+    seeds: dict[str, EanSeed] = {}
+    for _, _, ean, topic, wanted in rows:
+        if wanted and ean not in seeds:
+            seeds[ean] = EanSeed(ean, topic)
+    last = SeedMark(int(rows[-1][0]), int(rows[-1][1])) if len(rows) == limit else None
+    return SeedWindow(tuple(seeds.values()), last)
+
+
 def record_ean_lookups(
     conn: psycopg.Connection,
     source: str,
