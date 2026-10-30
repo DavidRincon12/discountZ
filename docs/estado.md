@@ -10,6 +10,7 @@
 - Suite: 1507 pruebas (1214 unitarias y de fuentes, 293 de integración) en verde el 2026-10-29.
 
 ## Último cambio
+- eBay (2026-10-29): una caída > 95 % contra la mediana del modelo sale como MODEL_LOW, no como error de precio (`MODEL_ERROR_MAX_BP`); los anuncios de pago de envío o diferencia y los enlaces «for VIP» ya no entran (`is_fee_listing_title`, `domain/catalog.py`, filtrados en `sources/ebay.py`); eran «errores de precio» falsos contra la mediana de su `epid`. Antes: garantías de Jumbo (PR #49).
 - Rama `claude/project-thread-xsztn5`: Mercado Libre por su API con token de aplicación (`MELI_CLIENT_ID`/`MELI_CLIENT_SECRET`), migración `0017` (`ean_lookup`, `catalog_item.checked_at`, esquema 17), `domain/gtin.py`, protocolo `EanCatalogSource` y rastreo sembrado en `app/crawl.py` (spec `docs/superpowers/specs/2026-10-29-mercadolibre-design.md`, plan ejecutado completo en modo Native). La revisión final arregló que un producto roto frenara toda la fuente y el reintento de los EAN con ceros (UPC de 12 dígitos). Antes: garantías y servicios listados como producto ya no alertan (`is_service_title`) y la tarjeta de Homecenter toma la foto de la ficha (PR #49).
 
 ## Siguiente paso

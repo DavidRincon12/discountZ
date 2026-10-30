@@ -15,6 +15,7 @@ from discountz.domain.catalog import (
     CatalogCandidate,
     CatalogObservation,
     CatalogState,
+    is_fee_listing_title,
     is_service_title,
     median_low,
     meets_floors,
@@ -256,9 +257,21 @@ def test_model_candidate_price_error() -> None:
     assert cand.kind is AlertKind.PRICE_ERROR
 
 
+def test_model_candidate_extreme_drop_is_only_model_low() -> None:
+    # -97 %: casi siempre un anuncio que no es el producto (pago de envío, repuesto)
+    cand = model_candidate(None, T0, usd(300), [10_000] * 5, TECH, GLOB)
+    assert cand is not None
+    assert cand.kind is AlertKind.MODEL_LOW
+    just_below = model_candidate(None, T0, usd(500), [10_000] * 5, TECH, GLOB)  # -95 % exacto
+    assert just_below is not None
+    assert just_below.kind is AlertKind.PRICE_ERROR
+
+
 def test_model_candidate_marketplace_price_error_is_none() -> None:
     mkt = replace(usd(4_000), seller_class=SellerClass.MARKETPLACE)
     assert model_candidate(None, T0, mkt, [10_000] * 5, TECH, GLOB) is None
+    extreme = replace(usd(300), seller_class=SellerClass.MARKETPLACE)
+    assert model_candidate(None, T0, extreme, [10_000] * 5, TECH, GLOB) is None
 
 
 def test_model_candidate_median_below_min_price_is_none() -> None:
@@ -408,3 +421,28 @@ def test_products_that_mention_a_warranty_are_still_products() -> None:
         "",
     ):
         assert not is_service_title(title), title
+
+
+def test_seller_fee_listings_are_not_products() -> None:
+    for title in (
+        "1PC ACS320-03U-08A8-4 for VIP",
+        "1PC 8906-CCFL-A-A161 for vip",
+        "Extra shipping fee Balance",
+        "Shipping fee balance for order #123",
+        "Extra Shipping Cost",
+        "Pay the difference - custom order",
+        "Price difference payment",
+        "Balance payment for your order",
+    ):
+        assert is_fee_listing_title(title), title
+
+
+def test_real_products_are_not_fee_listings() -> None:
+    for title in (
+        "Apple iPhone 15 128GB Unlocked",
+        "VIP Fitness Resistance Bands Set",
+        "Fan for VIPER gaming case 120mm",
+        "Router with free shipping included",
+        "",
+    ):
+        assert not is_fee_listing_title(title), title

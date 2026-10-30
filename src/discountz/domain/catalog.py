@@ -26,6 +26,9 @@ COOLDOWN = timedelta(hours=72)
 MODEL_REALERT = timedelta(days=30)
 MAX_MIN_DAYS = 90
 MIN_WINDOW = timedelta(days=MAX_MIN_DAYS)  # el mínimo de precios estables vence a los 90 días
+# Una caída mayor contra la mediana del modelo casi nunca es un error de precio: es un anuncio que
+# no es el producto (envío, repuesto, accesorio). Sale como MODEL_LOW, no como PRICE_ERROR.
+MODEL_ERROR_MAX_BP = 9_500
 MIN_PEERS = 5  # publicaciones del mismo modelo para comparar (spec de eBay §4.2)
 # Garantías, seguros e instalaciones que las tiendas listan como un producto más: no se compran
 # como ofertas. Solo cuenta el título que empieza así: un televisor «con garantía» sí lo es.
@@ -38,6 +41,26 @@ _SERVICE_TITLE = re.compile(
 def is_service_title(title: str | None) -> bool:
     """¿El título es una garantía, un seguro o un servicio y no un producto físico?"""
     return title is not None and _SERVICE_TITLE.match(title.strip()) is not None
+
+
+# Anuncios de eBay que no venden un producto: pagos de diferencia de envío o de precio y enlaces
+# privados de un vendedor («for VIP»). Comparten el `epid` de un producto real con precio de
+# centavos y disparan un «error de precio» falso.
+_FEE_TITLE = re.compile(
+    r"\bfor\s+vip\s*$"
+    r"|\bextra\s+(shipping|postage|freight)\b"
+    r"|\b(shipping|postage|freight)\s+(fee\s+|cost\s+|charge\s+)?"
+    r"(balance|difference|supplement|top[\s-]?up)\b"
+    r"|\bpay(ment)?\s+(the\s+|for\s+the\s+)?(price\s+)?difference\b"
+    r"|\bprice\s+difference\b"
+    r"|\bbalance\s+pay(ment)?\b",
+    re.IGNORECASE,
+)
+
+
+def is_fee_listing_title(title: str | None) -> bool:
+    """¿El título es el pago de una diferencia de envío o precio, o un enlace «for VIP»?"""
+    return title is not None and _FEE_TITLE.search(title.strip()) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,7 +237,9 @@ def model_candidate(
         return None
     drop_bp = (median - p) * 10_000 // median
     kind: AlertKind | None = None
-    if drop_bp >= topic.g_bp:
+    if drop_bp > MODEL_ERROR_MAX_BP:  # el marketplace no alerta con una caída así (ver arriba)
+        kind = AlertKind.MODEL_LOW if _price_error(obs) is not None else None
+    elif drop_bp >= topic.g_bp:
         kind = _price_error(obs)
     elif drop_bp >= topic.t_bp:
         kind = AlertKind.MODEL_LOW

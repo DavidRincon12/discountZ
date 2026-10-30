@@ -269,6 +269,12 @@ def test_parse_item_lot_is_dropped() -> None:
     assert parse_item(json.dumps(data).encode(), RULES) is None
 
 
+def test_parse_item_seller_fee_listing_is_dropped() -> None:
+    for title in ("1PC ACS320-03U-08A8-4 for VIP", "Extra shipping fee Balance"):
+        data = fx_json("item-single") | {"title": title}
+        assert parse_item(json.dumps(data).encode(), RULES) is None, title
+
+
 def test_parse_item_out_of_stock() -> None:
     data = fx_json("item-single")
     data["estimatedAvailabilities"] = [{"estimatedAvailabilityStatus": "OUT_OF_STOCK"}]
