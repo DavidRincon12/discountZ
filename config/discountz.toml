@@ -25,6 +25,7 @@ min_abs_cop = 10000
 min_abs_usd = 500
 # Calidad de las ofertas (2026-10-22): el «antes» del rastreo y lo que llega por casillero cuestan
 # al menos esto, y el rastreo exige este ahorro (los seguimientos siguen con min_abs).
+# Las semillas de Mercado Libre no bajan de 100.000: es el piso de su índice (migración 0018).
 min_price_cop = 100000
 min_price_usd = 1000
 catalog_min_saving_cop = 30000
