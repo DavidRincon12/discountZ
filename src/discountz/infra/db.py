@@ -2070,32 +2070,6 @@ class TrackedItem:
     topic: str
 
 
-def ean_seeds(
-    conn: psycopg.Connection, source: str, topics: Sequence[str], min_minor: int, limit: int
-) -> list[EanSeed]:
-    """EAN en pesos de las demás tiendas que `source` no sigue ni buscó, del más caro al más barato.
-
-    Si el EAN está en varias tiendas, mandan el tema y el precio de la fila vista más
-    recientemente. Lo buscado vence con el mantenimiento (`delete_old_ean_lookups`).
-    """
-    rows = conn.execute(
-        """SELECT ean, topic FROM (
-             SELECT DISTINCT ON (c.ean) c.ean, c.topic, c.price_minor
-               FROM discountz.catalog_item c
-              WHERE c.source <> %(src)s AND c.currency = 'COP' AND c.ean IS NOT NULL
-                AND c.topic = ANY(%(topics)s::text[]) AND c.price_minor >= %(min)s
-                AND NOT EXISTS (SELECT 1 FROM discountz.catalog_item m
-                                 WHERE m.source = %(src)s AND m.ean = c.ean)
-                AND NOT EXISTS (SELECT 1 FROM discountz.ean_lookup l
-                                 WHERE l.source = %(src)s AND l.ean = c.ean)
-              ORDER BY c.ean, c.last_seen_at DESC) s
-            ORDER BY price_minor DESC, ean
-            LIMIT %(limit)s""",
-        {"src": source, "topics": list(topics), "min": min_minor, "limit": limit},
-    ).fetchall()
-    return [EanSeed(r[0], r[1]) for r in rows]
-
-
 SEED_FLOOR_MINOR = 100_000  # COP: piso del índice parcial `catalog_item_seed_ix` (migración 0018)
 
 

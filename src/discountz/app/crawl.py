@@ -97,7 +97,8 @@ ERRORS_TOPIC = "errores"
 # Fuentes sembradas con EAN (spec de Mercado Libre §1.3).
 REFRESH_AFTER = timedelta(hours=6)  # lo seguido y leído hace menos no se relee
 SEED_CHUNK = 20  # lecturas que se guardan juntas (y se conservan si la corrida para)
-SEED_QUERY = 200  # semillas por consulta a la BD
+SEED_WINDOW = 200  # filas del índice de semillas por consulta (ADR 0019)
+SEED_WINDOWS = 25  # ventanas por corrida, como máximo
 
 # Con la BD en ≥ 450 MB el mantenimiento pausa el descubrimiento: también el rastreo de las
 # tiendas más grandes (spec del rastreo §7.2).
@@ -339,19 +340,29 @@ class _Run:
         return not db.bot_state(self.conn).discovery_paused
 
     def seed(self, src: EanCatalogSource) -> None:
-        """EAN de los temas en tarjeta que la fuente no sigue, del más caro al más barato."""
+        """EAN de los temas en tarjeta que la fuente no sigue, del más caro al más barato, por
+        ventanas desde la marca de la corrida anterior (ADR 0019). La marca avanza solo con la
+        ventana terminada: una cortada se relee y lo ya buscado se salta."""
         cards = self.topics_in("card")
-        floor = self.deps.params.glob.min_price[Currency.COP]
+        floor = self.deps.params.glob.min_price[Currency.COP]  # el índice pone su piso
         try:
-            while self.time_left() and self.seeds_allowed():
-                seeds = db.ean_seeds(self.conn, self.code, cards, floor, SEED_QUERY)
-                if not seeds:
+            for _ in range(SEED_WINDOWS):
+                if not self.time_left() or not self.seeds_allowed():
                     return
-                for i in range(0, len(seeds), SEED_CHUNK):
+                window = db.ean_seed_window(
+                    self.conn, self.code, cards, floor, self.cursor.seed_after, SEED_WINDOW
+                )
+                for i in range(0, len(window.seeds), SEED_CHUNK):
                     if not self.time_left() or not self.seeds_allowed():
                         return
                     self.check_breaker()
-                    self.batched(partial(self.read_seeds, src, seeds[i : i + SEED_CHUNK]))
+                    self.batched(partial(self.read_seeds, src, window.seeds[i : i + SEED_CHUNK]))
+                if not self.time_left():
+                    return  # `read_seeds` pudo dejar semillas sin buscar
+                self.cursor = replace(self.cursor, seed_after=window.after)
+                self.save_cursor()
+                if window.after is None:
+                    return  # se acabó el catálogo: la próxima corrida empieza por el más caro
         finally:
             event(
                 log,

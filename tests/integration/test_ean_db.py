@@ -39,35 +39,6 @@ def _item(
     )
 
 
-def _seeds(conn: psycopg.Connection, limit: int = 10) -> list[EanSeed]:
-    return repo.ean_seeds(conn, ML, CARDS, MIN, limit)
-
-
-def test_ean_seeds_take_card_topics_cop_and_min_price(db: psycopg.Connection) -> None:
-    _item(db, "exito", "1", ean=A, price=2_000_000)
-    _item(db, "exito", "2", ean=B, topic="belleza", price=2_000_000)  # tema apagado
-    _item(db, "alkosto", "3", ean=C, price=50_000)  # bajo el mínimo
-    _item(db, "ebay_us", "4", ean=D, currency="USD", price=99_999)  # en dólares
-    _item(db, "exito", "5", ean=None)
-    assert _seeds(db) == [EanSeed(A, "tecnologia")]
-
-
-def test_ean_seeds_skip_tracked_and_looked_up(db: psycopg.Connection) -> None:
-    for i, ean in enumerate((A, B, C)):
-        _item(db, "exito", str(i), ean=ean)
-    _item(db, ML, "MCO1", ean=A)  # ya seguido
-    repo.record_ean_lookups(db, ML, [(B, None)], NOW)  # ya buscado
-    assert _seeds(db) == [EanSeed(C, "tecnologia")]
-
-
-def test_ean_seeds_use_most_recent_row_and_price_desc(db: psycopg.Connection) -> None:
-    _item(db, "exito", "1", ean=E, topic="hogar", price=300_000, seen=NOW - 24 * HOUR)
-    _item(db, "jumbo", "2", ean=E, topic="electro", price=400_000, seen=NOW)
-    _item(db, "alkosto", "3", ean=F, price=900_000)
-    assert _seeds(db) == [EanSeed(F, "tecnologia"), EanSeed(E, "electro")]
-    assert _seeds(db, limit=1) == [EanSeed(F, "tecnologia")]
-
-
 def _window(
     conn: psycopg.Connection,
     after: SeedMark | None = None,
