@@ -2060,7 +2060,7 @@ def save_topic(conn: psycopg.Connection, code: str, title: str, thread_id: int |
 @dataclass(frozen=True, slots=True)
 class EanSeed:
     ean: str
-    topic: str  # el de la fila vista más recientemente en las demás tiendas
+    topic: str  # el de su fila más cara de un tema en tarjeta (ADR 0019)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2091,8 +2091,8 @@ def ean_seed_window(
     0019), y de ellas las semillas: tema en `topics`, EAN no buscado ni seguido por `source`.
 
     Cada consulta lee una ventana acotada del índice parcial, nunca el catálogo entero. Si un EAN
-    está en varias tiendas, manda su fila más cara. El piso va como literal y nunca por debajo del
-    índice, para que cualquier plan pueda usarlo.
+    está en varias tiendas, manda su fila más cara de un tema en `topics`. El piso va como literal
+    y nunca por debajo del índice, para que cualquier plan pueda usarlo.
     """
     floor = max(min_minor, SEED_FLOOR_MINOR)
     resume = "AND (c.price_minor, c.id) < (%(price)s, %(item)s)" if after else ""

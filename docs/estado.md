@@ -7,7 +7,7 @@
 - Canales de Telegram (ADR 0005: DescuentosTech, DescuentosHome, Clubgratis, cajitatech, OFERTU), Amazon de Slickdeals «sin verificar» (ADR 0006), 9to5Toys por su RSS (ADR 0014) y Woot por su API (ADR 0015), por casillero los de EE. UU. DealNews apagado (406 desde Actions). Best Buy y Walmart fuera; Amazon da CAPTCHA.
 - Perfil de temas (ADR 0013): Belleza, Mercado, Bebés y Mascotas apagados (no se rastrean ni se releen, y sus ofertas de canales quedan vistas); el resto en tarjeta. Intereses: semilla de `config/interests.toml` más los de `/interes`, con «🎯» y hasta 3 por interés al día.
 - Dos chats: el grupo (todo, temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas y resúmenes de ofertas).
-- Suite: 1517 pruebas (1218 unitarias y de fuentes, 299 de integración) en verde el 2026-10-30.
+- Suite: 1518 pruebas (1218 unitarias y de fuentes, 300 de integración) en verde el 2026-10-30.
 
 ## Último cambio
 - Rama `claude/project-thread-k5q32n`: las semillas de Mercado Libre se leen por ventanas de 200 filas del índice parcial `catalog_item_seed_ix` (8,7 MB en una copia local de 895 mil filas), del más caro al más barato y desde la marca que dejó la corrida anterior (`crawl_cursor.seed_*`), hasta 25 ventanas por corrida; migración `0018` (esquema 18), ADR 0019 y plan `docs/superpowers/plans/2026-10-30-semillas-por-ventanas.md` (Native, completo). `db_reconnect` dice la clase del error. Antes: Mercado Libre por su API (PR #51).
@@ -28,7 +28,7 @@
 - No se sortea ningún CAPTCHA ni detección de bots. eBay, Slickdeals y Mercado Libre siguen pese al riesgo de sus términos: decisiones de David.
 
 ## Pendientes y gotchas
-- Supabase: `statement_timeout = '15s'` en `discountz_app` y 250 IOPS en Nano; ninguna consulta del rastreo puede leer el catálogo entero. Mercado Libre: con 12 mil seguidos, la relectura y el conteo (`catalog_refresh_items`, `count_catalog_items`) leen ~1.200 páginas, unos 5 s en frío; si se acercan a los 15 s, darles un índice propio.
+- Supabase: `statement_timeout = '15s'` en `discountz_app` y 250 IOPS en Nano; ninguna consulta del rastreo puede leer el catálogo entero. Mercado Libre: la relectura y el conteo (`catalog_refresh_items`, `count_catalog_items`) leen todas sus filas: con 12 mil seguidos, ~1.200 páginas si están juntas (5 s en frío) y hasta ~12 mil si quedan dispersas (~48 s), el mismo modo de falla de las semillas; con `db_reconnect source=mercadolibre error=QueryCanceled` fuera de las semillas, toca índice propio para la relectura y otro conteo.
 - El mantenimiento no borra el catálogo de una tienda apagada (cuenta desde su última corrida); borrar filas no baja `pg_database_size` sin `VACUUM FULL`, que no corre dentro de una transacción.
 - Una tienda que rastrea de noche puede gastar sus 50 tarjetas en la madrugada (sin sonido); el resto del día va al resumen. Lo retenido después de las 21:00 sale al día siguiente.
 - BD: el rastreo reconecta hasta 2 veces (`db_reconnect`); el ciclo no. Supabase: el migrador necesita `GRANT CREATE ON DATABASE postgres TO discountz_owner`. Postgres en la nube: `service postgresql start` y `ALTER USER postgres PASSWORD 'postgres'`. Resumen diario (13:00Z): `catalog_daily_stats` a veces pasa el `statement_timeout` y se reintenta.
