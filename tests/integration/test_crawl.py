@@ -1029,7 +1029,9 @@ def test_crawl_reconnects_when_the_db_drops_mid_run(
     assert result.status == "ok"
     assert count(db, "catalog_item") == 8
     assert transport.kinds() == ["partitions", "page", "page", "page", "page", "page"]
-    assert "db_reconnect source=exito count=1" in caplog.text
+    # La clase dice si fue una caída (AdminShutdown) o el statement_timeout (QueryCanceled).
+    pattern = r"db_reconnect source=exito count=1 error=(AdminShutdown|OperationalError)\b"
+    assert re.search(pattern, caplog.text)
     assert count(db, "crawl_lease") == 0
     assert repo.get_cursor(db, "exito").partitions == ()
 

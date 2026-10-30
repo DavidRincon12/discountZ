@@ -918,7 +918,7 @@ def run_crawl_reconnecting(
         for attempt in range(1, DB_RECONNECTS + 2):
             try:
                 return _run_crawl(deps, now, end)
-            except psycopg.OperationalError:
+            except psycopg.OperationalError as exc:
                 if attempt > DB_RECONNECTS or deps.monotonic() + DB_RECONNECT_PAUSE_S >= end:
                     raise
                 event(
@@ -927,6 +927,7 @@ def run_crawl_reconnecting(
                     logging.WARNING,
                     source=deps.source.descriptor.code,
                     count=attempt,
+                    error=type(exc).__name__,  # QueryCanceled: una consulta pasó el timeout
                 )
                 deps.sleep(DB_RECONNECT_PAUSE_S)
                 opened.append(reconnect())
