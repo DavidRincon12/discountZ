@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -1769,6 +1769,14 @@ class CatalogRow:
 
 
 @dataclass(frozen=True, slots=True)
+class SeedMark:
+    """Última fila leída por las semillas (ADR 0019): la próxima ventana empieza después."""
+
+    price_minor: int
+    item_id: int  # `catalog_item.id`: desempata a igual precio
+
+
+@dataclass(frozen=True, slots=True)
 class CrawlCursor:
     source: str
     sweep_no: int
@@ -1781,6 +1789,7 @@ class CrawlCursor:
     partitions: tuple[str, ...] = ()  # particiones de la vuelta en curso (con las ya partidas)
     day: date | None = None  # día UTC de `day_requests`
     day_requests: int = 0  # peticiones del rastreo en ese día (tope de 24 h)
+    seed_after: SeedMark | None = None  # fuentes sembradas; None: la vuelta empieza arriba
 
 
 def load_catalog_states(
@@ -1915,7 +1924,8 @@ def get_cursor(conn: psycopg.Connection, source: str) -> CrawlCursor:
     row = _one(
         conn,
         """SELECT source, sweep_no, partition_idx, page, sweep_started_at, last_sweep_s,
-                  last_run_at, changed_since, partitions, day_start, day_requests
+                  last_run_at, changed_since, partitions, day_start, day_requests,
+                  seed_price_minor, seed_item_id
              FROM discountz.crawl_cursor WHERE source = %s""",
         (source,),
     )
@@ -1933,6 +1943,7 @@ def get_cursor(conn: psycopg.Connection, source: str) -> CrawlCursor:
         partitions=tuple(str(p) for p in row[8]),
         day=row[9],
         day_requests=int(row[10]),
+        seed_after=None if row[11] is None else SeedMark(int(row[11]), int(row[12])),
     )
 
 
@@ -1940,14 +1951,16 @@ def save_cursor(conn: psycopg.Connection, c: CrawlCursor) -> None:
     conn.execute(
         """INSERT INTO discountz.crawl_cursor (source, sweep_no, partition_idx, page,
                sweep_started_at, last_sweep_s, last_run_at, changed_since, partitions,
-               day_start, day_requests)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               day_start, day_requests, seed_price_minor, seed_item_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (source) DO UPDATE SET sweep_no = EXCLUDED.sweep_no,
                partition_idx = EXCLUDED.partition_idx, page = EXCLUDED.page,
                sweep_started_at = EXCLUDED.sweep_started_at,
                last_sweep_s = EXCLUDED.last_sweep_s, last_run_at = EXCLUDED.last_run_at,
                changed_since = EXCLUDED.changed_since, partitions = EXCLUDED.partitions,
-               day_start = EXCLUDED.day_start, day_requests = EXCLUDED.day_requests""",
+               day_start = EXCLUDED.day_start, day_requests = EXCLUDED.day_requests,
+               seed_price_minor = EXCLUDED.seed_price_minor,
+               seed_item_id = EXCLUDED.seed_item_id""",
         (
             c.source,
             c.sweep_no,
@@ -1960,6 +1973,8 @@ def save_cursor(conn: psycopg.Connection, c: CrawlCursor) -> None:
             Jsonb(list(c.partitions)),
             c.day,
             c.day_requests,
+            None if c.seed_after is None else c.seed_after.price_minor,
+            None if c.seed_after is None else c.seed_after.item_id,
         ),
     )
 
