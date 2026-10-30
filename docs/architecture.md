@@ -3,7 +3,7 @@
 ## Contexto
 Monitor **personal** de ofertas para David (Colombia). Rastrea tiendas colombianas (COP) y de EE. UU. que envían a casillero (USD), filtra descuentos inflados con un histórico propio y avisa por Telegram. Escala: decenas a pocos cientos de productos, un solo usuario, costo $0. Diseño completo: `docs/superpowers/specs/2026-10-13-discountz-v1-design.md`; decisiones en `docs/decisions/`.
 
-Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×6, Algolia de Alkosto, el JSON de las categorías de Homecenter y de Falabella, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API), el RSS de Slickdeals, el RSS de Amazon de DealNews el RSS de 9to5Toys y la API de Woot.
+Sistemas externos: GitHub Actions (cómputo), cron-job.org (disparo cada 5 min), Supabase Postgres (estado), Telegram Bot API (alertas y comandos), tiendas (VTEX ×6, Algolia de Alkosto, el JSON de las categorías de Homecenter y de Falabella, Amazon US, Newegg, Walmart, Best Buy, eBay por la Browse API, el catálogo de Mercado Libre por su API), el RSS de Slickdeals, el RSS de Amazon de DealNews el RSS de 9to5Toys y la API de Woot.
 
 ## Contenedores
 ```mermaid
@@ -93,6 +93,8 @@ Migración `0015_homecenter` (ADR 0016): fuente `homecenter` (`sources/homecente
 
 Migración `0016_falabella` (ADR 0017): fuente `falabella` (`sources/falabella.py`), que lee el `__NEXT_DATA__` de los listados filtrados por vendedor.
 
+Migración `0017_mercadolibre` (ADR 0018): fuente `mercadolibre` (`sources/mercadolibre.py`); `ean_lookup`, los EAN ya buscados en su catálogo (30 días, con el producto hallado o sin él), y `catalog_item.checked_at`, la última vez que la relectura pidió un producto, lo haya hallado o no.
+
 Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentajes en puntos básicos e instantes en `timestamptz` UTC.
 
 ## Flujos clave
@@ -111,7 +113,7 @@ Dinero en `bigint` de unidad menor (COP exponente 0, USD exponente 2), porcentaj
 3. **Rastreo** (`python -m discountz crawl --source <tienda>`, un job por tienda cada hora):
    1. Breaker abierto ⇒ `blocked`; tienda apagada (o Éxito y Carulla con la BD en ≥ 450 MB) ⇒ `disabled`; lease por tienda.
    2. Capa caliente (≤ 25 % del presupuesto): `fetch_changed` en Best Buy, relectura de lo que cambió hace poco en VTEX (sin los temas `off` del perfil, ADR 0013).
-   3. Barrido desde el cursor: particiones por categoría raíz y, si pasan de 2.500 productos, bandas de precio partidas a demanda. Se saltan las particiones de temas `off` del perfil (`domain/topics.py`, ADR 0013).
+   3. Barrido desde el cursor: particiones por categoría raíz y, si pasan de 2.500 productos, bandas de precio partidas a demanda. Se saltan las particiones de temas `off` del perfil (`domain/topics.py`, ADR 0013). Mercado Libre (`EanCatalogSource`, ADR 0018) no tiene capa caliente ni barrido: relee lo que sigue y no pidió en 6 h (`checked_at`), y con lo que sobra busca en su catálogo los EAN de los temas `card` de las demás tiendas (del más caro al más barato, sin los ya buscados en 30 días); cada producto hallado entra con el EAN y el tema de la semilla.
    4. Cada página va a `domain/catalog.py` (puro); en eBay también se compara con la mediana de las publicaciones del mismo modelo (`model_candidate`, ADR 0008); una bajada real contra el «antes» estable se confirma en la ficha (±1 %, stock, vendedor) y se descarta si otra tienda alertó el mismo EAN.
    5. Solo se confirma lo de un tema `card` del perfil o lo que coincide con un interés, que se detecta sin los mínimos de precio y de ahorro (ADR 0013, `domain/interests.py`). `app/held.py` decide si sale en tarjeta: 8 por tienda al día y 3 por interés (con ese tope lleno, lo que también saldría sin el interés usa el de la tienda); lo demás va al resumen de las 21:00. La alerta entra a `outbox` con su tema y su tarjeta; el ciclo la entrega como foto (`sendPhoto`) en ese tema.
 4. **Feed de Slickdeals**: una tarea `feed` baja el RSS una vez para todas las búsquedas `source='slickdeals'` vencidas → cada lead que coincide y apunta a una tienda activa (sin red: `href`, `u2=` o `data-aps-asin`) encola en memoria una lectura de ficha en esa tienda, antes que sus demás tareas → `evaluate(origin="lead")` puede dar `COMMUNITY_DEAL`. Los leads no se guardan, pero todo lead que lleva a una ficha crea un seguimiento automático (`aNN`, 30 días sin alerta, tope por tienda).

@@ -289,6 +289,14 @@ def test_maintenance_deletes_channel_posts_after_7_days(db: psycopg.Connection) 
     assert rows == [(2,)]
 
 
+def test_maintenance_deletes_ean_lookups_after_30_days(db: psycopg.Connection) -> None:
+    repo.record_ean_lookups(db, "mercadolibre", [("7700000000011", None)], T - 31 * DAY)
+    repo.record_ean_lookups(db, "mercadolibre", [("7700000000028", "MCO1")], T - 29 * DAY)
+    run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    rows = db.execute("SELECT ean FROM discountz.ean_lookup").fetchall()
+    assert rows == [("7700000000028",)]
+
+
 def test_daily_summary_counts_channel_posts(db: psycopg.Connection) -> None:
     for i in range(1, 4):
         _channel_post(db, i, timedelta(hours=i), None)

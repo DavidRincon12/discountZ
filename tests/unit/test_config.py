@@ -11,6 +11,7 @@ import psycopg
 import pytest
 
 from discountz.__main__ import main
+from discountz.app.crawl import crawl_max_items
 from discountz.config import (
     CANARIES_PATH,
     PARAMS_PATH,
@@ -62,6 +63,7 @@ def test_repo_toml_loads_with_spec_defaults() -> None:
         "alkosto",
         "homecenter",
         "falabella",
+        "mercadolibre",
         "slickdeals",
         "tg_descuentostech",
         "tg_clubgratis",
@@ -110,6 +112,7 @@ def test_co_events_include_the_new_vtex_stores() -> None:
     for name in ("Black Days", "Hot Sale"):
         event = next(e for e in events if e.name == name)
         assert {"jumbo", "pepeganga", "alkosto"} <= set(event.sources)
+        assert "mercadolibre" in event.sources
     black_days = next(e for e in events if e.name == "Black Days")
     assert {"homecenter", "falabella"} <= set(black_days.sources)
 
@@ -240,6 +243,7 @@ def test_crawl_budgets_match_spec() -> None:
         "pepeganga",
         "homecenter",
         "falabella",
+        "mercadolibre",
     }
     falabella = c["falabella"]
     assert (falabella.min_pause_s, falabella.jitter_s) == (10, 5)  # su WAF dio 403 a 3 s
@@ -263,9 +267,50 @@ def test_crawl_budgets_match_spec() -> None:
     assert all(
         b.hot_share_bp == 2500
         for code, b in c.items()
-        if code not in ("ebay_us", "homecenter", "falabella")
+        if code not in ("ebay_us", "homecenter", "falabella", "mercadolibre")
     )
     assert all(b.max_per_run <= b.max_per_24h for b in c.values())
+
+
+def test_meli_budgets_follow_the_spec() -> None:
+    p = load_params(PARAMS_PATH)
+    b = p.budgets["mercadolibre"]
+    assert (b.min_pause_s, b.jitter_s, b.max_per_run, b.max_per_24h, b.max_batch) == (
+        1,
+        1,
+        10,
+        1000,
+        1,
+    )
+    assert (b.watch_interval, b.search_interval) == (timedelta(minutes=120), timedelta(days=1))
+    c = p.crawl["mercadolibre"]
+    assert (c.min_pause_s, c.jitter_s, c.max_per_run, c.max_per_24h, c.hot_share_bp) == (
+        0.5,
+        0.5,
+        2000,
+        20_000,
+        7000,
+    )
+    assert p.meli.max_items == 12_000
+    assert crawl_max_items("mercadolibre", p) == 12_000
+    assert crawl_max_items("exito", p) is None
+
+
+def test_meli_credentials_both_or_none(env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    s = load_settings()
+    assert (s.meli_client_id, s.meli_client_secret) == (None, None)
+    monkeypatch.setenv("DISCOUNTZ_MELI_CLIENT_ID", " ")  # secreto sin definir en Actions
+    monkeypatch.setenv("DISCOUNTZ_MELI_CLIENT_SECRET", "")
+    assert load_settings().meli_client_id is None
+    monkeypatch.setenv("DISCOUNTZ_MELI_CLIENT_ID", "1234567890")
+    with pytest.raises(ConfigError, match="meli_incomplete"):
+        load_settings()
+    monkeypatch.setenv("DISCOUNTZ_MELI_CLIENT_SECRET", "m3liS3cret")
+    s = load_settings()
+    assert s.meli_client_id == "1234567890"
+    assert s.meli_client_secret is not None
+    assert s.meli_client_secret.get_secret_value() == "m3liS3cret"
+    assert "m3liS3cret" not in repr(s)
 
 
 def test_crawl_section_must_name_a_known_source(tmp_path: Path) -> None:

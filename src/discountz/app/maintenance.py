@@ -24,6 +24,7 @@ GLITCH_RECLASS = timedelta(days=7)
 CATALOG_UNSEEN = timedelta(days=30)
 CHANNEL_POSTS_KEEP = timedelta(days=7)  # ventana de duplicados (24 h) más margen para el resumen
 OFFER_LOG_KEEP = timedelta(days=7)  # tope del día, promociones de 24 h y resumen de la noche
+EAN_LOOKUP_KEEP = timedelta(days=30)  # un EAN buscado no se repite en ese plazo (ADR 0018)
 MAINTENANCE_AT = time(3, 0)
 SUMMARY_AT = time(8, 0)
 TOKEN_WARN_DAYS = 14
@@ -78,6 +79,7 @@ def run_maintenance(
     retention += db.delete_unseen_catalog_items(conn, CATALOG_UNSEEN)
     retention += db.delete_old_channel_posts(conn, now - CHANNEL_POSTS_KEEP)
     retention += db.delete_old_offer_log(conn, now - OFFER_LOG_KEEP)
+    retention += db.delete_old_ean_lookups(conn, now - EAN_LOOKUP_KEEP)
     size = db.db_size(conn) if db_bytes is None else db_bytes
     week = local(now).strftime("%G-W%V")
     listings_pruned = segments_pruned = 0

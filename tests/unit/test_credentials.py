@@ -23,6 +23,8 @@ BASE_ENV = {
     "DISCOUNTZ_TELEGRAM_OWNER_ID": "2",
 }
 EBAY_VARS = ("DISCOUNTZ_EBAY_APP_ID", "DISCOUNTZ_EBAY_CERT_ID")
+MELI_VARS = ("DISCOUNTZ_MELI_CLIENT_ID", "DISCOUNTZ_MELI_CLIENT_SECRET")
+MELI = {"DISCOUNTZ_MELI_CLIENT_ID": "1234567890", "DISCOUNTZ_MELI_CLIENT_SECRET": "m3liS3cret"}
 WALMART = (
     "DISCOUNTZ_WALMART_CONSUMER_ID",
     "DISCOUNTZ_WALMART_KEY_VERSION",
@@ -45,7 +47,7 @@ def pem(key: rsa.RSAPrivateKey) -> str:
 
 
 def settings(monkeypatch: pytest.MonkeyPatch, **extra: str) -> Settings:
-    for k in (*WALMART, "DISCOUNTZ_BESTBUY_API_KEY", *EBAY_VARS):
+    for k in (*WALMART, "DISCOUNTZ_BESTBUY_API_KEY", *EBAY_VARS, *MELI_VARS):
         monkeypatch.delenv(k, raising=False)
     for k, v in {**BASE_ENV, **extra}.items():
         monkeypatch.setenv(k, v)
@@ -129,10 +131,12 @@ def test_repr_hides_secrets(monkeypatch: pytest.MonkeyPatch, rsa_key: rsa.RSAPri
         DISCOUNTZ_WALMART_KEY_VERSION="1",
         DISCOUNTZ_WALMART_PRIVATE_KEY=key,
         DISCOUNTZ_WALMART_PUBLISHER_ID="pub9",
+        **MELI,
     )
     for text in (repr(s), repr(EnvCredentials(s)), str(EnvCredentials(s))):
         assert "sup3rsecret" not in text
         assert "PRIVATE KEY" not in text
+        assert "m3liS3cret" not in text
 
 
 def test_empty_env_values_mean_absent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,3 +218,18 @@ def test_blank_woot_key_means_no_woot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DISCOUNTZ_WOOT_API_KEY", " ")
     with pytest.raises(CredentialUnavailable):
         EnvCredentials(Settings()).bearer("woot")  # type: ignore[call-arg]
+
+
+def test_meli_id_and_secret_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    creds = EnvCredentials(settings(monkeypatch, **MELI))
+    assert creds.public_id("mercadolibre") == "1234567890"
+    assert creds.bearer("mercadolibre").get_secret_value() == "m3liS3cret"
+    assert "mercadolibre=True" in repr(creds)
+
+
+def test_meli_missing_raises_credential_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    creds = EnvCredentials(settings(monkeypatch))
+    with pytest.raises(CredentialUnavailable):
+        creds.public_id("mercadolibre")
+    with pytest.raises(CredentialUnavailable):
+        creds.bearer("mercadolibre")

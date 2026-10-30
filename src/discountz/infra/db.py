@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -2037,6 +2037,103 @@ def save_topic(conn: psycopg.Connection, code: str, title: str, thread_id: int |
 
 
 # ───────────── Catálogo: retención y resumen diario (spec del rastreo §7.2 y §8)
+
+
+# ───────────── Fuentes sembradas con EAN (spec de Mercado Libre §1.3, ADR 0018)
+
+
+@dataclass(frozen=True, slots=True)
+class EanSeed:
+    ean: str
+    topic: str  # el de la fila vista más recientemente en las demás tiendas
+
+
+@dataclass(frozen=True, slots=True)
+class TrackedItem:
+    external_id: str
+    ean: str | None
+    topic: str
+
+
+def ean_seeds(
+    conn: psycopg.Connection, source: str, topics: Sequence[str], min_minor: int, limit: int
+) -> list[EanSeed]:
+    """EAN en pesos de las demás tiendas que `source` no sigue ni buscó, del más caro al más barato.
+
+    Si el EAN está en varias tiendas, mandan el tema y el precio de la fila vista más
+    recientemente. Lo buscado vence con el mantenimiento (`delete_old_ean_lookups`).
+    """
+    rows = conn.execute(
+        """SELECT ean, topic FROM (
+             SELECT DISTINCT ON (c.ean) c.ean, c.topic, c.price_minor
+               FROM discountz.catalog_item c
+              WHERE c.source <> %(src)s AND c.currency = 'COP' AND c.ean IS NOT NULL
+                AND c.topic = ANY(%(topics)s::text[]) AND c.price_minor >= %(min)s
+                AND NOT EXISTS (SELECT 1 FROM discountz.catalog_item m
+                                 WHERE m.source = %(src)s AND m.ean = c.ean)
+                AND NOT EXISTS (SELECT 1 FROM discountz.ean_lookup l
+                                 WHERE l.source = %(src)s AND l.ean = c.ean)
+              ORDER BY c.ean, c.last_seen_at DESC) s
+            ORDER BY price_minor DESC, ean
+            LIMIT %(limit)s""",
+        {"src": source, "topics": list(topics), "min": min_minor, "limit": limit},
+    ).fetchall()
+    return [EanSeed(r[0], r[1]) for r in rows]
+
+
+def record_ean_lookups(
+    conn: psycopg.Connection,
+    source: str,
+    results: Sequence[tuple[str, str | None]],
+    now: datetime,
+) -> None:
+    """Anota cada EAN buscado con el producto hallado (o ninguno); el plazo vuelve a empezar."""
+    if not results:
+        return
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO discountz.ean_lookup (source, ean, checked_at, external_id)
+               VALUES (%s, %s, %s, %s)
+               ON CONFLICT (source, ean) DO UPDATE
+                 SET checked_at = EXCLUDED.checked_at, external_id = EXCLUDED.external_id""",
+            [(source, ean, now, found) for ean, found in results],
+        )
+
+
+def catalog_refresh_items(
+    conn: psycopg.Connection,
+    source: str,
+    before: datetime,
+    limit: int,
+    skip_topics: Sequence[str] = (),
+) -> list[TrackedItem]:
+    """Lo seguido que no se pide desde `before`, primero lo pedido hace más tiempo."""
+    rows = conn.execute(
+        """SELECT external_id, ean, topic FROM discountz.catalog_item
+            WHERE source = %s AND coalesce(checked_at, last_seen_at) < %s
+              AND topic <> ALL(%s::text[])
+            ORDER BY coalesce(checked_at, last_seen_at), external_id
+            LIMIT %s""",
+        (source, before, list(skip_topics), limit),
+    ).fetchall()
+    return [TrackedItem(r[0], r[1], r[2]) for r in rows]
+
+
+def mark_catalog_checked(
+    conn: psycopg.Connection, source: str, external_ids: Sequence[str], now: datetime
+) -> None:
+    """Marca la lectura de lo seguido, haya dado precio o no (`last_seen_at` no cambia)."""
+    if not external_ids:
+        return
+    conn.execute(
+        """UPDATE discountz.catalog_item SET checked_at = %s
+            WHERE source = %s AND external_id = ANY(%s)""",
+        (now, source, list(external_ids)),
+    )
+
+
+def delete_old_ean_lookups(conn: psycopg.Connection, before: datetime) -> int:
+    return _delete_batched(conn, "ean_lookup", "checked_at < %s", (before,))
 
 
 def delete_unseen_catalog_items(conn: psycopg.Connection, unseen: timedelta) -> int:

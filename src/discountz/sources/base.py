@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import SecretStr
 
@@ -33,6 +33,7 @@ __all__ = [
     "ChannelSource",
     "CrawlSource",
     "CredentialStore",
+    "EanCatalogSource",
     "ExtractionPath",
     "ListingFailed",
     "ListingFound",
@@ -210,6 +211,18 @@ class CatalogSource(Protocol):
 
 class CrawlSource(Source, CatalogSource, Protocol):
     """Fuente que se puede rastrear: ficha y búsqueda de la v1 más el catálogo."""
+
+
+@runtime_checkable
+class EanCatalogSource(CrawlSource, Protocol):
+    """Fuente sin recorrido propio: su catálogo se siembra con los EAN de las demás tiendas.
+
+    El rastreo relee lo que ya sigue y busca EAN nuevos (spec de Mercado Libre §1.2 y §1.3).
+    """
+
+    def find_by_ean(self, ctx: SourceContext, ean: str) -> str | None:
+        """El id del producto con ese EAN en la fuente, o `None` si no lo tiene."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
