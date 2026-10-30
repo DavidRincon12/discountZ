@@ -108,6 +108,17 @@ def test_ean_seed_window_goes_on_after_the_mark(db: psycopg.Connection) -> None:
     assert _window(db, second.after, limit=2) == SeedWindow((), None)  # se acabó el catálogo
 
 
+def test_ean_seed_window_breaks_price_ties_by_id(db: psycopg.Connection) -> None:
+    for i, ean in enumerate((A, B, C)):
+        _item(db, "exito", str(i), ean=ean)  # mismo precio: manda el id, de mayor a menor
+    after: SeedMark | None = None
+    for ext, ean in (("2", C), ("1", B), ("0", A)):
+        window = _window(db, after, limit=1)
+        assert window == SeedWindow((EanSeed(ean, "tecnologia"),), _mark(db, "exito", ext))
+        after = window.after
+    assert _window(db, after, limit=1) == SeedWindow((), None)
+
+
 def test_ean_seed_window_counts_skipped_rows(db: psycopg.Connection) -> None:
     for i, ean in enumerate((A, B, C)):
         _item(db, "exito", str(i), ean=ean, price=2_000_000 - i * 100_000)
