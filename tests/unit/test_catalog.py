@@ -341,16 +341,16 @@ def test_cycle_quota_does_not_trip_breaker() -> None:
 
 
 def test_alkosto_pauses_with_the_db_near_full() -> None:
-    from discountz.app.crawl import PAUSED_AT_450
+    from discountz.app.crawl import PAUSED_BY_SIZE
 
-    assert "alkosto" in PAUSED_AT_450
+    assert "alkosto" in PAUSED_BY_SIZE
 
 
 def test_jumbo_pauses_with_the_db_near_full_but_not_pepeganga() -> None:
-    from discountz.app.crawl import PAUSED_AT_450
+    from discountz.app.crawl import PAUSED_BY_SIZE
 
-    assert "jumbo" in PAUSED_AT_450
-    assert "pepeganga" not in PAUSED_AT_450
+    assert "jumbo" in PAUSED_BY_SIZE
+    assert "pepeganga" not in PAUSED_BY_SIZE
 
 
 def test_split_price_band_at_the_geometric_midpoint() -> None:

@@ -1631,6 +1631,7 @@ class BotState:
     last_summary_on: date | None
     discovery_paused: bool
     dispatch_token_expires_on: date | None
+    crawl_pace_bp: int = 10_000  # ritmo del rastreo según el egress (ADR 0021)
 
 
 def bot_state(conn: psycopg.Connection) -> BotState:
@@ -1638,10 +1639,15 @@ def bot_state(conn: psycopg.Connection) -> BotState:
         _one(
             conn,
             """SELECT last_maintenance_on, last_summary_on, discovery_paused,
-                      dispatch_token_expires_on FROM discountz.bot_state WHERE id = 1""",
+                      dispatch_token_expires_on, crawl_pace_bp
+                 FROM discountz.bot_state WHERE id = 1""",
         )
     )
-    return BotState(row[0], row[1], bool(row[2]), row[3])
+    return BotState(row[0], row[1], bool(row[2]), row[3], int(row[4]))
+
+
+def set_crawl_pace(conn: psycopg.Connection, pace_bp: int) -> None:
+    conn.execute("UPDATE discountz.bot_state SET crawl_pace_bp = %s WHERE id = 1", (pace_bp,))
 
 
 def set_maintenance_state(
@@ -2232,7 +2238,7 @@ def delete_unseen_catalog_items(conn: psycopg.Connection, unseen: timedelta) -> 
     """Productos que el rastreo dejó de ver (sin stock o retirados).
 
     El plazo cuenta desde la última corrida de su tienda, no desde hoy: una tienda pausada
-    (450 MB, breaker, rastreo apagado) conserva su catálogo. Por lotes: con el de eBay
+    (480 MB, breaker, rastreo apagado) conserva su catálogo. Por lotes: con el de eBay
     (~150 mil filas) un solo `DELETE` pasaba del `statement_timeout`.
     """
     # Tienda por tienda, con su plazo como constante: la subconsulta por fila obligaba a leer

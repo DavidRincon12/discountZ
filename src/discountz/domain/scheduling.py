@@ -76,6 +76,11 @@ class CrawlBudget:
         )
 
 
+def paced_cap(cap: int, pace_bp: int) -> int:
+    """Tope de una corrida con el ritmo del egress (ADR 0021); nunca apaga una corrida con tope."""
+    return 0 if cap <= 0 else max(1, cap * pace_bp // 10_000)
+
+
 @dataclass(frozen=True, slots=True)
 class Event:
     name: str
