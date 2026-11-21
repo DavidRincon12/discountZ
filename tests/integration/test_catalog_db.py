@@ -59,10 +59,23 @@ def test_save_page_upserts_and_logs_only_changes(db: psycopg.Connection) -> None
         "SELECT last_changed_at FROM discountz.catalog_item WHERE external_id = '2'"
     ).fetchone()
     assert changed == (T + timedelta(hours=1),)
-    seen = db.execute(
-        "SELECT last_seen_at FROM discountz.catalog_item WHERE external_id = '1'"
-    ).fetchone()
-    assert seen == (T + timedelta(hours=1),)
+
+
+def test_save_page_moves_last_seen_at_most_once_a_day(db: psycopg.Connection) -> None:
+    """Mover `last_seen_at` en cada lectura deja basura en los 7 índices (spec BD autorregulada)."""
+
+    def seen() -> datetime:
+        r = db.execute("SELECT last_seen_at FROM discountz.catalog_item").fetchone()
+        assert r is not None
+        return r[0]  # type: ignore[no-any-return]
+
+    repo.save_catalog_page(db, "exito", [row("1", 99_900)], T)
+    assert seen() == T
+    repo.save_catalog_page(db, "exito", [row("1", 99_900, reads=2)], T + timedelta(hours=3))
+    assert seen() == T
+    later = T + timedelta(hours=25)
+    repo.save_catalog_page(db, "exito", [row("1", 99_900, reads=3)], later)
+    assert seen() == later
 
 
 def test_hot_ids_ordered_by_recent_change(db: psycopg.Connection) -> None:

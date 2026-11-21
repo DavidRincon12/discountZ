@@ -189,10 +189,10 @@ def test_found_product_without_sellers_is_not_searched_again(db: psycopg.Connect
 
 
 def test_refresh_reads_tracked_items_and_marks_checked(db: psycopg.Connection) -> None:
-    store_row(db, ML, "MCO1", A, price=1_000_000, at=T - 7 * HOUR)
-    store_row(db, ML, "MCO2", B, topic="hogar", price=900_000, at=T - 7 * HOUR)
-    store_row(db, ML, "MCO3", C, topic="tema_viejo", price=800_000, at=T - 7 * HOUR)
-    store_row(db, ML, "MCO4", D, topic="belleza", price=700_000, at=T - 7 * HOUR)  # apagado
+    store_row(db, ML, "MCO1", A, price=1_000_000, at=T - 25 * HOUR)
+    store_row(db, ML, "MCO2", B, topic="hogar", price=900_000, at=T - 25 * HOUR)
+    store_row(db, ML, "MCO3", C, topic="tema_viejo", price=800_000, at=T - 25 * HOUR)
+    store_row(db, ML, "MCO4", D, topic="belleza", price=700_000, at=T - 25 * HOUR)  # apagado
     hot = {"MCO1": meli("MCO1", 1_000_000), "MCO3": meli("MCO3", 800_000)}
     src = FakeEanCatalog({}, hot=hot)
     d, transport = deps(db, src, Clock())
@@ -204,9 +204,9 @@ def test_refresh_reads_tracked_items_and_marks_checked(db: psycopg.Connection) -
     ).fetchall()
     assert rows == [
         ("MCO1", A, "tecnologia", T, T),
-        ("MCO2", B, "hogar", T - 7 * HOUR, T),  # sin vendedores: marcada, no vista
+        ("MCO2", B, "hogar", T - 25 * HOUR, T),  # sin vendedores: marcada, no vista
         ("MCO3", C, "otros", T, T),  # tema que ya no existe: el de la ruta
-        ("MCO4", D, "belleza", T - 7 * HOUR, None),
+        ("MCO4", D, "belleza", T - 25 * HOUR, None),
     ]
     assert transport.kinds().count("items") == 3
 

@@ -1793,6 +1793,7 @@ def is_unique_violation(exc: BaseException) -> bool:
 
 # ───────────── Catálogo (spec del rastreo §7.1)
 
+CATALOG_SEEN_STEP = timedelta(days=1)  # paso de `last_seen_at` (la retención cuenta en días)
 _CAT_COLS = (
     "price_minor, usual_minor, min_seen_minor, first_seen_at, stable_since, reads_at_price,"
     " last_changed_at, last_alert_at, last_alert_minor, min_seen_at"
@@ -1865,7 +1866,9 @@ def save_catalog_page(
                     stable_since = EXCLUDED.stable_since,
                     reads_at_price = EXCLUDED.reads_at_price,
                     last_changed_at = EXCLUDED.last_changed_at,
-                    last_seen_at = greatest(catalog_item.last_seen_at, EXCLUDED.last_seen_at)""",
+                    last_seen_at = CASE  -- una vez al día: si no, ninguna escritura es HOT
+                        WHEN EXCLUDED.last_seen_at >= catalog_item.last_seen_at + %s
+                        THEN EXCLUDED.last_seen_at ELSE catalog_item.last_seen_at END""",
             [
                 (
                     source,
@@ -1885,6 +1888,7 @@ def save_catalog_page(
                     r.state.min_seen_at,
                     now,
                     r.model_key,
+                    CATALOG_SEEN_STEP,
                 )
                 for r in rows
             ],
