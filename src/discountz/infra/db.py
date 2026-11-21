@@ -1799,6 +1799,7 @@ def load_catalog_states(
         f"""SELECT external_id, {_CAT_COLS} FROM discountz.catalog_item
              WHERE source = %s AND external_id = ANY(%s)""",
         (source, list(external_ids)),
+        binary=True,  # la consulta que más egress da: en binario cada fila pesa ~40 % menos
     ).fetchall()
     return {r[0]: CatalogState(*r[1:]) for r in rows}
 

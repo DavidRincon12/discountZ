@@ -69,6 +69,21 @@ class ChannelsResult:
     held: int = 0  # pasado el tope del día: esperan el resumen de la noche
 
 
+@dataclass(slots=True)
+class _Recent:
+    """Originales de la ventana de duplicados, leídos solo cuando un post nuevo los necesita: la
+    mayoría de los ciclos no trae ninguno y releerlos era egress de más (ADR 0020)."""
+
+    conn: psycopg.Connection
+    since: datetime
+    posts: list[db.RecentPost] | None = None
+
+    def get(self) -> list[db.RecentPost]:
+        if self.posts is None:
+            self.posts = list(db.recent_channel_posts(self.conn, self.since))
+        return self.posts
+
+
 @dataclass(frozen=True, slots=True)
 class _Step:
     """Lo que comparten todos los canales en una pasada del ciclo."""
@@ -76,7 +91,7 @@ class _Step:
     conn: psycopg.Connection
     now: datetime
     topics: Topics
-    recent: list[db.RecentPost]  # originales de la ventana de duplicados; crece con cada una
+    recent: _Recent  # originales de la ventana de duplicados; crece con cada una
     silent: bool
     min_price: Mapping[Currency, int]  # lo que llega por casillero cuesta al menos esto
     daily_cards: int  # tarjetas por canal al día
@@ -143,7 +158,7 @@ def run_channels(
         conn,
         now,
         topics,
-        list(db.recent_channel_posts(conn, now - RECENT_WINDOW)),
+        _Recent(conn, now - RECENT_WINDOW),
         is_quiet(now, params.quiet_start, params.quiet_end),
         params.glob.min_price,
         params.daily_cards,
@@ -368,7 +383,7 @@ def _handle(
         _mark(step, code, post, topic)  # solo queda vista
         tally.skipped += 1
         return
-    dup = find_duplicate(post, step.recent)
+    dup = find_duplicate(post, step.recent.get())
     title_norm = normalize_title(post.title)
     inserted = db.insert_channel_post(
         conn,
@@ -409,7 +424,7 @@ def _handle(
     else:
         tally.held += 1
     # Retenida también es la original: la misma oferta en otro canal es un duplicado.
-    step.recent.append(
+    step.recent.get().append(
         db.RecentPost(
             f"{code}:{post.post_id}",
             title_norm,
