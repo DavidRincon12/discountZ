@@ -93,14 +93,14 @@ def test_glitch_older_than_7_days_becomes_open(db: psycopg.Connection) -> None:
 
 
 def test_size_guard_pauses_discovery(db: psycopg.Connection) -> None:
-    report = run_maintenance(db, T, load_params(), db_bytes=455 * MB)
+    report = run_maintenance(db, T, load_params(), db_bytes=485 * MB)
     assert report.discovery_paused
     paused = db.execute("SELECT discovery_paused FROM discountz.bot_state").fetchone()
     assert paused == (True,)
     urgent = db.execute(
         "SELECT body_html FROM discountz.outbox WHERE purpose = 'system'"
     ).fetchall()
-    assert any("450" in r[0] for r in urgent)
+    assert any("480" in r[0] for r in urgent)
     run_maintenance(db, T + DAY, load_params(), db_bytes=100 * MB)
     paused = db.execute("SELECT discovery_paused FROM discountz.bot_state").fetchone()
     assert paused == (False,)
@@ -223,6 +223,22 @@ def test_catalog_unseen_30d_is_deleted(db: psycopg.Connection) -> None:
     assert items == [("1",)]
 
 
+def test_from_400_mb_unseen_catalog_goes_at_14_days(db: psycopg.Connection) -> None:
+    """Escalón de limpieza: antes de pausar nada, se borra antes lo que el rastreo dejó de ver."""
+    _crawled(db, "exito", 0)
+    _item(db, "1", 10)
+    _item(db, "2", 15)
+    report = run_maintenance(db, T, load_params(), db_bytes=420 * MB)
+    items = db.execute("SELECT external_id FROM discountz.catalog_item").fetchall()
+    assert items == [("1",)]
+    assert not report.discovery_paused
+
+
+def test_455_mb_no_longer_pauses_discovery(db: psycopg.Connection) -> None:
+    report = run_maintenance(db, T, load_params(), db_bytes=455 * MB)
+    assert not report.discovery_paused
+
+
 def test_unseen_items_of_a_paused_crawl_are_kept(db: psycopg.Connection) -> None:
     """Una tienda pausada (450 MB, breaker, rastreo apagado) no pierde su histórico a los 30 d."""
     _crawled(db, "carulla", 20)
@@ -234,8 +250,8 @@ def test_unseen_items_of_a_paused_crawl_are_kept(db: psycopg.Connection) -> None
     assert items == [("1",), ("3",)]
 
 
-def test_size_guard_450_pauses_exito_carulla_crawl(db: psycopg.Connection) -> None:
-    run_maintenance(db, T, load_params(), db_bytes=455 * MB)
+def test_size_guard_480_pauses_exito_carulla_crawl(db: psycopg.Connection) -> None:
+    run_maintenance(db, T, load_params(), db_bytes=485 * MB)
     for code, expected in (("exito", "disabled"), ("carulla", "disabled"), ("olimpica", "ok")):
         src = FakeCatalog({"all": [page_of(1)]}, code=code)
         d, _ = deps(db, src, Clock())
@@ -243,7 +259,7 @@ def test_size_guard_450_pauses_exito_carulla_crawl(db: psycopg.Connection) -> No
     notice = db.execute(
         "SELECT body_html FROM discountz.outbox WHERE purpose = 'system' AND priority = 0"
     ).fetchone()
-    assert notice is not None and "Éxito y Carulla" in notice[0]
+    assert notice is not None and "Éxito, Alkosto, eBay y Jumbo" in notice[0]
 
 
 def test_daily_summary_has_catalog_lines(db: psycopg.Connection) -> None:
@@ -412,7 +428,9 @@ def test_high_egress_warns_in_telegram_and_moves_the_mark(
     ).fetchall()
     (body,) = [r[0] for r in rows]
     assert "Tráfico de la BD" in body and "324 MB" in body
+    assert "40 %" in body  # el rastreo baja su ritmo solo: 10000 × 132 ÷ 324
     assert repo.egress_mark(db) == (2_001_000, T)
+    assert repo.bot_state(db).crawl_pace_bp == 4074
 
 
 def test_normal_egress_moves_the_mark_without_warning(
@@ -423,4 +441,5 @@ def test_normal_egress_moves_the_mark_without_warning(
     report = run_maintenance(db, T, load_params(), db_bytes=10 * MB)
     assert report.egress_mb == 81
     assert db.execute("SELECT count(*) FROM discountz.outbox").fetchone() == (0,)
+    assert repo.bot_state(db).crawl_pace_bp == 10000  # ya estaba al 100 %
     assert repo.egress_mark(db) == (501_000, T)

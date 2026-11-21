@@ -668,6 +668,17 @@ def test_crawl_spreads_the_daily_budget_over_the_hours_left(db: psycopg.Connecti
     assert len(transport.urls) == 10
 
 
+def test_crawl_slows_down_with_the_egress_pace(db: psycopg.Connection) -> None:
+    """Con el ritmo al 50 % (ADR 0021), las 10 peticiones de la corrida pasan a 5."""
+    repo.save_cursor(db, replace(repo.get_cursor(db, "exito"), day=T.date(), day_requests=99_880))
+    repo.set_crawl_pace(db, 5_000)
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(200)]})
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.requests == 5
+    assert len(transport.urls) == 5
+
+
 def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
     seed_history(db, "123", 199_900)
     src = FakeCatalog({"C:/1/": [[obs("123", 119_900)]]}, offers={"123": offer("123", 119_900)})

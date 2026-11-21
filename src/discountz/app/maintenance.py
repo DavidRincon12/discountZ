@@ -18,10 +18,11 @@ from discountz.infra import db
 MB = 1024 * 1024
 WARN_BYTES = 300 * MB
 PRUNE_BYTES = 400 * MB
-PAUSE_BYTES = 450 * MB
+PAUSE_BYTES = 480 * MB  # último recurso (ADR 0021): antes van los escalones de limpieza
 SEGMENT_KEEP = timedelta(days=400)
 GLITCH_RECLASS = timedelta(days=7)
 CATALOG_UNSEEN = timedelta(days=30)
+CATALOG_UNSEEN_TIGHT = timedelta(days=14)  # desde PRUNE_BYTES
 CHANNEL_POSTS_KEEP = timedelta(days=7)  # ventana de duplicados (24 h) más margen para el resumen
 OFFER_LOG_KEEP = timedelta(days=7)  # tope del día, promociones de 24 h y resumen de la noche
 EAN_LOOKUP_KEEP = timedelta(days=30)  # un EAN buscado no se repite en ese plazo (ADR 0018)
@@ -34,6 +35,8 @@ SYSTEM_TTL = timedelta(hours=48)
 EGRESS_QUOTA_MB = 5 * 1024
 BYTES_PER_ROW = 170
 EGRESS_MIN_SPAN = timedelta(hours=12)
+EGRESS_TARGET_MB = EGRESS_QUOTA_MB * 8 // 10 // 31  # 132 MB al día: 80 % del plan en 31 días
+PACE_MIN_BP = 1000
 _HEALTH = {"healthy": "sana", "degraded": "degradada", "blocked": "bloqueada", "broken": "rota"}
 
 
@@ -65,6 +68,13 @@ def egress_too_high(mb_day: int) -> bool:
     return mb_day * 31 * 10 >= EGRESS_QUOTA_MB * 8
 
 
+def next_pace(pace_bp: int, mb_day: int | None) -> int:
+    """Ritmo del rastreo para mañana: lo lleva hacia la meta de egress en proporción."""
+    if mb_day is None:
+        return pace_bp
+    return max(PACE_MIN_BP, min(10_000, pace_bp * EGRESS_TARGET_MB // max(mb_day, 1)))
+
+
 def _measure_egress(conn: psycopg.Connection, now: datetime) -> int | None:
     total = db.select_rows_total(conn)
     if total is None:
@@ -72,18 +82,20 @@ def _measure_egress(conn: psycopg.Connection, now: datetime) -> int | None:
     prev, prev_at = db.egress_mark(conn)
     mb_day = egress_mb_per_day(prev, prev_at, total, now)
     with conn.transaction():
+        pace = next_pace(db.bot_state(conn).crawl_pace_bp, mb_day)
         if mb_day is not None and egress_too_high(mb_day):
             month = mb_day * 31 / 1024
             _notice(
                 conn,
                 f"⚠️ Tráfico de la BD alto: ~{mb_day} MB al día (~{month:.1f} GB al mes; el plan "
-                "gratis de Supabase da 5). Pausa el rastreo (DISCOUNTZ_RASTREO=false) o apaga "
-                "fuentes antes de que Supabase restrinja el proyecto.",
+                f"gratis de Supabase da 5). Bajo el rastreo al {pace // 100} % de su ritmo; "
+                "vuelve a subir solo cuando el tráfico baje.",
                 f"egress:{local(now).date().isoformat()}",
                 now,
                 0,
             )
         db.set_egress_mark(conn, total, now)
+        db.set_crawl_pace(conn, pace)
     return mb_day
 
 
@@ -106,7 +118,7 @@ def _notice(conn: psycopg.Connection, text: str, key: str, now: datetime, priori
 def run_maintenance(
     conn: psycopg.Connection, now: datetime, params: AppParams, *, db_bytes: int | None = None
 ) -> MaintenanceReport:
-    """Los 4 pasos del spec §2.4 en orden y las guardas de 300/400/450 MB.
+    """Los 4 pasos del spec §2.4 en orden y las guardas de 300/400/480 MB (ADR 0021).
 
     `db_bytes` permite simular el tamaño en pruebas; por defecto se mide.
     """
@@ -120,11 +132,12 @@ def run_maintenance(
     retention += db.prune_discoveries(conn, now - timedelta(days=120), now - timedelta(days=365))
     with conn.transaction():
         retention += db.expire_auto_watches(conn, now)
-    retention += db.delete_unseen_catalog_items(conn, CATALOG_UNSEEN)
+    size = db.db_size(conn) if db_bytes is None else db_bytes
+    unseen = CATALOG_UNSEEN_TIGHT if size >= PRUNE_BYTES else CATALOG_UNSEEN
+    retention += db.delete_unseen_catalog_items(conn, unseen)
     retention += db.delete_old_channel_posts(conn, now - CHANNEL_POSTS_KEEP)
     retention += db.delete_old_offer_log(conn, now - OFFER_LOG_KEEP)
     retention += db.delete_old_ean_lookups(conn, now - EAN_LOOKUP_KEEP)
-    size = db.db_size(conn) if db_bytes is None else db_bytes
     week = local(now).strftime("%G-W%V")
     listings_pruned = segments_pruned = 0
     if size >= WARN_BYTES:
@@ -137,16 +150,16 @@ def run_maintenance(
         paused = True
         _notice(
             conn,
-            f"⚠️ BD en {size // MB} MB (≥ 450 de 500): pauso las búsquedas y el rastreo de "
-            "Éxito y Carulla; siguen los seguimientos.",
-            f"db450:{local(now).date().isoformat()}",
+            f"⚠️ BD en {size // MB} MB (≥ 480 de 500): pauso las búsquedas y el rastreo de "
+            "Éxito, Alkosto, eBay y Jumbo; siguen los seguimientos.",
+            f"db480:{local(now).date().isoformat()}",
             now,
             0,
         )
     elif size < PRUNE_BYTES:
         paused = False  # por debajo de 400 MB se reanuda el descubrimiento
     else:
-        paused = db.bot_state(conn).discovery_paused  # entre 400 y 450 se mantiene
+        paused = db.bot_state(conn).discovery_paused  # entre 400 y 480 se mantiene
     with conn.transaction():
         db.set_maintenance_state(conn, local(now).date(), size, paused)
     egress = _measure_egress(conn, now)

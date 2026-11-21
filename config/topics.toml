@@ -81,7 +81,7 @@ category = "otros"
 
 [topics.ferreteria]
 title = "🔧 Ferretería y autos"
-mode = "card"
+mode = "off"  # herramientas de Homecenter y canales: no le sirven a David (2026-11-21)
 t_bp = 2000
 g_bp = 6000
 category = "otros"

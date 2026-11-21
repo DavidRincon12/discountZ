@@ -55,7 +55,7 @@ from discountz.domain.health import BreakerEvent, BreakerState, breaker_transiti
 from discountz.domain.interests import Interest, match_interest
 from discountz.domain.model import AlertKind, ListingRef, Maturity, Offer, SellerClass
 from discountz.domain.money import Currency, format_money
-from discountz.domain.scheduling import CrawlBudget
+from discountz.domain.scheduling import CrawlBudget, paced_cap
 from discountz.domain.segments import Observation, SegmentStatus, gap_h
 from discountz.domain.topics import TopicParams, assign_topic, crawl_wanted
 from discountz.infra import db
@@ -100,9 +100,9 @@ SEED_CHUNK = 20  # lecturas que se guardan juntas (y se conservan si la corrida 
 SEED_WINDOW = 200  # filas del índice de semillas por consulta (ADR 0019)
 SEED_WINDOWS = 25  # ventanas por corrida, como máximo
 
-# Con la BD en ≥ 450 MB el mantenimiento pausa el descubrimiento: también el rastreo de las
+# Con la BD en ≥ 480 MB el mantenimiento pausa el descubrimiento: también el rastreo de las
 # tiendas más grandes (spec del rastreo §7.2).
-PAUSED_AT_450 = frozenset({"exito", "carulla", "ebay_us", "alkosto", "jumbo"})
+PAUSED_BY_SIZE = frozenset({"exito", "carulla", "ebay_us", "alkosto", "jumbo"})
 CrawlStatus = Literal["ok", "partial", "blocked", "skipped_locked", "skipped_schema", "disabled"]
 
 
@@ -181,7 +181,8 @@ class _Run:
         if self.cursor.day != now.date():
             self.cursor = replace(self.cursor, day=now.date(), day_requests=0)
         self.day_base = self.cursor.day_requests
-        self.cap = deps.budget.run_cap(self.day_base, now.hour)
+        pace = db.bot_state(self.conn).crawl_pace_bp  # el mantenimiento lo ajusta al egress
+        self.cap = paced_cap(deps.budget.run_cap(self.day_base, now.hour), pace)
         self.http = PacedClient(
             deps.http,
             deps.budget.paced(self.code, max(self.cap, 1)),
@@ -943,7 +944,7 @@ def _run_crawl(deps: CrawlDeps, now: datetime, end: float) -> CrawlResult:
     if db.schema_version(deps.conn) != db.SCHEMA_VERSION:  # el ciclo ya avisa de la migración
         return _skipped(code, "skipped_schema")
     breaker = db.load_breakers(deps.conn).get(code)
-    if breaker is None or (code in PAUSED_AT_450 and db.bot_state(deps.conn).discovery_paused):
+    if breaker is None or (code in PAUSED_BY_SIZE and db.bot_state(deps.conn).discovery_paused):
         return _skipped(code, "disabled")
     if effective_state(breaker, now) == "open":
         return _skipped(code, "blocked")
