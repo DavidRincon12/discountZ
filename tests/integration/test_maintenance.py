@@ -9,9 +9,9 @@ from datetime import date, timedelta
 import psycopg
 import pytest
 
+from discountz.app import cycle
 from discountz.app.collect import Collector, SourceRun
 from discountz.app.crawl import run_crawl
-from discountz.app import cycle
 from discountz.app.cycle import _daily
 from discountz.app.held import Slot, admit
 from discountz.app.maintenance import (
@@ -391,3 +391,36 @@ def test_daily_sends_the_digest_even_if_maintenance_fails(
     _daily(db, nine, load_params())
     purposes = [r[0] for r in db.execute("SELECT purpose FROM discountz.outbox").fetchall()]
     assert purposes == ["digest"]
+
+
+def test_without_pg_stat_statements_there_is_no_egress_estimate(db: psycopg.Connection) -> None:
+    assert repo.select_rows_total(db) is None  # la extensión no está en el Postgres de pruebas
+    report = run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert report.egress_mb is None
+    assert repo.egress_mark(db) == (None, None)
+
+
+def test_high_egress_warns_in_telegram_and_moves_the_mark(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.set_egress_mark(db, 1_000, T - DAY)
+    monkeypatch.setattr(repo, "select_rows_total", lambda conn: 2_001_000)
+    report = run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert report.egress_mb == 324
+    rows = db.execute(
+        "SELECT body_html FROM discountz.outbox WHERE purpose = 'system' AND priority = 0"
+    ).fetchall()
+    (body,) = [r[0] for r in rows]
+    assert "Tráfico de la BD" in body and "324 MB" in body
+    assert repo.egress_mark(db) == (2_001_000, T)
+
+
+def test_normal_egress_moves_the_mark_without_warning(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.set_egress_mark(db, 1_000, T - DAY)
+    monkeypatch.setattr(repo, "select_rows_total", lambda conn: 501_000)
+    report = run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert report.egress_mb == 81
+    assert db.execute("SELECT count(*) FROM discountz.outbox").fetchone() == (0,)
+    assert repo.egress_mark(db) == (501_000, T)

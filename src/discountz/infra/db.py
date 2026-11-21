@@ -1584,6 +1584,47 @@ def top_tables(conn: psycopg.Connection, n: int = 5) -> list[tuple[str, int]]:
     return [(str(r[0]), int(r[1])) for r in rows]
 
 
+def select_rows_total(conn: psycopg.Connection) -> int | None:
+    """Filas que devolvieron los `SELECT`/`WITH` del rol según `pg_stat_statements` (ADR 0020).
+
+    `None` sin la extensión o si no se puede leer (en Supabase vive en el esquema `extensions`).
+    """
+    row = _one(
+        conn,
+        """SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
+            WHERE e.extname = 'pg_stat_statements'""",
+    )
+    if row is None:
+        return None
+    query = sql.SQL(
+        r"""SELECT coalesce(sum(s.rows), 0) FROM {}.pg_stat_statements s
+             WHERE s.userid = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+               AND s.query ~* '^\s*(select|with)\M'"""
+    ).format(sql.Identifier(row[0]))
+    try:
+        with (
+            conn.transaction()
+        ):  # un error (sin `shared_preload_libraries`) no deja la conexión rota
+            got = conn.execute(query).fetchone()
+    except psycopg.Error:
+        return None
+    return None if got is None else int(got[0])
+
+
+def egress_mark(conn: psycopg.Connection) -> tuple[int | None, datetime | None]:
+    row = _required(
+        _one(conn, "SELECT select_rows_total, select_rows_at FROM discountz.bot_state WHERE id = 1")
+    )
+    return (None if row[0] is None else int(row[0]), row[1])
+
+
+def set_egress_mark(conn: psycopg.Connection, total: int, at: datetime) -> None:
+    conn.execute(
+        "UPDATE discountz.bot_state SET select_rows_total = %s, select_rows_at = %s WHERE id = 1",
+        (total, at),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class BotState:
     last_maintenance_on: date | None
