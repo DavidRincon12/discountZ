@@ -776,6 +776,21 @@ def test_held_digest_splits_into_messages_that_fit() -> None:
     assert all(b.startswith("<b>") for b in bodies[1:])  # cada uno dice de qué fuente sigue
 
 
+def test_held_digest_bodies_fit_the_outbox_html_limit() -> None:
+    # Enlaces largos (eBay, Woot): 4.096 visibles pasaban de los 8.000 de `outbox.body_html`.
+    href = "https://www.ebay.com/itm/" + "1" * 275
+    sources = ("exito", "ebay_us", "woot")
+    rows = [
+        _held(s, 1000, f'• <a href="{href}">{s} {i}</a> · <b>$1</b>', i)
+        for s in sources
+        for i in range(40)
+    ]
+    bodies = render_held_digest(rows, 8)
+    assert all(len(b) <= 8000 for b in bodies)
+    joined = "\n".join(bodies)
+    assert all(f"woot {i}<" in joined for i in range(40))
+
+
 def test_held_digest_of_one_offer_says_so_in_singular() -> None:
     (body,) = render_held_digest([_held("exito", 2000, "• x")], 8)
     assert body.startswith("🌙 <b>Resumen de la noche</b> · 1 oferta\n")

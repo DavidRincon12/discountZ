@@ -9,6 +9,7 @@ from datetime import date, timedelta
 import psycopg
 import pytest
 
+from discountz.app import cycle
 from discountz.app.collect import Collector, SourceRun
 from discountz.app.crawl import run_crawl
 from discountz.app.cycle import _daily
@@ -23,7 +24,7 @@ from discountz.app.maintenance import (
 from discountz.app.render import render_daily
 from discountz.config import Canary, load_params
 from discountz.domain.health import BreakerState
-from discountz.domain.model import AlertKind
+from discountz.domain.model import AlertKind, Maturity
 from discountz.domain.scheduling import Task
 from discountz.infra import db as repo
 from discountz.infra.http import FakeHttp, PacedClient
@@ -349,3 +350,77 @@ def test_daily_step_sends_the_held_digest_after_21h(db: psycopg.Connection) -> N
     _daily(db, nine, load_params())
     rows = db.execute("SELECT purpose, body_html FROM discountz.outbox").fetchall()
     assert [p for p, _ in rows] == ["digest"] and "• lonchera" in rows[0][1]
+
+
+def test_retention_keeps_queued_alerts_whose_outbox_expired(db: psycopg.Connection) -> None:
+    lid = _listing(db)
+    alert = repo.NewAlert(
+        lid,
+        None,
+        None,
+        AlertKind.GOOD_DEAL,
+        Maturity.MATURE,
+        1_000,
+        2_000,
+        5_000,
+        None,
+        (),
+        "new",
+        T - 40 * DAY,
+    )
+    alert_id = repo.insert_alert(db, alert)
+    assert alert_id is not None
+    out = repo.enqueue(db, "alert", "x", priority=2, dedup_key="a:1", now=T - 40 * DAY, ttl=DAY)
+    repo.mark_alerts_queued(db, [alert_id], out)
+    db.execute("UPDATE discountz.outbox SET created_at = %s", (T - 40 * DAY,))
+    run_maintenance(db, T, load_params(), db_bytes=10 * MB)  # antes: CheckViolation
+    row = db.execute("SELECT delivery, outbox_id FROM discountz.alert").fetchone()
+    assert row == ("queued", None)  # queda enviada: nunca vuelve a `new` (se reenviaría)
+
+
+def test_daily_sends_the_digest_even_if_maintenance_fails(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*_: object, **__: object) -> None:
+        raise psycopg.errors.CheckViolation("rota")
+
+    monkeypatch.setattr(cycle, "run_maintenance", broken)
+    repo.set_summary_on(db, T.date() + DAY)
+    admit(db, Slot("exito", "hogar", AlertKind.CATALOG_DROP, 2000), T, 0, "• lonchera")
+    nine = T.replace(hour=2, minute=10) + DAY  # 21:10 en Bogotá; el mantenimiento sigue debido
+    _daily(db, nine, load_params())
+    purposes = [r[0] for r in db.execute("SELECT purpose FROM discountz.outbox").fetchall()]
+    assert purposes == ["digest"]
+
+
+def test_without_pg_stat_statements_there_is_no_egress_estimate(db: psycopg.Connection) -> None:
+    assert repo.select_rows_total(db) is None  # la extensión no está en el Postgres de pruebas
+    report = run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert report.egress_mb is None
+    assert repo.egress_mark(db) == (None, None)
+
+
+def test_high_egress_warns_in_telegram_and_moves_the_mark(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.set_egress_mark(db, 1_000, T - DAY)
+    monkeypatch.setattr(repo, "select_rows_total", lambda conn: 2_001_000)
+    report = run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert report.egress_mb == 324
+    rows = db.execute(
+        "SELECT body_html FROM discountz.outbox WHERE purpose = 'system' AND priority = 0"
+    ).fetchall()
+    (body,) = [r[0] for r in rows]
+    assert "Tráfico de la BD" in body and "324 MB" in body
+    assert repo.egress_mark(db) == (2_001_000, T)
+
+
+def test_normal_egress_moves_the_mark_without_warning(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.set_egress_mark(db, 1_000, T - DAY)
+    monkeypatch.setattr(repo, "select_rows_total", lambda conn: 501_000)
+    report = run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert report.egress_mb == 81
+    assert db.execute("SELECT count(*) FROM discountz.outbox").fetchone() == (0,)
+    assert repo.egress_mark(db) == (501_000, T)

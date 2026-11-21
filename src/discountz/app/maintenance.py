@@ -29,6 +29,11 @@ MAINTENANCE_AT = time(3, 0)
 SUMMARY_AT = time(8, 0)
 TOKEN_WARN_DAYS = 14
 SYSTEM_TTL = timedelta(hours=48)
+# Egress (ADR 0020): el plan gratis da 5 GB al mes; 170 bytes por fila salió de 11,48 GB del
+# ciclo 28-oct/21-nov entre las filas de los SELECT del rol (`pg_stat_statements`).
+EGRESS_QUOTA_MB = 5 * 1024
+BYTES_PER_ROW = 170
+EGRESS_MIN_SPAN = timedelta(hours=12)
 _HEALTH = {"healthy": "sana", "degraded": "degradada", "blocked": "bloqueada", "broken": "rota"}
 
 
@@ -41,6 +46,45 @@ class MaintenanceReport:
     segments_pruned: int
     db_bytes: int
     discovery_paused: bool
+    egress_mb: int | None = None  # MB al día estimados desde el mantenimiento anterior
+
+
+def egress_mb_per_day(
+    prev: int | None, prev_at: datetime | None, total: int, now: datetime
+) -> int | None:
+    """MB al día desde la lectura anterior; `None` sin ella, con las estadísticas reiniciadas
+    (el total bajó) o con menos de 12 h entre lecturas."""
+    if prev is None or prev_at is None or total < prev or now - prev_at < EGRESS_MIN_SPAN:
+        return None
+    per_day = (total - prev) * BYTES_PER_ROW * 86_400 / (now - prev_at).total_seconds()
+    return int(per_day // MB)
+
+
+def egress_too_high(mb_day: int) -> bool:
+    """¿A este ritmo un mes de 31 días pasa del 80 % del plan gratis?"""
+    return mb_day * 31 * 10 >= EGRESS_QUOTA_MB * 8
+
+
+def _measure_egress(conn: psycopg.Connection, now: datetime) -> int | None:
+    total = db.select_rows_total(conn)
+    if total is None:
+        return None
+    prev, prev_at = db.egress_mark(conn)
+    mb_day = egress_mb_per_day(prev, prev_at, total, now)
+    with conn.transaction():
+        if mb_day is not None and egress_too_high(mb_day):
+            month = mb_day * 31 / 1024
+            _notice(
+                conn,
+                f"⚠️ Tráfico de la BD alto: ~{mb_day} MB al día (~{month:.1f} GB al mes; el plan "
+                "gratis de Supabase da 5). Pausa el rastreo (DISCOUNTZ_RASTREO=false) o apaga "
+                "fuentes antes de que Supabase restrinja el proyecto.",
+                f"egress:{local(now).date().isoformat()}",
+                now,
+                0,
+            )
+        db.set_egress_mark(conn, total, now)
+    return mb_day
 
 
 def maintenance_due(conn: psycopg.Connection, now: datetime) -> bool:
@@ -105,8 +149,9 @@ def run_maintenance(
         paused = db.bot_state(conn).discovery_paused  # entre 400 y 450 se mantiene
     with conn.transaction():
         db.set_maintenance_state(conn, local(now).date(), size, paused)
+    egress = _measure_egress(conn, now)
     return MaintenanceReport(
-        deleted, glitches, retention, listings_pruned, segments_pruned, size, paused
+        deleted, glitches, retention, listings_pruned, segments_pruned, size, paused, egress
     )
 
 

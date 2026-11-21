@@ -21,6 +21,7 @@ from discountz.infra.db import CatalogDaily, HeldOffer, SearchItem, StatusSnapsh
 from discountz.sources.telegram_channels import CHANNELS
 
 MAX_VISIBLE = 4096
+MAX_BODY_HTML = 8000  # CHECK de `outbox.body_html`: con enlaces largos pasa antes que el visible
 MAX_TITLE = 120
 DIGEST_TITLE = 80  # títulos en el resumen de la noche
 DIGEST_SOURCE_MAX = 40  # líneas por fuente en el resumen; las demás se cuentan
@@ -617,7 +618,8 @@ def render_held_digest(rows: Sequence[HeldOffer], daily_cards: int) -> list[str]
         heading = ["", f"<b>{name}</b> · {len(lines)}"]
         for line in shown:
             block = [*heading, line]
-            if visible_length("\n".join([*current, *block])) > MAX_VISIBLE:
+            body = "\n".join([*current, *block])
+            if visible_length(body) > MAX_VISIBLE or len(body) > MAX_BODY_HTML:
                 bodies.append("\n".join(current))
                 block = [heading[1] if heading else f"<b>{name}</b> (sigue)", line]
                 current = []

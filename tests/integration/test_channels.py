@@ -239,6 +239,26 @@ def test_replayed_page_does_not_resend(db: psycopg.Connection) -> None:
     assert len(outbox(db)) == 1
 
 
+def test_read_without_new_posts_does_not_load_recent_posts(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Cada ~2 min se releían los posts de 24 h aunque no llegara ninguno (egress, 2026-11-21).
+    repo.save_channel_cursor(db, "tg_cajitatech", 100, T - timedelta(hours=1))
+    run(db, FakeChannel("tg_cajitatech", [page(deal("tg_cajitatech", 101))]))
+    calls: list[datetime] = []
+    real = repo.recent_channel_posts
+
+    def counted(conn: psycopg.Connection, since: datetime) -> list[repo.RecentPost]:
+        calls.append(since)
+        return real(conn, since)
+
+    monkeypatch.setattr(repo, "recent_channel_posts", counted)
+    run(db, FakeChannel("tg_cajitatech", [page()]), now=T + timedelta(minutes=10))
+    assert calls == []
+    run(db, FakeChannel("tg_cajitatech", [page(deal("tg_cajitatech", 102, title="Olla"))]))
+    assert len(calls) == 1
+
+
 def test_failure_mid_page_keeps_cursor(
     db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
