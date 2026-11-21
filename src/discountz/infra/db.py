@@ -2231,12 +2231,17 @@ def delete_unseen_catalog_items(conn: psycopg.Connection, unseen: timedelta) -> 
     (450 MB, breaker, rastreo apagado) conserva su catálogo. Por lotes: con el de eBay
     (~150 mil filas) un solo `DELETE` pasaba del `statement_timeout`.
     """
-    return _delete_batched(
-        conn,
-        "catalog_item",
-        """last_seen_at < (SELECT cc.last_run_at FROM discountz.crawl_cursor cc
-                             WHERE cc.source = catalog_item.source) - %s""",
-        (unseen,),
+    # Tienda por tienda, con su plazo como constante: la subconsulta por fila obligaba a leer
+    # todo el catálogo (~420 MB) y pasaba del `statement_timeout` (2026-11-21); así usa
+    # `catalog_item_seen_ix`.
+    cursors = conn.execute(
+        "SELECT source, last_run_at FROM discountz.crawl_cursor WHERE last_run_at IS NOT NULL"
+    ).fetchall()
+    return sum(
+        _delete_batched(
+            conn, "catalog_item", "last_seen_at < %s AND source = %s", (last - unseen, source)
+        )
+        for source, last in cursors
     )
 
 
