@@ -634,6 +634,18 @@ def test_crawl_block_trips_breaker_and_stops(db: psycopg.Connection) -> None:
     assert transport2.urls == []
 
 
+def test_blocked_probe_of_open_breaker_is_not_a_new_failure(db: psycopg.Connection) -> None:
+    """La prueba tras el backoff vuelve a recibir el bloqueo: el breaker se reabre sin rojo."""
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(4)]})
+    b = repo.load_breakers(db)["exito"]
+    repo.save_breaker(db, "exito", replace(b, state="open", open_until=T, trips=1))
+    d, transport = deps(db, src, Clock())
+    transport.blocked.add("https://fake/page/C:/1//1")
+    assert run_crawl(d, T + timedelta(minutes=1), minutes=60).status == "breaker_open"
+    after = repo.load_breakers(db)["exito"]
+    assert after.state == "open" and after.trips == 2
+
+
 def test_crawl_disabled_source_does_nothing(db: psycopg.Connection) -> None:
     src = FakeCatalog({"all": [page_of(1)]}, code="bestbuy_us")  # apagada en la semilla
     d, transport = deps(db, src, Clock())

@@ -952,12 +952,15 @@ def _run_crawl(deps: CrawlDeps, now: datetime, end: float) -> CrawlResult:
         return _skipped(code, "breaker_open")
     if not db.acquire_crawl_lease(deps.conn, code, deps.holder, now, LEASE_TTL):
         return _skipped(code, "skipped_locked")
+    probe = effective_state(breaker, now) == "half_open"
     run = _Run(deps, now, end, breaker)
     try:
         try:
             status = run.run()
         except _Stop as stop:
             status = stop.status
+        if probe and status == "blocked":  # la prueba tras el backoff reabre el breaker sin rojo
+            status = "breaker_open"
         if status == "ok" and run.ok_pages:
             run.breaker_event(BreakerEvent.OK)
         db.save_cursor(deps.conn, run.with_requests())
@@ -978,6 +981,6 @@ def _run_crawl(deps: CrawlDeps, now: datetime, end: float) -> CrawlResult:
 
 
 def _skipped(code: str, status: CrawlStatus) -> CrawlResult:
-    """Corrida que no pidió nada: el log dice por qué (con el breaker abierto sale en rojo)."""
+    """Corrida que no pidió nada: el log dice por qué."""
     event(log, "crawl_done", source=code, status=status, requests=0)
     return CrawlResult(status, 0, 0, 0, 0, 0)
