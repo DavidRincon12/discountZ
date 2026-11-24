@@ -103,7 +103,9 @@ SEED_WINDOWS = 25  # ventanas por corrida, como máximo
 # Con la BD en ≥ 480 MB el mantenimiento pausa el descubrimiento: también el rastreo de las
 # tiendas más grandes (spec del rastreo §7.2).
 PAUSED_BY_SIZE = frozenset({"exito", "carulla", "ebay_us", "alkosto", "jumbo"})
-CrawlStatus = Literal["ok", "partial", "blocked", "skipped_locked", "skipped_schema", "disabled"]
+CrawlStatus = Literal[
+    "ok", "partial", "blocked", "breaker_open", "skipped_locked", "skipped_schema", "disabled"
+]  # breaker_open: ya estaba abierto al empezar; no es una falla nueva (exit 0)
 
 
 @dataclass(frozen=True)
@@ -947,7 +949,7 @@ def _run_crawl(deps: CrawlDeps, now: datetime, end: float) -> CrawlResult:
     if breaker is None or (code in PAUSED_BY_SIZE and db.bot_state(deps.conn).discovery_paused):
         return _skipped(code, "disabled")
     if effective_state(breaker, now) == "open":
-        return _skipped(code, "blocked")
+        return _skipped(code, "breaker_open")
     if not db.acquire_crawl_lease(deps.conn, code, deps.holder, now, LEASE_TTL):
         return _skipped(code, "skipped_locked")
     run = _Run(deps, now, end, breaker)

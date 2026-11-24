@@ -478,8 +478,8 @@ def test_crawl_logs_why_it_did_not_run(
     again, _ = deps(db, src, Clock())
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="discountz"):
-        assert run_crawl(again, T + timedelta(minutes=5), minutes=60).status == "blocked"
-    assert "crawl_done source=exito status=blocked requests=0" in caplog.text
+        assert run_crawl(again, T + timedelta(minutes=5), minutes=60).status == "breaker_open"
+    assert "crawl_done source=exito status=breaker_open requests=0" in caplog.text
 
 
 def test_crawl_single_parse_error_is_skipped(db: psycopg.Connection) -> None:
@@ -630,7 +630,7 @@ def test_crawl_block_trips_breaker_and_stops(db: psycopg.Connection) -> None:
     assert repo.get_cursor(db, "exito").page == 1
     assert transport.kinds() == ["partitions", "page", "page"]
     again, transport2 = deps(db, src, Clock())
-    assert run_crawl(again, T + timedelta(minutes=5), minutes=60).status == "blocked"
+    assert run_crawl(again, T + timedelta(minutes=5), minutes=60).status == "breaker_open"
     assert transport2.urls == []
 
 
