@@ -36,6 +36,7 @@ ALLOWED_FIELDS = frozenset(
         "held",
         "db_mb",
         "egress_mb",
+        "egress_cycle_mb",
         "found",
     }
 )

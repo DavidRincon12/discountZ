@@ -293,6 +293,7 @@ def _daily(conn: psycopg.Connection, now: datetime, params: AppParams) -> None:
                 count=report.segments_deleted + report.retention_deleted,
                 db_mb=report.db_bytes // MB,  # el peso de la BD se vigila desde Actions
                 egress_mb=report.egress_mb,  # MB al día estimados (ADR 0020)
+                egress_cycle_mb=report.egress_cycle_mb,  # MB del ciclo de facturación (ADR 0022)
             )
     except Exception as exc:
         event(

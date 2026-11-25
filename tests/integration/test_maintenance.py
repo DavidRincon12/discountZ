@@ -416,6 +416,74 @@ def test_without_pg_stat_statements_there_is_no_egress_estimate(db: psycopg.Conn
     assert repo.egress_mark(db) == (None, None)
 
 
+def _system_notices(db: psycopg.Connection) -> list[str]:
+    rows = db.execute(
+        "SELECT body_html FROM discountz.outbox WHERE purpose = 'system' ORDER BY id"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def test_egress_accumulates_within_the_billing_cycle(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.set_egress_cycle(db, date(2026, 9, 28), 10_000_000)
+    repo.set_egress_mark(db, 1_000, T - DAY)
+    monkeypatch.setattr(repo, "select_rows_total", lambda conn: 1_001_000)
+    report = run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert repo.egress_cycle(db) == (date(2026, 9, 28), 11_000_000)
+    assert report.egress_cycle_mb == 1_783
+
+
+def test_reset_stats_add_nothing_to_the_cycle(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.set_egress_cycle(db, date(2026, 9, 28), 10_000_000)
+    repo.set_egress_mark(db, 5_000_000, T - DAY)
+    monkeypatch.setattr(repo, "select_rows_total", lambda conn: 1_000)
+    run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert repo.egress_cycle(db) == (date(2026, 9, 28), 10_000_000)
+
+
+def test_spent_budget_turns_the_crawl_off_and_warns_once(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.set_egress_cycle(db, date(2026, 9, 28), 23_000_000)
+    repo.set_egress_mark(db, 1_000, T - DAY)
+    monkeypatch.setattr(repo, "select_rows_total", lambda conn: 2_001_000)
+    report = run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert report.egress_cycle_mb == 4_053  # 25 millones de filas ≥ 3.840 MB de presupuesto
+    assert repo.bot_state(db).crawl_pace_bp == 0
+    monkeypatch.setattr(repo, "select_rows_total", lambda conn: 2_101_000)
+    run_maintenance(db, T + DAY, load_params(), db_bytes=10 * MB)
+    assert repo.bot_state(db).crawl_pace_bp == 0
+    cuts = [b for b in _system_notices(db) if "apago el rastreo" in b]
+    assert len(cuts) == 1
+    assert "28-oct" in cuts[0]  # vuelve con el ciclo nuevo
+    assert not any("90 %" in b for b in _system_notices(db))
+
+
+def test_ninety_percent_of_the_plan_warns(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.set_egress_cycle(db, date(2026, 9, 28), 28_000_000)
+    repo.set_egress_mark(db, 1_000, T - DAY)
+    monkeypatch.setattr(repo, "select_rows_total", lambda conn: 501_000)
+    run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert any("90 %" in b for b in _system_notices(db))
+
+
+def test_a_new_billing_cycle_restarts_the_count_and_the_crawl(
+    db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.set_egress_cycle(db, date(2026, 8, 28), 99_000_000)
+    repo.set_crawl_pace(db, 0)
+    repo.set_egress_mark(db, 1_000, T - DAY)
+    monkeypatch.setattr(repo, "select_rows_total", lambda conn: 301_000)
+    run_maintenance(db, T, load_params(), db_bytes=10 * MB)
+    assert repo.egress_cycle(db) == (date(2026, 9, 28), 300_000)
+    assert repo.bot_state(db).crawl_pace_bp == 2_562  # 1000 × 123 ÷ 48 MB
+
+
 def test_egress_cycle_round_trips(db: psycopg.Connection) -> None:
     repo.set_egress_cycle(db, date(2026, 11, 28), 1_234)
     assert repo.egress_cycle(db) == (date(2026, 11, 28), 1_234)
@@ -428,14 +496,15 @@ def test_high_egress_warns_in_telegram_and_moves_the_mark(
     monkeypatch.setattr(repo, "select_rows_total", lambda conn: 2_001_000)
     report = run_maintenance(db, T, load_params(), db_bytes=10 * MB)
     assert report.egress_mb == 324
-    rows = db.execute(
-        "SELECT body_html FROM discountz.outbox WHERE purpose = 'system' AND priority = 0"
-    ).fetchall()
-    (body,) = [r[0] for r in rows]
+    (body,) = _system_notices(db)
     assert "Tráfico de la BD" in body and "324 MB" in body
-    assert "40 %" in body  # el rastreo baja su ritmo solo: 10000 × 132 ÷ 324
+    assert "37 %" in body  # el rastreo baja su ritmo solo: 10000 × 123 ÷ 324 (ADR 0022)
+    assert "0.3 GB del ciclo" in body
     assert repo.egress_mark(db) == (2_001_000, T)
-    assert repo.bot_state(db).crawl_pace_bp == 4074
+    assert repo.bot_state(db).crawl_pace_bp == 3796
+    # T es el 13-oct: el ciclo de la siembra (28-oct) no es el suyo y el acumulado empieza de cero
+    assert repo.egress_cycle(db) == (date(2026, 9, 28), 2_000_000)
+    assert report.egress_cycle_mb == 324
 
 
 def test_normal_egress_moves_the_mark_without_warning(
