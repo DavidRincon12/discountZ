@@ -30,7 +30,7 @@ from discountz.domain.segments import (
     apply_sample,
 )
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 CONNECT_TIMEOUT_S = 10
 LEASE_TTL = "16 minutes"
 STUCK_SENDING = timedelta(minutes=10)
@@ -1622,6 +1622,24 @@ def set_egress_mark(conn: psycopg.Connection, total: int, at: datetime) -> None:
     conn.execute(
         "UPDATE discountz.bot_state SET select_rows_total = %s, select_rows_at = %s WHERE id = 1",
         (total, at),
+    )
+
+
+def egress_cycle(conn: psycopg.Connection) -> tuple[date | None, int]:
+    """Inicio del ciclo de facturación y filas devueltas en él (ADR 0022)."""
+    row = _required(
+        _one(
+            conn,
+            "SELECT egress_cycle_on, egress_cycle_rows FROM discountz.bot_state WHERE id = 1",
+        )
+    )
+    return row[0], int(row[1])
+
+
+def set_egress_cycle(conn: psycopg.Connection, on: date, rows: int) -> None:
+    conn.execute(
+        "UPDATE discountz.bot_state SET egress_cycle_on = %s, egress_cycle_rows = %s WHERE id = 1",
+        (on, rows),
     )
 
 

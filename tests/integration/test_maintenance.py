@@ -416,6 +416,11 @@ def test_without_pg_stat_statements_there_is_no_egress_estimate(db: psycopg.Conn
     assert repo.egress_mark(db) == (None, None)
 
 
+def test_egress_cycle_round_trips(db: psycopg.Connection) -> None:
+    repo.set_egress_cycle(db, date(2026, 11, 28), 1_234)
+    assert repo.egress_cycle(db) == (date(2026, 11, 28), 1_234)
+
+
 def test_high_egress_warns_in_telegram_and_moves_the_mark(
     db: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
