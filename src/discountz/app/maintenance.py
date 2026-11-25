@@ -7,11 +7,11 @@ primero después de las 08:00. Los canarios se leen dentro del plan (tarea `cana
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 import psycopg
 
-from discountz.app.render import DailyView, local, render_daily
+from discountz.app.render import DailyView, local, render_daily, short_date
 from discountz.config import AppParams
 from discountz.infra import db
 
@@ -35,7 +35,10 @@ SYSTEM_TTL = timedelta(hours=48)
 EGRESS_QUOTA_MB = 5 * 1024
 BYTES_PER_ROW = 170
 EGRESS_MIN_SPAN = timedelta(hours=12)
-EGRESS_TARGET_MB = EGRESS_QUOTA_MB * 8 // 10 // 31  # 132 MB al día: 80 % del plan en 31 días
+# Presupuesto mensual (ADR 0022): el 75 % del plan para todo lo que devuelve la BD; el 25 %
+# restante cubre el ciclo de cada 2 min con el rastreo apagado. Supabase reinicia el día 28.
+EGRESS_BUDGET_MB = EGRESS_QUOTA_MB * 3 // 4
+EGRESS_CYCLE_DAY = 28
 PACE_MIN_BP = 1000
 _HEALTH = {"healthy": "sana", "degraded": "degradada", "blocked": "bloqueada", "broken": "rota"}
 
@@ -50,6 +53,7 @@ class MaintenanceReport:
     db_bytes: int
     discovery_paused: bool
     egress_mb: int | None = None  # MB al día estimados desde el mantenimiento anterior
+    egress_cycle_mb: int | None = None  # MB estimados del ciclo de facturación (ADR 0022)
 
 
 def egress_mb_per_day(
@@ -68,35 +72,93 @@ def egress_too_high(mb_day: int) -> bool:
     return mb_day * 31 * 10 >= EGRESS_QUOTA_MB * 8
 
 
-def next_pace(pace_bp: int, mb_day: int | None) -> int:
-    """Ritmo del rastreo para mañana: lo lleva hacia la meta de egress en proporción."""
+def billing_cycle_start(day: date) -> date:
+    """Día 28 en que empezó el ciclo de facturación de Supabase que contiene `day`."""
+    if day.day >= EGRESS_CYCLE_DAY:
+        return day.replace(day=EGRESS_CYCLE_DAY)
+    if day.month == 1:
+        return date(day.year - 1, 12, EGRESS_CYCLE_DAY)
+    return date(day.year, day.month - 1, EGRESS_CYCLE_DAY)
+
+
+def _next_billing_cycle(day: date) -> date:
+    start = billing_cycle_start(day)
+    if start.month == 12:
+        return date(start.year + 1, 1, EGRESS_CYCLE_DAY)
+    return date(start.year, start.month + 1, EGRESS_CYCLE_DAY)
+
+
+def cycle_target_mb(used_mb: int, day: date) -> int:
+    """MB al día que caben en lo que queda del presupuesto, nunca más que un reparto parejo."""
+    days_left = max(1, (_next_billing_cycle(day) - day).days)
+    return min(EGRESS_BUDGET_MB // 31, max(0, EGRESS_BUDGET_MB - used_mb) // days_left)
+
+
+def next_pace(pace_bp: int, mb_day: int | None, target_mb: int) -> int:
+    """Ritmo del rastreo para mañana: lo lleva hacia la meta en proporción; 0 sin presupuesto.
+    Desde 0 (ciclo nuevo) vuelve a arrancar en el piso."""
+    if target_mb <= 0:
+        return 0
+    pace_bp = max(pace_bp, PACE_MIN_BP)
     if mb_day is None:
         return pace_bp
-    return max(PACE_MIN_BP, min(10_000, pace_bp * EGRESS_TARGET_MB // max(mb_day, 1)))
+    return max(PACE_MIN_BP, min(10_000, pace_bp * target_mb // max(mb_day, 1)))
 
 
-def _measure_egress(conn: psycopg.Connection, now: datetime) -> int | None:
+def _measure_egress(conn: psycopg.Connection, now: datetime) -> tuple[int | None, int | None]:
+    """MB al día y MB del ciclo de facturación; ajusta el ritmo del rastreo al presupuesto del
+    mes (ADR 0022) y lo apaga al agotarlo."""
     total = db.select_rows_total(conn)
     if total is None:
-        return None
+        return None, None
     prev, prev_at = db.egress_mark(conn)
     mb_day = egress_mb_per_day(prev, prev_at, total, now)
+    today = local(now).date()
+    start = billing_cycle_start(today)
+    added = total - prev if prev is not None and total >= prev else 0  # estadísticas reiniciadas
+    cycle_on, cycle_rows = db.egress_cycle(conn)
+    rows = cycle_rows + added if cycle_on == start else added
+    used_mb = rows * BYTES_PER_ROW // MB
+    target = cycle_target_mb(used_mb, today)
     with conn.transaction():
-        pace = next_pace(db.bot_state(conn).crawl_pace_bp, mb_day)
+        pace = next_pace(db.bot_state(conn).crawl_pace_bp, mb_day, target)
         if mb_day is not None and egress_too_high(mb_day):
             month = mb_day * 31 / 1024
             _notice(
                 conn,
                 f"⚠️ Tráfico de la BD alto: ~{mb_day} MB al día (~{month:.1f} GB al mes; el plan "
-                f"gratis de Supabase da 5). Bajo el rastreo al {pace // 100} % de su ritmo; "
-                "vuelve a subir solo cuando el tráfico baje.",
-                f"egress:{local(now).date().isoformat()}",
+                f"gratis de Supabase da 5) y van ~{used_mb / 1024:.1f} GB del ciclo. Bajo el "
+                f"rastreo al {pace // 100} % de su ritmo; vuelve a subir solo cuando el tráfico "
+                "baje.",
+                f"egress:{today.isoformat()}",
+                now,
+                0,
+            )
+        if target == 0:
+            back = short_date(now + timedelta(days=(_next_billing_cycle(today) - today).days))
+            _notice(
+                conn,
+                f"⛔ El ciclo de Supabase va en ~{used_mb / 1024:.1f} GB de egress (presupuesto "
+                f"{EGRESS_BUDGET_MB / 1024:.2f} de 5): apago el rastreo hasta el {back}. Siguen "
+                "los canales, los seguimientos y las búsquedas.",
+                f"egress-cut:{start.isoformat()}",
+                now,
+                0,
+            )
+        if used_mb * 10 >= EGRESS_QUOTA_MB * 9:
+            _notice(
+                conn,
+                f"🚨 El ciclo de Supabase va en ~{used_mb / 1024:.1f} GB de 5 de egress (más del "
+                "90 %) aun con el rastreo apagado: revisa qué consulta gasta antes de que "
+                "Supabase restrinja la BD.",
+                f"egress-90:{start.isoformat()}",
                 now,
                 0,
             )
         db.set_egress_mark(conn, total, now)
+        db.set_egress_cycle(conn, start, rows)
         db.set_crawl_pace(conn, pace)
-    return mb_day
+    return mb_day, used_mb
 
 
 def maintenance_due(conn: psycopg.Connection, now: datetime) -> bool:
@@ -162,9 +224,17 @@ def run_maintenance(
         paused = db.bot_state(conn).discovery_paused  # entre 400 y 480 se mantiene
     with conn.transaction():
         db.set_maintenance_state(conn, local(now).date(), size, paused)
-    egress = _measure_egress(conn, now)
+    egress, cycle_mb = _measure_egress(conn, now)
     return MaintenanceReport(
-        deleted, glitches, retention, listings_pruned, segments_pruned, size, paused, egress
+        deleted,
+        glitches,
+        retention,
+        listings_pruned,
+        segments_pruned,
+        size,
+        paused,
+        egress,
+        cycle_mb,
     )
 
 

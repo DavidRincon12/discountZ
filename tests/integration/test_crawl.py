@@ -691,6 +691,16 @@ def test_crawl_slows_down_with_the_egress_pace(db: psycopg.Connection) -> None:
     assert len(transport.urls) == 5
 
 
+def test_crawl_is_off_when_the_month_budget_is_spent(db: psycopg.Connection) -> None:
+    """Ritmo 0 (ADR 0022): la corrida sale bien sin pedir nada."""
+    repo.set_crawl_pace(db, 0)
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(200)]})
+    d, transport = deps(db, src, Clock())
+    result = run_crawl(d, T, minutes=60)
+    assert result.requests == 0
+    assert transport.urls == []
+
+
 def test_crawl_enqueues_card_with_topic(db: psycopg.Connection) -> None:
     seed_history(db, "123", 199_900)
     src = FakeCatalog({"C:/1/": [[obs("123", 119_900)]]}, offers={"123": offer("123", 119_900)})
