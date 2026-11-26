@@ -51,7 +51,13 @@ from discountz.domain.errors import (
 )
 from discountz.domain.gtin import gtin_ok
 from discountz.domain.guards import check_offer
-from discountz.domain.health import BreakerEvent, BreakerState, breaker_transition, effective_state
+from discountz.domain.health import (
+    TRIPS_RESET,
+    BreakerEvent,
+    BreakerState,
+    breaker_transition,
+    effective_state,
+)
 from discountz.domain.interests import Interest, match_interest
 from discountz.domain.model import AlertKind, ListingRef, Maturity, Offer, SellerClass
 from discountz.domain.money import Currency, format_money
@@ -952,7 +958,13 @@ def _run_crawl(deps: CrawlDeps, now: datetime, end: float) -> CrawlResult:
         return _skipped(code, "breaker_open")
     if not db.acquire_crawl_lease(deps.conn, code, deps.holder, now, LEASE_TTL):
         return _skipped(code, "skipped_locked")
-    probe = effective_state(breaker, now) == "half_open"
+    # Sin canario el ciclo cierra el breaker sin probar nada: dentro de las 24 h del último disparo
+    # (`trips` > 0) la corrida sigue siendo la prueba.
+    probe = effective_state(breaker, now) == "half_open" or (
+        breaker.trips > 0
+        and breaker.last_trip_at is not None
+        and now - breaker.last_trip_at < TRIPS_RESET
+    )
     run = _Run(deps, now, end, breaker)
     try:
         try:

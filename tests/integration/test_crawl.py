@@ -1207,3 +1207,18 @@ def test_full_interest_cap_holds_a_card_topic_offer_below_the_floors(
     d, _ = deps(db, src, Clock(), interests=(METER,))
     assert run_crawl(d, T, minutes=60).alerts == 0
     assert db.execute("SELECT delivery FROM discountz.alert").fetchone() == ("held",)
+
+
+def test_block_right_after_unverified_recovery_is_not_a_new_failure(db: psycopg.Connection) -> None:
+    """Sin canario el ciclo cierra el breaker sin probar: un bloqueo ahí es la prueba."""
+    src = FakeCatalog({"C:/1/": [page_of(1, i) for i in range(4)]})
+    b = repo.load_breakers(db)["exito"]
+    recovered = replace(
+        b, state="closed", open_until=None, trips=1, last_trip_at=T, last_trip_kind="blocked"
+    )
+    repo.save_breaker(db, "exito", recovered)
+    d, transport = deps(db, src, Clock())
+    transport.blocked.add("https://fake/page/C:/1//1")
+    assert run_crawl(d, T + timedelta(hours=1), minutes=60).status == "breaker_open"
+    after = repo.load_breakers(db)["exito"]
+    assert after.state == "open" and after.trips == 2
