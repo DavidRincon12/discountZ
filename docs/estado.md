@@ -7,10 +7,10 @@
 - Canales de Telegram (ADR 0005: DescuentosTech, DescuentosHome, Clubgratis, cajitatech, OFERTU), Amazon de Slickdeals «sin verificar» (ADR 0006), 9to5Toys por su RSS (ADR 0014) y Woot por su API (ADR 0015), por casillero los de EE. UU. DealNews apagado (406 desde Actions). Best Buy y Walmart fuera; Amazon da CAPTCHA.
 - Perfil de temas (ADR 0013): Belleza, Mercado, Bebés, Mascotas y Ferretería (desde el 2026-11-21) apagados (no se rastrean ni se releen, y sus ofertas de canales quedan vistas); el resto en tarjeta. Intereses: semilla de `config/interests.toml` más los de `/interes`, con «🎯» y hasta 3 por interés al día.
 - Dos chats: el grupo (todo, temas apagados) y el canal general (`TELEGRAM_CHANNEL_ID`, solo ofertas y resúmenes de ofertas).
-- Suite: 1562 pruebas (1241 unitarias y de fuentes, 321 de integración) en verde el 2026-11-25.
+- Suite: 1563 pruebas (1241 unitarias y de fuentes, 322 de integración) en verde el 2026-11-26.
 
 ## Último cambio
-- Rama `claude/project-thread-y2h44q`: presupuesto mensual de egress (ADR 0022, migración `0021`, esquema 21). El mantenimiento acumula las filas devueltas desde el día 28, la meta del día reparte lo que queda del 75 % del plan y con el presupuesto agotado `crawl_pace_bp = 0` (rastreo apagado); avisos únicos al cortar y al 90 %. La migración siembra el ciclo actual con lo gastado: el rastreo queda apagado hasta el 28-nov. Plan `docs/superpowers/plans/2026-11-25-presupuesto-mensual-egress.md` (Native, completo).
+- Rama `claude/project-thread-zsk4qr`: el rastreo de una fuente sin canario (MeLi, Alkosto…) salía en rojo (exit 4) cada vez que vencía el backoff: el ciclo cerraba el breaker sin probar nada y el rastreo recibía el 403 con el breaker «cerrado». Ahora, con `trips` > 0 y el último disparo de menos de 24 h, esa corrida cuenta como prueba (`breaker_open`, exit 0). Los fallos de las 07:00Z del 2026-11-26 y de 17:00 y 18:00Z del 25 eran este caso.
 
 ## Siguiente paso
 - Al fusionar: *Actions → migrate* (`to = head`, esquema 21). El mantenimiento siguiente (03:00 de Bogotá) avisa del corte y del 90 % de este ciclo; es lo esperado.
